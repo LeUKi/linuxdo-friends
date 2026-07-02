@@ -517,8 +517,13 @@ describe("OptionsApp update diagnostics", () => {
     await act(async () => {
       getButton(container, "佬有料").click();
     });
-    expect(headingByText(container, "佬有料").querySelector(".lucide-telescope")).toBeTruthy();
-    expect(container.textContent).toContain("定时刷新");
+    expect(headingByText(container, "佬有料").querySelector("svg")).toBeFalsy();
+    expect(container.textContent).toContain("自动捞料");
+    expect(container.textContent).toContain("打捞请求范围");
+    expect(container.textContent).toContain("打捞间隔");
+    expect(container.textContent).not.toContain("启用定时刷新");
+    expect(container.textContent).not.toContain("刷新范围");
+    expect(container.textContent).not.toContain("刷新间隔");
     expect(container.textContent).not.toContain("后台刷新");
     expect(container.textContent).not.toContain("正在施工");
     expect(container.querySelector(".settings-construction-card[aria-label='后台刷新设置正在施工']")).toBeFalsy();
@@ -731,12 +736,18 @@ describe("OptionsApp update diagnostics", () => {
     const chromeMock = setupChrome({ state });
     const { container } = await renderOptionsApp("#lao-finds");
 
-    expect(container.textContent).toContain("定时刷新");
+    expect(container.textContent).toContain("自动捞料");
+    expect(container.textContent).toContain("打捞请求范围");
+    expect(container.textContent).toContain("打捞间隔");
     expect(container.textContent).toContain("保持插件界面打开，自动捞料才会运行。");
     expect(container.textContent).toContain("打捞起点");
     expect(container.textContent).toContain("打捞规则");
-    expect(headingByText(container, "佬有料").querySelector(".lucide-telescope")).toBeTruthy();
-    expect(headingByText(container, "打捞规则").querySelector(".lucide-telescope")).toBeTruthy();
+    expect(headingByText(container, "佬有料").querySelector("svg")).toBeFalsy();
+    expect(headingByText(container, "打捞规则").querySelector("svg")).toBeFalsy();
+    expect(container.textContent).not.toContain("启用定时刷新");
+    expect(container.textContent).not.toContain("刷新范围");
+    expect(container.textContent).not.toContain("刷新间隔");
+    expect(container.querySelector(".dredge-choice-row svg")).toBeFalsy();
     await act(async () => {
       vi.spyOn(window, "confirm").mockReturnValueOnce(true);
       getButton(container, "重设为现在").click();

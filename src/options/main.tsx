@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useAtom, useSetAtom } from "jotai";
-import { Cloud, Send, Telescope } from "lucide-react";
+import { Cloud, Send } from "lucide-react";
 import {
   addFriendFromKnownUserAtom,
   appStateAtom,
@@ -587,17 +587,14 @@ export function OptionsApp() {
               <section className="panel">
                 <div className="panel-title-row">
                   <div>
-                    <h2 className="settings-title-with-icon">
-                      <Telescope size={16} aria-hidden="true" />
-                      <span>佬有料</span>
-                    </h2>
-                    <p className="panel-subtitle">侧栏打开时运行定时刷新。</p>
+                    <h2>佬有料</h2>
+                    <p className="panel-subtitle">侧栏打开时运行自动捞料。</p>
                   </div>
                 </div>
                 <div className="timed-settings-grid">
                   <div className="timed-setting-row">
                     <div>
-                      <strong>启用定时刷新</strong>
+                      <strong>自动捞料</strong>
                       <span>保持插件界面打开，自动捞料才会运行。</span>
                     </div>
                     <button
@@ -611,10 +608,10 @@ export function OptionsApp() {
                   </div>
                   <div className="timed-setting-row">
                     <div>
-                      <strong>刷新范围</strong>
+                      <strong>打捞请求范围</strong>
                       <span>按规则会从启用的打捞规则反推请求范围；全量会按每位用户的视奸范围刷新。</span>
                     </div>
-                    <div className="segmented-control timed-mode-control" role="radiogroup" aria-label="定时刷新范围">
+                    <div className="segmented-control timed-mode-control" role="radiogroup" aria-label="打捞请求范围">
                       <button
                         className={`segmented-option${state.settings.timedActivityRefreshScopeMode === "rules" ? " active" : ""}`}
                         type="button"
@@ -635,7 +632,7 @@ export function OptionsApp() {
                   </div>
                   <div className="timed-setting-row">
                     <div>
-                      <strong>刷新间隔</strong>
+                      <strong>打捞间隔</strong>
                       <span>范围 30 到 720 分钟。</span>
                     </div>
                     <input
@@ -650,7 +647,7 @@ export function OptionsApp() {
                         if (!Number.isFinite(value)) return;
                         void updateSettings({ timedActivityRefreshIntervalMinutes: value });
                       }}
-                      aria-label="定时刷新间隔分钟"
+                      aria-label="打捞间隔分钟"
                     />
                   </div>
                   <div className="timed-setting-row">

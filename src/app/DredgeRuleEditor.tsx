@@ -1,9 +1,8 @@
 import React, { useMemo } from "react";
-import { Telescope } from "lucide-react";
 import { ALL_ACTIVITY_KINDS } from "../domain/friends";
 import type { ActivityRefreshKind, AppState, DredgeRule, Username } from "../shared/types";
 import { deriveFeedUserOptions, deriveDredgeRuleScopeWarning } from "../popup/selectors";
-import { kindIcon, kindText } from "./activityKinds";
+import { kindText } from "./activityKinds";
 
 export function DredgeRuleEditor({
   locked = false,
@@ -34,10 +33,7 @@ export function DredgeRuleEditor({
     <section className="dredge-rule-panel">
       <div className="finds-section-head">
         <div>
-          <h2 className="finds-title-with-icon">
-            <Telescope size={16} aria-hidden="true" />
-            <span>打捞规则</span>
-          </h2>
+          <h2>打捞规则</h2>
         </div>
         <button className="small-action" type="button" onClick={createRule} disabled={locked}>
           新建
@@ -121,7 +117,6 @@ function DredgeRuleCard({
         <div className="dredge-choice-row">
           {ALL_ACTIVITY_KINDS.map((kind) => (
             <button className={rule.kinds.includes(kind) ? `active kind-${kind}` : ""} key={kind} type="button" onClick={() => toggleKind(kind)} disabled={locked}>
-              {kindIcon(kind, 13)}
               {kindText(kind)}
             </button>
           ))}
