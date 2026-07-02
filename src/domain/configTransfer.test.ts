@@ -57,7 +57,15 @@ describe("config transfer", () => {
           }
         },
         activity: { neo: { username: "neo", refreshedAt: "2026-06-28T00:00:00.000Z", items: [] } },
-        currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" }
+        currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" },
+        settings: {
+          ...defaultAppState.settings,
+          openActivityLinksInPage: false,
+          timedActivityRefreshEnabled: true,
+          timedActivityRefreshScopeMode: "all",
+          timedActivityRefreshIntervalMinutes: 240,
+          requestStatsAutoSyncEnabled: true
+        }
       },
       "2026-06-28T00:00:00.000Z"
     );
@@ -89,7 +97,6 @@ describe("config transfer", () => {
           updatedAt: "2026-06-28T00:00:00.000Z"
         }
       ],
-      laoFindsStartedAt: "2026-06-28T00:00:00.000Z",
       requestStats: {
         total: 6,
         byFamily: { activity: 4, profile: 2 },
@@ -102,12 +109,20 @@ describe("config transfer", () => {
           }
         }
       },
-      settings: defaultAppState.settings
+      settings: {
+        openActivityLinksInPage: false,
+        refreshIntervalMinutes: 120,
+        timedActivityRefreshScopeMode: "all",
+        timedActivityRefreshIntervalMinutes: 240
+      }
     });
     expect(file).not.toHaveProperty("currentAccount");
     expect(file).not.toHaveProperty("followedUsers");
     expect(file).not.toHaveProperty("activity");
+    expect(file).not.toHaveProperty("laoFindsStartedAt");
     expect(file).not.toHaveProperty("laoFindsItems");
+    expect(file.settings).not.toHaveProperty("timedActivityRefreshEnabled");
+    expect(file.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
     expect(JSON.stringify(file)).not.toContain("token");
     expect(JSON.stringify(file)).not.toContain("linux_do_id");
     expect(JSON.stringify(file)).not.toContain("linuxdoFriendsCloudAuth");
@@ -170,17 +185,15 @@ describe("config transfer", () => {
 
     expect(file.friends.neo).toMatchObject({ username: "neo", groups: ["ops"], pinned: true, activityKinds: ["reply", "reaction"] });
     expect(file.dredgeRules[0]).toMatchObject({ id: "rule-1", name: "AI", usernames: ["neo"], kinds: ["topic", "reply"], keywords: ["ai 工具"] });
-    expect(file.laoFindsStartedAt).toBe("2026-06-28T00:00:00.000Z");
+    expect(file).not.toHaveProperty("laoFindsStartedAt");
     expect(file.settings).toEqual({
-      allowAutoRefresh: false,
-      allowInactiveTabFallback: false,
       openActivityLinksInPage: true,
       refreshIntervalMinutes: 60,
-      timedActivityRefreshEnabled: true,
       timedActivityRefreshScopeMode: "all",
-      timedActivityRefreshIntervalMinutes: 240,
-      requestStatsAutoSyncEnabled: true
+      timedActivityRefreshIntervalMinutes: 240
     });
+    expect(file.settings).not.toHaveProperty("timedActivityRefreshEnabled");
+    expect(file.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
     expect(file.requestStats).toEqual({
       total: 9,
       byFamily: { activity: 5, profile: 4 },
@@ -224,10 +237,10 @@ describe("config transfer", () => {
     expect(file.friends.legacy.activityKinds).toEqual(["topic", "reply", "boost", "reaction"]);
     expect(file.friends.quiet.activityKinds).toEqual([]);
     expect(file.settings.openActivityLinksInPage).toBe(true);
-    expect(file.settings.timedActivityRefreshEnabled).toBe(false);
     expect(file.settings.timedActivityRefreshScopeMode).toBe("rules");
     expect(file.settings.timedActivityRefreshIntervalMinutes).toBe(120);
-    expect(file.settings.requestStatsAutoSyncEnabled).toBe(false);
+    expect(file.settings).not.toHaveProperty("timedActivityRefreshEnabled");
+    expect(file.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
     expect(file.requestStats).toEqual({ total: 0, byFamily: {}, days: {} });
   });
 
@@ -333,18 +346,29 @@ describe("config transfer", () => {
             }
           }
         },
-        settings: { refreshIntervalMinutes: 90, openActivityLinksInPage: true }
+        settings: {
+          refreshIntervalMinutes: 90,
+          openActivityLinksInPage: true,
+          timedActivityRefreshEnabled: true,
+          requestStatsAutoSyncEnabled: true
+        }
       })
     );
-    const { state } = applyConfigImport(file, "2026-06-28T00:01:00.000Z");
+    const { state } = applyConfigImport(
+      file,
+      "2026-06-28T00:01:00.000Z",
+      { ...defaultAppState, laoFindsStartedAt: "2026-06-27T00:00:00.000Z" }
+    );
 
     expect(state.friends).toEqual(file.friends);
     expect(state.dredgeRules).toEqual(file.dredgeRules);
-    expect(state.laoFindsStartedAt).toBe("2026-06-28T00:00:00.000Z");
+    expect(state.laoFindsStartedAt).toBe("2026-06-27T00:00:00.000Z");
     expect(state.requestStats).toEqual(file.requestStats);
     expect(state.laoFindsItems).toEqual({});
     expect(state.settings.refreshIntervalMinutes).toBe(90);
     expect(state.settings.openActivityLinksInPage).toBe(true);
+    expect(state.settings.timedActivityRefreshEnabled).toBe(false);
+    expect(state.settings.requestStatsAutoSyncEnabled).toBe(false);
     expect(state.activity).toEqual({});
     expect(state.currentAccount).toBeUndefined();
     expect(state.lastSync?.message).toBe("已导入 1 位佬朋友配置。");
@@ -421,6 +445,22 @@ describe("config transfer", () => {
       ...base,
       settings: { ...base.settings, openActivityLinksInPage: false }
     };
+    const changedTimedRefreshEnabled = {
+      ...base,
+      settings: { ...base.settings, timedActivityRefreshEnabled: true }
+    };
+    const changedRequestStatsAutoSync = {
+      ...base,
+      settings: { ...base.settings, requestStatsAutoSyncEnabled: true }
+    };
+    const changedTimedRefreshScopeMode = {
+      ...base,
+      settings: { ...base.settings, timedActivityRefreshScopeMode: "all" as const }
+    };
+    const changedTimedRefreshInterval = {
+      ...base,
+      settings: { ...base.settings, timedActivityRefreshIntervalMinutes: 240 }
+    };
     const changedStartedAt = {
       ...base,
       laoFindsStartedAt: "2026-06-28T00:01:00.000Z"
@@ -448,7 +488,11 @@ describe("config transfer", () => {
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedScope));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedRule));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedSettings));
-    expect(fingerprint).not.toBe(await createConfigFingerprint(changedStartedAt));
+    expect(fingerprint).not.toBe(await createConfigFingerprint(changedTimedRefreshScopeMode));
+    expect(fingerprint).not.toBe(await createConfigFingerprint(changedTimedRefreshInterval));
+    expect(fingerprint).toBe(await createConfigFingerprint(changedTimedRefreshEnabled));
+    expect(fingerprint).toBe(await createConfigFingerprint(changedRequestStatsAutoSync));
+    expect(fingerprint).toBe(await createConfigFingerprint(changedStartedAt));
     expect(fingerprint).toBe(await createConfigFingerprint(changedStats));
     expect(fingerprint).toBe(await createConfigFingerprint({ ...base }));
     expect(fingerprint).not.toContain("neo");

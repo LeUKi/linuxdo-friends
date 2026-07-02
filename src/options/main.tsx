@@ -226,7 +226,17 @@ export function OptionsApp() {
 
   useEffect(() => {
     void refreshCloudArchiveState();
-  }, [refreshCloudArchiveState, state.friends, state.dredgeRules, state.laoFindsStartedAt, state.settings]);
+  }, [
+    refreshCloudArchiveState,
+    state.friends,
+    state.dredgeRules,
+    state.settings.openActivityLinksInPage,
+    state.settings.refreshIntervalMinutes,
+    state.settings.timedActivityRefreshScopeMode,
+    state.settings.timedActivityRefreshIntervalMinutes,
+    state.settings.telegramBotToken,
+    state.settings.telegramChatId
+  ]);
 
   useEffect(() => {
     if (window.location.hash !== "#cloud-backup" || activeSection !== "data") return;

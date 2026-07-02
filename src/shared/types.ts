@@ -205,6 +205,15 @@ export interface RefreshSettings {
   telegramChatId?: string;
 }
 
+export interface ConfigExportSettings {
+  openActivityLinksInPage: boolean;
+  refreshIntervalMinutes: number;
+  timedActivityRefreshScopeMode: TimedActivityRefreshScopeMode;
+  timedActivityRefreshIntervalMinutes: number;
+  telegramBotToken?: string;
+  telegramChatId?: string;
+}
+
 export interface CurrentAccount {
   username: Username;
   verifiedAt: string;
@@ -235,9 +244,8 @@ export interface ConfigExportFile {
   exportedAt: string;
   friends: Record<Username, FriendUser>;
   dredgeRules: DredgeRule[];
-  laoFindsStartedAt?: string;
   requestStats: RequestStatsState;
-  settings: RefreshSettings;
+  settings: ConfigExportSettings;
 }
 
 export type CloudConfigStatusState = "unchecked" | "remote_config" | "missing" | "unauthorized" | "invalid_config" | "network_error";

@@ -4,22 +4,11 @@ import { normalizeDredgeRules } from "./laoFinds";
 import { normalizeRequestStats } from "./requestStats";
 import { sha256Base64url } from "../shared/crypto";
 import { nowIso } from "../shared/time";
-import type { AppState, FriendUser, DredgeRule, RefreshSettings, RequestStatsState } from "../shared/types";
+import type { AppState, ConfigExportFile, ConfigExportSettings, FriendUser, DredgeRule, RefreshSettings } from "../shared/types";
 
 export const CONFIG_EXPORT_SCHEMA_VERSION = 1;
 export const CONFIG_EXPORT_SOURCE = "linuxdo-friends";
 export type ConfigExportSchemaVersion = typeof CONFIG_EXPORT_SCHEMA_VERSION;
-
-export interface ConfigExportFile {
-  schemaVersion: ConfigExportSchemaVersion;
-  source: "linuxdo-friends";
-  exportedAt: string;
-  friends: Record<string, FriendUser>;
-  dredgeRules: DredgeRule[];
-  laoFindsStartedAt?: string;
-  requestStats: RequestStatsState;
-  settings: RefreshSettings;
-}
 
 export interface ConfigImportResult {
   state: AppState;
@@ -32,9 +21,8 @@ export function createConfigExport(state: AppState, exportedAt: string = nowIso(
     exportedAt,
     friends: normalizeFriendsRecord(state.friends),
     dredgeRules: normalizeDredgeRules(state.dredgeRules),
-    laoFindsStartedAt: normalizeOptionalTimestamp(state.laoFindsStartedAt),
     requestStats: normalizeRequestStats(state.requestStats),
-    settings: normalizeStoredSettings(state.settings)
+    settings: normalizeExportSettings(state.settings)
   };
 }
 
@@ -45,7 +33,6 @@ export async function createConfigFingerprint(state: AppState): Promise<string> 
     source: file.source,
     friends: file.friends,
     dredgeRules: file.dredgeRules,
-    laoFindsStartedAt: file.laoFindsStartedAt,
     settings: file.settings
   };
   return sha256Base64url(stableStringify(payload));
@@ -61,7 +48,7 @@ export function parseConfigImportJson(text: string): ConfigExportFile {
   return normalizeConfigFile(json);
 }
 
-export function applyConfigImport(file: ConfigExportFile, importedAt: string = nowIso()): ConfigImportResult {
+export function applyConfigImport(file: ConfigExportFile, importedAt: string = nowIso(), localState: AppState = defaultAppState): ConfigImportResult {
   const friends = normalizeFriendsRecord(file.friends);
   const dredgeRules = normalizeDredgeRules(file.dredgeRules);
   return {
@@ -69,7 +56,7 @@ export function applyConfigImport(file: ConfigExportFile, importedAt: string = n
       ...defaultAppState,
       friends,
       dredgeRules,
-      laoFindsStartedAt: file.laoFindsStartedAt,
+      laoFindsStartedAt: localState.laoFindsStartedAt,
       requestStats: normalizeRequestStats(file.requestStats),
       settings: normalizeImportedSettings(file.settings),
       lastSync: {
@@ -103,9 +90,8 @@ function normalizeConfigFileV1(value: Record<string, unknown>): ConfigExportFile
     exportedAt: value.exportedAt,
     friends: normalizeFriendsRecord(value.friends),
     dredgeRules: normalizeDredgeRules(value.dredgeRules),
-    laoFindsStartedAt: normalizeOptionalTimestamp(value.laoFindsStartedAt),
     requestStats: normalizeRequestStats(value.requestStats),
-    settings: normalizeImportedSettings(value.settings)
+    settings: normalizeExportSettings(normalizeImportedSettings(value.settings))
   };
 }
 
@@ -140,7 +126,7 @@ function normalizeGroups(value: unknown): string[] {
   return [...new Set(value.map((item) => item.trim()).filter(Boolean))];
 }
 
-function normalizeStoredSettings(value: Partial<RefreshSettings> | Record<string, unknown>): RefreshSettings {
+function normalizeExportSettings(value: Partial<RefreshSettings> | Record<string, unknown>): ConfigExportSettings {
   const refreshIntervalMinutes =
     typeof value.refreshIntervalMinutes === "number" &&
     Number.isFinite(value.refreshIntervalMinutes) &&
@@ -156,25 +142,14 @@ function normalizeStoredSettings(value: Partial<RefreshSettings> | Record<string
       ? value.timedActivityRefreshIntervalMinutes
       : defaultAppState.settings.timedActivityRefreshIntervalMinutes;
   return {
-    ...defaultAppState.settings,
+    openActivityLinksInPage:
+      typeof value.openActivityLinksInPage === "boolean" ? value.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     refreshIntervalMinutes,
-    timedActivityRefreshEnabled:
-      typeof value.timedActivityRefreshEnabled === "boolean"
-        ? value.timedActivityRefreshEnabled
-        : defaultAppState.settings.timedActivityRefreshEnabled,
     timedActivityRefreshScopeMode:
       value.timedActivityRefreshScopeMode === "all" || value.timedActivityRefreshScopeMode === "rules"
         ? value.timedActivityRefreshScopeMode
         : defaultAppState.settings.timedActivityRefreshScopeMode,
     timedActivityRefreshIntervalMinutes,
-    requestStatsAutoSyncEnabled:
-      typeof value.requestStatsAutoSyncEnabled === "boolean"
-        ? value.requestStatsAutoSyncEnabled
-        : defaultAppState.settings.requestStatsAutoSyncEnabled,
-    openActivityLinksInPage:
-      typeof value.openActivityLinksInPage === "boolean" ? value.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
-    allowAutoRefresh: false,
-    allowInactiveTabFallback: false,
     telegramBotToken: typeof value.telegramBotToken === "string" && value.telegramBotToken ? value.telegramBotToken : undefined,
     telegramChatId: typeof value.telegramChatId === "string" && value.telegramChatId ? value.telegramChatId : undefined
   };
@@ -220,41 +195,19 @@ function normalizeImportedSettings(value: Partial<RefreshSettings> | Record<stri
   if (value.requestStatsAutoSyncEnabled !== undefined && typeof value.requestStatsAutoSyncEnabled !== "boolean") {
     throw new Error("配置文件的请求统计自动同步设置不正确。");
   }
+  const exportSettings = normalizeExportSettings(value);
   return {
     ...defaultAppState.settings,
-    refreshIntervalMinutes: value.refreshIntervalMinutes,
-    timedActivityRefreshEnabled:
-      typeof value.timedActivityRefreshEnabled === "boolean"
-        ? value.timedActivityRefreshEnabled
-        : defaultAppState.settings.timedActivityRefreshEnabled,
-    timedActivityRefreshScopeMode:
-      value.timedActivityRefreshScopeMode === "all" || value.timedActivityRefreshScopeMode === "rules"
-        ? value.timedActivityRefreshScopeMode
-        : defaultAppState.settings.timedActivityRefreshScopeMode,
-    timedActivityRefreshIntervalMinutes:
-      typeof value.timedActivityRefreshIntervalMinutes === "number"
-        ? value.timedActivityRefreshIntervalMinutes
-        : defaultAppState.settings.timedActivityRefreshIntervalMinutes,
-    requestStatsAutoSyncEnabled:
-      typeof value.requestStatsAutoSyncEnabled === "boolean"
-        ? value.requestStatsAutoSyncEnabled
-        : defaultAppState.settings.requestStatsAutoSyncEnabled,
-    openActivityLinksInPage:
-      typeof value.openActivityLinksInPage === "boolean" ? value.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
+    ...exportSettings,
+    timedActivityRefreshEnabled: false,
+    requestStatsAutoSyncEnabled: false,
     allowAutoRefresh: false,
-    allowInactiveTabFallback: false,
-    telegramBotToken: typeof value.telegramBotToken === "string" && value.telegramBotToken ? value.telegramBotToken : undefined,
-    telegramChatId: typeof value.telegramChatId === "string" && value.telegramChatId ? value.telegramChatId : undefined
+    allowInactiveTabFallback: false
   };
 }
 
 function normalizeTimestamp(value: unknown): string {
   return typeof value === "string" && value.trim() ? value : nowIso();
-}
-
-function normalizeOptionalTimestamp(value: unknown): string | undefined {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  return Number.isNaN(Date.parse(value)) ? undefined : value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

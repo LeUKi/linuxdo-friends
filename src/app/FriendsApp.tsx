@@ -330,7 +330,18 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   useEffect(() => {
     if (!appStateLoaded) return;
     void loadCloudArchiveLocalState();
-  }, [appStateLoaded, loadCloudArchiveLocalState, state.dredgeRules, state.friends, state.settings]);
+  }, [
+    appStateLoaded,
+    loadCloudArchiveLocalState,
+    state.dredgeRules,
+    state.friends,
+    state.settings.openActivityLinksInPage,
+    state.settings.refreshIntervalMinutes,
+    state.settings.timedActivityRefreshScopeMode,
+    state.settings.timedActivityRefreshIntervalMinutes,
+    state.settings.telegramBotToken,
+    state.settings.telegramChatId
+  ]);
 
   useEffect(() => {
     if (!appStateLoaded || typeof chrome === "undefined" || !chrome.storage?.onChanged) return undefined;

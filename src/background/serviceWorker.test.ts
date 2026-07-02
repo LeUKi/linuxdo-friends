@@ -1110,13 +1110,19 @@ describe("message contracts", () => {
     expect(JSON.stringify(response)).not.toContain("secret-token");
   });
 
-  it("keeps the local archive tag stable for request-stats-only changes", async () => {
+  it("keeps the local archive tag stable for request stats and local runtime-only changes", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const base = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
     const digest = await createConfigFingerprintForTest(base);
     const state = {
       ...base,
-      requestStats: requestStatsFixture(99)
+      laoFindsStartedAt: "2026-06-29T00:00:00.000Z",
+      requestStats: requestStatsFixture(99),
+      settings: {
+        ...base.settings,
+        timedActivityRefreshEnabled: true,
+        requestStatsAutoSyncEnabled: true
+      }
     };
     const { send } = await setupWorker({
       initialState: state,
@@ -1163,7 +1169,15 @@ describe("message contracts", () => {
     vi.stubGlobal("fetch", fetchImpl);
     const state = {
       ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
-      requestStats: requestStatsFixture(7)
+      laoFindsStartedAt: "2026-06-29T00:00:00.000Z",
+      requestStats: requestStatsFixture(7),
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "all" as const,
+        timedActivityRefreshIntervalMinutes: 240,
+        requestStatsAutoSyncEnabled: true
+      }
     };
     const { send } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
 
@@ -1180,6 +1194,13 @@ describe("message contracts", () => {
     const body = JSON.parse(String(request.body));
     expect(body).toMatchObject({ schemaVersion: 1, source: "linuxdo-friends", friends: { neo: { username: "neo" } }, requestStats: { total: 7 } });
     expect(body).not.toHaveProperty("currentAccount");
+    expect(body).not.toHaveProperty("laoFindsStartedAt");
+    expect(body.settings).toMatchObject({
+      timedActivityRefreshScopeMode: "all",
+      timedActivityRefreshIntervalMinutes: 240
+    });
+    expect(body.settings).not.toHaveProperty("timedActivityRefreshEnabled");
+    expect(body.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
     expect(JSON.stringify(body)).not.toContain("secret-token");
     expect(JSON.stringify(response)).not.toContain("secret-token");
   });
@@ -1278,11 +1299,21 @@ describe("message contracts", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
-        configSlotResponse({ friends: { neo: minimalFriend("neo") }, settings: { refreshIntervalMinutes: 90 }, requestStats: requestStatsFixture(13) })
+        configSlotResponse({
+          friends: { neo: minimalFriend("neo") },
+          laoFindsStartedAt: "2026-06-30T00:00:00.000Z",
+          settings: {
+            refreshIntervalMinutes: 90,
+            timedActivityRefreshEnabled: true,
+            requestStatsAutoSyncEnabled: true
+          },
+          requestStats: requestStatsFixture(13)
+        })
       )
     );
     const state = {
       ...addFriendFromProfile(defaultAppState, { username: "old", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      laoFindsStartedAt: "2026-06-29T00:00:00.000Z",
       currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" as const }
     };
     const { send, localStorage, sessionStorage } = await setupWorker({
@@ -1298,8 +1329,9 @@ describe("message contracts", () => {
       data: {
         state: {
           friends: { neo: { username: "neo" } },
+          laoFindsStartedAt: "2026-06-29T00:00:00.000Z",
           requestStats: { total: 13 },
-          settings: { refreshIntervalMinutes: 90 },
+          settings: { refreshIntervalMinutes: 90, timedActivityRefreshEnabled: false, requestStatsAutoSyncEnabled: false },
           lastSync: { message: "已导入 1 位佬朋友配置。" }
         },
         binding: { bound: true, linuxDoId: "42", lastRestoreAt: expect.any(String), lastRequestStatsSyncedAt: expect.any(String), lastRequestStatsTotal: 13 },
@@ -1462,7 +1494,9 @@ describe("message contracts", () => {
     const [url, request] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://linuxdo-cloud-save.lafish.workers.dev/api/apps/linuxdo-friends/slots/config");
     expect(request.method).toBe("PUT");
-    expect(JSON.parse(String(request.body))).toMatchObject({ requestStats: { total: 17 } });
+    const body = JSON.parse(String(request.body));
+    expect(body).toMatchObject({ requestStats: { total: 17 } });
+    expect(body.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
     expect(localStorage.dump()[CLOUD_AUTH_STORAGE_KEY]).toMatchObject({
       lastRequestStatsSyncedAt: expect.any(String),
       lastRequestStatsTotal: 17,
@@ -2544,8 +2578,6 @@ describe("message contracts", () => {
         friends: { neil: { username: "neil" } },
         settings: {
           refreshIntervalMinutes: 60,
-          allowAutoRefresh: false,
-          allowInactiveTabFallback: false,
           openActivityLinksInPage: true
         }
       }
@@ -2555,6 +2587,8 @@ describe("message contracts", () => {
     expect(exported).not.toHaveProperty("followedUsers");
     expect(exported).not.toHaveProperty("avatarCache");
     expect(exported).not.toHaveProperty("activity");
+    expect((exported.settings as Record<string, unknown>)).not.toHaveProperty("timedActivityRefreshEnabled");
+    expect((exported.settings as Record<string, unknown>)).not.toHaveProperty("requestStatsAutoSyncEnabled");
   });
 
   it("imports config with overwrite semantics and clears non-migratable state", async () => {
@@ -2569,7 +2603,13 @@ describe("message contracts", () => {
         }
       },
       activity: { old: { username: "old", refreshedAt: "2026-06-28T00:00:00.000Z", items: [] } },
-      currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" as const }
+      laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
+      currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" as const },
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: true,
+        requestStatsAutoSyncEnabled: true
+      }
     };
     const json = JSON.stringify({
       schemaVersion: 1,
@@ -2585,7 +2625,8 @@ describe("message contracts", () => {
           updatedAt: "2026-06-28T00:00:00.000Z"
         }
       },
-      settings: { refreshIntervalMinutes: 90 }
+      laoFindsStartedAt: "2026-06-28T00:00:00.000Z",
+      settings: { refreshIntervalMinutes: 90, timedActivityRefreshEnabled: true, requestStatsAutoSyncEnabled: true }
     });
     const { send, localStorage, sessionStorage } = await setupWorker({
       initialState: state,
@@ -2610,7 +2651,14 @@ describe("message contracts", () => {
       ok: true,
       data: {
         friends: { neo: { username: "neo", note: "NAS", groups: ["ops"], pinned: true } },
-        settings: { refreshIntervalMinutes: 90, allowAutoRefresh: false, allowInactiveTabFallback: false },
+        settings: {
+          refreshIntervalMinutes: 90,
+          allowAutoRefresh: false,
+          allowInactiveTabFallback: false,
+          timedActivityRefreshEnabled: false,
+          requestStatsAutoSyncEnabled: false
+        },
+        laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
         followedUsers: {},
         friendProfiles: {},
         activity: {},

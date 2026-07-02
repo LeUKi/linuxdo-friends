@@ -299,9 +299,10 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
 
 async function importConfig(json: string): Promise<AppState> {
   const file = parseConfigImportJson(json);
+  const currentState = await loadState();
   invalidateStateWriters();
   clearActiveSiteDataTask();
-  const { state: next } = applyConfigImport(file);
+  const { state: next } = applyConfigImport(file, nowIso(), currentState);
   await saveState(next);
   await removeLocalStorageKeys([UPDATE_CHECK_STORAGE_KEY]);
   await removeSessionStorageKeys([SITE_DATA_PROGRESS_STORAGE_KEY, PAGE_SCRIPT_STATUS_STORAGE_KEY, ...allUiSceneStorageKeys]);
