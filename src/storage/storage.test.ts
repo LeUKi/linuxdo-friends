@@ -9,6 +9,9 @@ describe("storage migration", () => {
     expect(defaultAppState.activityRefreshLedger).toEqual({});
     expect(defaultAppState.activityWatermarks).toEqual({});
     expect(defaultAppState.activityFeedWaterlineAt).toBeUndefined();
+    expect(defaultAppState.dredgeRules).toEqual([]);
+    expect(defaultAppState.laoFindsStartedAt).toBeUndefined();
+    expect(defaultAppState.laoFindsItems).toEqual({});
     expect(defaultAppState.avatarCache).toEqual({});
   });
 
@@ -27,8 +30,58 @@ describe("storage migration", () => {
       activityRefreshLedger: {},
       activityWatermarks: {},
       activityFeedWaterlineAt: undefined,
+      dredgeRules: [],
+      laoFindsStartedAt: undefined,
+      laoFindsItems: {},
       avatarCache: {},
       settings: { openActivityLinksInPage: true }
+    });
+  });
+
+  it("preserves persisted lao finds rules and items", async () => {
+    const storage = createMockStorage({
+      linuxdoFriendsState: {
+        dredgeRules: [
+          {
+            id: "rule-1",
+            name: "AI",
+            enabled: true,
+            usernames: ["Neo"],
+            kinds: ["reply", "bad"],
+            keywords: [" AI "],
+            createdAt: "2026-06-30T00:00:00.000Z",
+            updatedAt: "2026-06-30T00:00:00.000Z"
+          }
+        ],
+        laoFindsStartedAt: "2026-06-30T00:00:00.000Z",
+        laoFindsItems: {
+          item1: {
+            id: "item1",
+            activityId: "activity1",
+            activity: { id: "activity1", username: "neo", kind: "reply", title: "AI" },
+            collectedAt: "2026-06-30T00:01:00.000Z",
+            matchedRuleIds: ["rule-1"]
+          }
+        }
+      }
+    });
+
+    await expect(loadState(storage)).resolves.toMatchObject({
+      dredgeRules: [{ id: "rule-1", usernames: ["neo"], kinds: ["reply"], keywords: ["ai"] }],
+      laoFindsStartedAt: "2026-06-30T00:00:00.000Z",
+      laoFindsItems: { item1: { activityId: "activity1", matchedRuleIds: ["rule-1"] } }
+    });
+  });
+
+  it("drops invalid persisted lao finds start point", async () => {
+    const storage = createMockStorage({
+      linuxdoFriendsState: {
+        laoFindsStartedAt: "bad"
+      }
+    });
+
+    await expect(loadState(storage)).resolves.toMatchObject({
+      laoFindsStartedAt: undefined
     });
   });
 
@@ -164,6 +217,46 @@ describe("storage migration", () => {
 
     await expect(loadState(storage)).resolves.toMatchObject({
       settings: { telegramBotToken: "123456:ABC-DEF", telegramChatId: "987654321" }
+    });
+  });
+
+  it("normalizes timed activity refresh settings", async () => {
+    const storage = createMockStorage({
+      linuxdoFriendsState: {
+        settings: {
+          timedActivityRefreshEnabled: true,
+          timedActivityRefreshScopeMode: "all",
+          timedActivityRefreshIntervalMinutes: 240
+        }
+      }
+    });
+
+    await expect(loadState(storage)).resolves.toMatchObject({
+      settings: {
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "all",
+        timedActivityRefreshIntervalMinutes: 240
+      }
+    });
+  });
+
+  it("backfills missing or invalid timed activity refresh settings", async () => {
+    const storage = createMockStorage({
+      linuxdoFriendsState: {
+        settings: {
+          timedActivityRefreshEnabled: "yes",
+          timedActivityRefreshScopeMode: "bad",
+          timedActivityRefreshIntervalMinutes: 1
+        }
+      }
+    });
+
+    await expect(loadState(storage)).resolves.toMatchObject({
+      settings: {
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      }
     });
   });
 

@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createConfigFingerprint as createConfigFingerprintForTest } from "../domain/configTransfer";
 import { defaultAppState } from "../domain/defaultState";
 import { addFriendFromProfile, updateFriend, upsertFollowedUser } from "../domain/friends";
 import { isBackgroundCommand } from "../messages/contracts";
 import { PAGE_SCRIPT_STATUS_STORAGE_KEY } from "../storage/pageScriptStatusStorage";
 import { SITE_DATA_PROGRESS_STORAGE_KEY } from "../storage/siteDataProgressStorage";
 import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
+import { TIMED_ACTIVITY_SESSION_STORAGE_KEY } from "../storage/timedActivityRefreshSessionStorage";
 import { createMockStorage } from "../test/mockStorage";
+import type { AppState } from "../shared/types";
 
 describe("message contracts", () => {
   beforeEach(() => {
@@ -30,12 +33,19 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "refreshFriendProfiles", usernames: ["neil"] })).toBe(true);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", usernames: ["neil"] })).toBe(true);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neil"] } })).toBe(true);
+    expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neil"] }, trigger: "timed", timedRunId: "run-1" })).toBe(true);
+    expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { id: "rule-1", name: "AI", usernames: ["neil"], kinds: ["topic"], keywords: ["AI"] } })).toBe(true);
+    expect(isBackgroundCommand({ type: "removeDredgeRule", id: "rule-1" })).toBe(true);
+    expect(isBackgroundCommand({ type: "resetLaoFindsStartedAt" })).toBe(true);
+    expect(isBackgroundCommand({ type: "markLaoFindsItemRead", id: "item-1", read: true })).toBe(true);
+    expect(isBackgroundCommand({ type: "archiveLaoFindsItem", id: "item-1", archived: true })).toBe(true);
     expect(isBackgroundCommand({ type: "cacheAvatars", usernames: ["neil"] })).toBe(true);
     expect(isBackgroundCommand({ type: "getSiteDataProgress" })).toBe(true);
     expect(isBackgroundCommand({ type: "getPageScriptStatus" })).toBe(true);
     expect(isBackgroundCommand({ type: "getUpdateCheck" })).toBe(true);
     expect(isBackgroundCommand({ type: "checkForUpdates" })).toBe(true);
     expect(isBackgroundCommand({ type: "checkForUpdates", force: true })).toBe(true);
+    expect(isBackgroundCommand({ type: "getCloudArchiveLocalState" })).toBe(true);
     expect(isBackgroundCommand({ type: "getCloudConfigStatus" })).toBe(true);
     expect(isBackgroundCommand({ type: "bindCloudSave" })).toBe(true);
     expect(isBackgroundCommand({ type: "cloudSaveExchangeCode", code: "code-1" })).toBe(true);
@@ -70,9 +80,20 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "repairLinuxDoPageScript", tabId: 0 })).toBe(false);
     expect(isBackgroundCommand({ type: "checkForUpdates", force: "yes" })).toBe(false);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "bad", usernames: ["ok"] } })).toBe(false);
+    expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "timed" })).toBe(false);
+    expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, timedRunId: "run-1" })).toBe(false);
+    expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "manual", timedRunId: "run-1" })).toBe(false);
+    expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "bad", timedRunId: "run-1" })).toBe(false);
+    expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { usernames: [""] } })).toBe(false);
+    expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { kinds: ["bad"] } })).toBe(false);
+    expect(isBackgroundCommand({ type: "removeDredgeRule", id: "" })).toBe(false);
+    expect(isBackgroundCommand({ type: "markLaoFindsItemRead", id: "item-1", read: "yes" })).toBe(false);
+    expect(isBackgroundCommand({ type: "archiveLaoFindsItem", id: "item-1", archived: "yes" })).toBe(false);
     expect(isBackgroundCommand({ type: "updateFriend", username: "neil", patch: { activityKinds: ["bad"] } })).toBe(false);
     expect(isBackgroundCommand({ type: "seedFollowedUser", user: { name: "No username" } })).toBe(false);
     expect(isBackgroundCommand({ type: "updateSettings", settings: { refreshIntervalMinutes: 1 } })).toBe(false);
+    expect(isBackgroundCommand({ type: "updateSettings", settings: { timedActivityRefreshScopeMode: "bad" } })).toBe(false);
+    expect(isBackgroundCommand({ type: "updateSettings", settings: { timedActivityRefreshIntervalMinutes: 1 } })).toBe(false);
     expect(isBackgroundCommand({ type: "openActivityLink", url: "https://example.com/t/topic/1" })).toBe(false);
     expect(isBackgroundCommand({ type: "importConfig", json: "" })).toBe(false);
   });
@@ -94,6 +115,444 @@ describe("message contracts", () => {
         }
       }
     });
+  });
+
+  it("clears paused timed activity refresh session when timed refresh is re-enabled", async () => {
+    const pausedState: AppState = {
+      ...defaultAppState,
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: false
+      }
+    };
+    const { send, sessionStorage } = await setupWorker({
+      initialState: pausedState,
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          pausedReason: "challenge",
+          pausedMessage: "遇到浏览器验证页面，已停止请求。",
+          lastFailureAt: "2026-06-30T00:00:00.000Z",
+          pendingDue: true,
+          nextDueAt: "2026-06-30T01:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    const response = await send({
+      type: "updateSettings",
+      settings: { timedActivityRefreshEnabled: true }
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      data: {
+        settings: {
+          timedActivityRefreshEnabled: true
+        }
+      }
+    });
+    expect(sessionStorage.dump()).toMatchObject({
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        pendingDue: false,
+        nextDueAt: expect.any(String)
+      }
+    });
+    const timedSession = sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY] as Record<string, unknown>;
+    expect(timedSession.nextDueAt).not.toBe("2026-06-30T00:00:00.000Z");
+    expect(timedSession).not.toHaveProperty("pausedReason");
+    expect(timedSession).not.toHaveProperty("pausedMessage");
+    expect(timedSession).not.toHaveProperty("lastFailureAt");
+  });
+
+  it("clears active timed activity run state when timed refresh is disabled", async () => {
+    const activeState: AppState = {
+      ...defaultAppState,
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: true
+      }
+    };
+    const { send, sessionStorage } = await setupWorker({
+      initialState: activeState,
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          activeRunId: "timed-activity:running",
+          pendingDue: true,
+          nextDueAt: "2026-06-30T00:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    await send({ type: "updateSettings", settings: { timedActivityRefreshEnabled: false } });
+
+    const timedSession = sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY] as Record<string, unknown>;
+    expect(timedSession.pendingDue).toBe(false);
+    expect(timedSession).not.toHaveProperty("activeRunId");
+  });
+
+  it("invalidates stale no-rule timed session state when dredge rules become targetable", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const activeState: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "rules"
+      },
+      dredgeRules: []
+    };
+    const { send, sessionStorage } = await setupWorker({
+      initialState: activeState,
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          noTargetAt: "2026-06-30T00:00:00.000Z",
+          noTargetMessage: "没有启用规则",
+          nextDueAt: "2026-06-30T02:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    await send({
+      type: "upsertDredgeRule",
+      rule: {
+        name: "Neo",
+        enabled: true,
+        usernames: ["neo"],
+        kinds: ["topic"],
+        keywords: []
+      }
+    });
+    await send({ type: "updateSettings", settings: { timedActivityRefreshEnabled: true } });
+
+    const timedSession = sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY] as Record<string, unknown>;
+    expect(timedSession).not.toHaveProperty("noTargetAt");
+    expect(timedSession).not.toHaveProperty("noTargetMessage");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps stale no-rule timed session state when timed dredging is re-enabled without targets", async () => {
+    const activeState: AppState = {
+      ...defaultAppState,
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "rules"
+      },
+      dredgeRules: []
+    };
+    const { send, sessionStorage } = await setupWorker({
+      initialState: activeState,
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          noTargetAt: "2026-06-30T00:00:00.000Z",
+          noTargetMessage: "没有启用规则",
+          nextDueAt: "2026-06-30T02:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    await send({ type: "updateSettings", settings: { timedActivityRefreshEnabled: true } });
+
+    expect(sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).toMatchObject({
+      noTargetAt: "2026-06-30T00:00:00.000Z",
+      noTargetMessage: "没有启用规则"
+    });
+  });
+
+  it("invalidates stale no-rule timed session state when target inputs become targetable", async () => {
+    const staleNoTargetSession = {
+      noTargetAt: "2026-06-30T00:00:00.000Z",
+      noTargetMessage: "没有启用规则",
+      nextDueAt: "2026-06-30T02:00:00.000Z",
+      updatedAt: "2026-06-30T00:00:00.000Z"
+    };
+
+    const modeWorker = await setupWorker({
+      initialState: addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      initialSession: { [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: staleNoTargetSession }
+    });
+    await modeWorker.send({ type: "updateSettings", settings: { timedActivityRefreshScopeMode: "all" } });
+    expect(modeWorker.sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).not.toHaveProperty("noTargetMessage");
+
+    vi.resetModules();
+    vi.unstubAllGlobals();
+    const friendState = updateFriend(
+      {
+        ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+        dredgeRules: [
+          {
+            id: "rule-neo",
+            name: "Neo",
+            enabled: true,
+            usernames: ["neo"],
+            kinds: ["topic"],
+            keywords: [],
+            createdAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:00.000Z"
+          }
+        ]
+      },
+      "neo",
+      { activityKinds: [] }
+    );
+    const friendWorker = await setupWorker({
+      initialState: friendState,
+      initialSession: { [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: staleNoTargetSession }
+    });
+    await friendWorker.send({ type: "updateFriend", username: "neo", patch: { activityKinds: ["topic"] } });
+    expect(friendWorker.sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).not.toHaveProperty("noTargetMessage");
+
+    vi.resetModules();
+    vi.unstubAllGlobals();
+    const combinedSettingsWorker = await setupWorker({
+      initialState: {
+        ...defaultAppState,
+        settings: { ...defaultAppState.settings, timedActivityRefreshEnabled: true, timedActivityRefreshScopeMode: "rules" }
+      },
+      initialSession: { [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: staleNoTargetSession }
+    });
+    await combinedSettingsWorker.send({ type: "updateSettings", settings: { timedActivityRefreshEnabled: false, timedActivityRefreshScopeMode: "all" } });
+    expect(combinedSettingsWorker.sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).not.toHaveProperty("noTargetAt");
+    expect(combinedSettingsWorker.sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).not.toHaveProperty("noTargetMessage");
+  });
+
+  it("keeps no-rule timed session state when rule edits do not change timed targets", async () => {
+    const activeState: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "rules"
+      },
+      dredgeRules: [
+        {
+          id: "rule-ghost",
+          name: "Ghost",
+          enabled: true,
+          usernames: ["ghost"],
+          kinds: ["topic"],
+          keywords: [],
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      ]
+    };
+    const { send, sessionStorage } = await setupWorker({
+      initialState: activeState,
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          noTargetAt: "2026-06-30T00:00:00.000Z",
+          noTargetMessage: "没有启用规则",
+          nextDueAt: "2026-06-30T02:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    await send({ type: "upsertDredgeRule", rule: { id: "rule-ghost", name: "Ghost renamed" } });
+
+    expect(sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).toMatchObject({
+      noTargetAt: "2026-06-30T00:00:00.000Z",
+      noTargetMessage: "没有启用规则"
+    });
+  });
+
+  it("keeps no-rule timed session state when broad state replacement still has no timed targets", async () => {
+    const staleNoTargetSession = {
+      noTargetAt: "2026-06-30T00:00:00.000Z",
+      noTargetMessage: "没有启用规则",
+      nextDueAt: "2026-06-30T02:00:00.000Z",
+      updatedAt: "2026-06-30T00:00:00.000Z"
+    };
+    const importWorker = await setupWorker({
+      initialState: defaultAppState,
+      initialSession: { [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: staleNoTargetSession }
+    });
+    await importWorker.send({
+      type: "importConfig",
+      json: JSON.stringify({
+        schemaVersion: 1,
+        source: "linuxdo-friends",
+        exportedAt: "2026-06-30T00:00:00.000Z",
+        friends: {},
+        dredgeRules: []
+      })
+    });
+    expect(importWorker.sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).toMatchObject({
+      noTargetAt: "2026-06-30T00:00:00.000Z",
+      noTargetMessage: "没有启用规则"
+    });
+
+    vi.resetModules();
+    vi.unstubAllGlobals();
+    const resetWorker = await setupWorker({
+      initialState: defaultAppState,
+      initialSession: { [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: staleNoTargetSession }
+    });
+    await resetWorker.send({ type: "resetExtension" });
+    expect(resetWorker.sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).toMatchObject({
+      noTargetAt: "2026-06-30T00:00:00.000Z",
+      noTargetMessage: "没有启用规则"
+    });
+  });
+
+  it("retires a matching timed activity task when timed refresh is disabled", async () => {
+    let releaseFetch: (response: Response) => void = () => undefined;
+    const pendingFetch = new Promise<Response>((resolve) => {
+      releaseFetch = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(pendingFetch));
+    const activeState: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: true
+      }
+    };
+    const { send, runtime, sessionStorage } = await setupWorker({
+      initialState: activeState,
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          activeRunId: "timed-run-1",
+          pendingDue: true,
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    const timedRefresh = send({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neo"] }, trigger: "timed", timedRunId: "timed-run-1" });
+    await Promise.resolve();
+    await send({ type: "updateSettings", settings: { timedActivityRefreshEnabled: false } });
+    const progressAfterDisable = await send({ type: "getSiteDataProgress" });
+    releaseFetch(new Response(JSON.stringify({ boosts: [] }), { status: 200 }));
+    await timedRefresh;
+
+    expect(progressAfterDisable).toMatchObject({
+      ok: true,
+      data: {
+        taskType: "activity",
+        status: "error",
+        trigger: "timed",
+        timedRunId: "timed-run-1",
+        retiredReason: "timed_disabled",
+        error: "自动捞料已关闭，本次打捞已停止。"
+      }
+    });
+    expect(sessionStorage.dump()).toMatchObject({
+      [SITE_DATA_PROGRESS_STORAGE_KEY]: expect.objectContaining({ status: "error", retiredReason: "timed_disabled", timedRunId: "timed-run-1" })
+    });
+    expect(runtime.sendMessage).toHaveBeenCalledWith({
+      type: "linuxdoFriends.siteDataProgress",
+      progress: expect.objectContaining({ status: "error", retiredReason: "timed_disabled", timedRunId: "timed-run-1" })
+    });
+  });
+
+  it("does not let a retired timed activity callback finish newer manual profile progress", async () => {
+    let releaseTimedFetch: (response: Response) => void = () => undefined;
+    const timedFetch = new Promise<Response>((resolve) => {
+      releaseTimedFetch = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(timedFetch).mockResolvedValueOnce(profileResponse("Neo", "Neo")));
+    const activeState: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: true
+      }
+    };
+    const { send, sessionStorage } = await setupWorker({
+      initialState: activeState,
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          activeRunId: "timed-run-1",
+          pendingDue: true,
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    const timedRefresh = send({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neo"] }, trigger: "timed", timedRunId: "timed-run-1" });
+    await Promise.resolve();
+    await send({ type: "updateSettings", settings: { timedActivityRefreshEnabled: false } });
+    const manualRefresh = await send({ type: "refreshFriendProfiles" });
+    releaseTimedFetch(new Response(JSON.stringify({ boosts: [] }), { status: 200 }));
+    await timedRefresh;
+    const progressAfterLateTimed = await send({ type: "getSiteDataProgress" });
+
+    expect(manualRefresh).toMatchObject({
+      ok: true,
+      data: {
+        friendProfiles: { neo: { name: "Neo" } },
+        lastSync: { ok: true, source: "direct_fetch" }
+      }
+    });
+    expect(progressAfterLateTimed).toMatchObject({
+      ok: true,
+      data: { taskType: "profiles", status: "success", currentLabel: "@neo" }
+    });
+    expect(sessionStorage.dump()).toMatchObject({
+      [SITE_DATA_PROGRESS_STORAGE_KEY]: expect.objectContaining({ taskType: "profiles", status: "success", currentLabel: "@neo" })
+    });
+  });
+
+  it("lets an unrelated manual refresh release its slot after timed refresh is disabled", async () => {
+    let releaseManualFetch: (response: Response) => void = () => undefined;
+    const manualFetch = new Promise<Response>((resolve) => {
+      releaseManualFetch = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(manualFetch).mockResolvedValueOnce(profileResponse("Neo", "Neo")));
+    const activeState: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      settings: {
+        ...defaultAppState.settings,
+        timedActivityRefreshEnabled: true
+      }
+    };
+    const { send } = await setupWorker({
+      initialState: activeState,
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          activeRunId: "timed-run-1",
+          pendingDue: true,
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    const manualRefresh = send({ type: "refreshFriendProfiles" });
+    await Promise.resolve();
+    await send({ type: "updateSettings", settings: { timedActivityRefreshEnabled: false } });
+    releaseManualFetch(profileResponse("Neo", "Stale"));
+    const staleManualRefresh = await manualRefresh;
+    const progressAfterManualFinish = await send({ type: "getSiteDataProgress" });
+    const laterManualRefresh = await send({ type: "refreshFriendProfiles" });
+
+    expect(staleManualRefresh).toMatchObject({
+      ok: true,
+      data: {
+        lastSync: { ok: false, message: "已导入配置，较早的刷新结果已丢弃。" }
+      }
+    });
+    expect(progressAfterManualFinish).toMatchObject({
+      ok: true,
+      data: {
+        taskType: "profiles",
+        status: "error",
+        error: "刷新结果已被较新的本地状态变更丢弃。"
+      }
+    });
+    expect(laterManualRefresh).toMatchObject({
+      ok: true,
+      data: {
+        friendProfiles: { neo: { name: "Neo" } },
+        lastSync: { ok: true, source: "direct_fetch" }
+      }
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("checks GitHub latest release and persists an available update", async () => {
@@ -252,16 +711,22 @@ describe("message contracts", () => {
     expect(sidePanel.open).toHaveBeenCalledWith({ tabId: 456 });
   });
 
-  it("opens the extension options page", async () => {
-    const { send, runtime } = await setupWorker();
+  it("opens a new extension options page when no existing options tab is available", async () => {
+    const { send, runtime, tabs } = await setupWorker();
 
     const response = await send({ type: "openOptionsPage" });
 
     expect(response).toMatchObject({ ok: true, data: { message: "已打开配置页。" } });
-    expect(runtime.openOptionsPage).toHaveBeenCalled();
+    expect(runtime.openOptionsPage).not.toHaveBeenCalled();
+    expect(tabs.query).toHaveBeenCalledWith({ currentWindow: true });
+    expect(tabs.query).toHaveBeenCalledWith({});
+    expect(tabs.create).toHaveBeenCalledWith({
+      url: "chrome-extension://linuxdo-friends/src/options/index.html",
+      active: true
+    });
   });
 
-  it("opens the extension options page at a specific section hash", async () => {
+  it("opens a new extension options page at a specific section hash when no options tab exists", async () => {
     const { send, runtime, tabs } = await setupWorker();
 
     const response = await send({ type: "openOptionsPage", hash: "#cloud-backup" });
@@ -272,6 +737,63 @@ describe("message contracts", () => {
       url: "chrome-extension://linuxdo-friends/src/options/index.html#cloud-backup",
       active: true
     });
+  });
+
+  it("reuses the current-window options tab before checking other windows", async () => {
+    const { send, tabs, windows } = await setupWorker({
+      tabs: {
+        query: vi.fn(async (queryInfo: chrome.tabs.QueryInfo) =>
+          queryInfo.currentWindow
+            ? [{ id: 123, windowId: 7, url: "chrome-extension://linuxdo-friends/src/options/index.html#basic" } as chrome.tabs.Tab]
+            : [{ id: 456, windowId: 9, url: "chrome-extension://linuxdo-friends/src/options/index.html#data" } as chrome.tabs.Tab]
+        ),
+        sendMessage: vi.fn(),
+        update: vi.fn(async () => ({ id: 123 } as chrome.tabs.Tab)),
+        create: vi.fn()
+      }
+    });
+
+    const response = await send({ type: "openOptionsPage", hash: "#lao-finds" });
+
+    expect(response).toMatchObject({ ok: true, data: { message: "已打开配置页。" } });
+    expect(tabs.query).toHaveBeenCalledTimes(1);
+    expect(tabs.query).toHaveBeenCalledWith({ currentWindow: true });
+    expect(tabs.update).toHaveBeenCalledWith(123, {
+      url: "chrome-extension://linuxdo-friends/src/options/index.html#lao-finds",
+      active: true
+    });
+    expect(windows.update).toHaveBeenCalledWith(7, { focused: true });
+    expect(tabs.create).not.toHaveBeenCalled();
+  });
+
+  it("reuses an options tab from another window when the current window has none", async () => {
+    const { send, tabs, windows } = await setupWorker({
+      tabs: {
+        query: vi.fn(async (queryInfo: chrome.tabs.QueryInfo) =>
+          queryInfo.currentWindow
+            ? [{ id: 111, windowId: 7, url: "https://linux.do/latest" } as chrome.tabs.Tab]
+            : [
+                { id: 222, windowId: 8, url: "https://linux.do/t/topic/1" } as chrome.tabs.Tab,
+                { id: 333, windowId: 9, url: "chrome-extension://linuxdo-friends/src/options/index.html#data" } as chrome.tabs.Tab
+              ]
+        ),
+        sendMessage: vi.fn(),
+        update: vi.fn(async () => ({ id: 333 } as chrome.tabs.Tab)),
+        create: vi.fn()
+      }
+    });
+
+    const response = await send({ type: "openOptionsPage", hash: "#cloud-backup" });
+
+    expect(response).toMatchObject({ ok: true, data: { message: "已打开配置页。" } });
+    expect(tabs.query).toHaveBeenCalledWith({ currentWindow: true });
+    expect(tabs.query).toHaveBeenCalledWith({});
+    expect(tabs.update).toHaveBeenCalledWith(333, {
+      url: "chrome-extension://linuxdo-friends/src/options/index.html#cloud-backup",
+      active: true
+    });
+    expect(windows.update).toHaveBeenCalledWith(9, { focused: true });
+    expect(tabs.create).not.toHaveBeenCalled();
   });
 
   it("routes activity links through the active linux.do page script", async () => {
@@ -469,6 +991,53 @@ describe("message contracts", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("returns local-only cloud archive state without fetching", async () => {
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", fetchImpl);
+    const state = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const { send } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
+
+    const response = await send({ type: "getCloudArchiveLocalState" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      data: {
+        binding: { bound: true, linuxDoId: "42" },
+        archiveState: "different"
+      }
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(JSON.stringify(response)).not.toContain("secret-token");
+  });
+
+  it("returns same local cloud archive state when the stored digest matches current migratable config", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const state = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const digest = await createConfigFingerprintForTest(state);
+    const { send } = await setupWorker({
+      initialState: state,
+      initialCloudAuth: { ...cloudAuthFixture(), lastConfigDigest: digest, lastConfigSyncedAt: "2026-06-29T00:02:00.000Z" }
+    });
+
+    const response = await send({ type: "getCloudArchiveLocalState" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      data: {
+        binding: {
+          bound: true,
+          linuxDoId: "42",
+          lastConfigDigest: digest,
+          lastConfigSyncedAt: "2026-06-29T00:02:00.000Z"
+        },
+        archiveState: "same",
+        syncedAt: "2026-06-29T00:02:00.000Z"
+      }
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(JSON.stringify(response)).not.toContain("secret-token");
+  });
+
   it("reads cloud config status without mutating stored state", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => configSlotResponse({ friends: { neo: minimalFriend("neo") } })));
     const state = addFriendFromProfile(defaultAppState, { username: "local", refreshedAt: "2026-06-28T00:00:00.000Z" });
@@ -505,7 +1074,7 @@ describe("message contracts", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      data: { status: { state: "remote_config", friendCount: 1 }, message: "已备份 1 位佬朋友到云端。" }
+      data: { status: { state: "remote_config", friendCount: 1 }, archiveState: "same", message: "已备份 1 位佬朋友到云端。" }
     });
     const [url, request] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://linuxdo-cloud-save.lafish.workers.dev/api/apps/linuxdo-friends/slots/config");
@@ -516,6 +1085,36 @@ describe("message contracts", () => {
     expect(body).not.toHaveProperty("currentAccount");
     expect(JSON.stringify(body)).not.toContain("secret-token");
     expect(JSON.stringify(response)).not.toContain("secret-token");
+  });
+
+  it("persists the current config digest after a successful cloud backup", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+    const state = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const expectedDigest = await createConfigFingerprintForTest(state);
+    const { send, localStorage } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
+
+    const response = await send({ type: "backupCloudConfig" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      data: {
+        archiveState: "same",
+        binding: {
+          bound: true,
+          lastConfigDigest: expectedDigest,
+          lastConfigSyncedAt: expect.any(String)
+        }
+      }
+    });
+    expect(localStorage.dump()[CLOUD_AUTH_STORAGE_KEY]).toMatchObject({
+      token: "secret-token",
+      lastConfigDigest: expectedDigest,
+      lastConfigSyncedAt: expect.any(String)
+    });
+    expect(JSON.stringify(response)).not.toContain("secret-token");
+    expect(JSON.stringify(response)).not.toContain("Neo");
+    expect(JSON.stringify(response)).not.toContain("\"friends\":");
+    expect(JSON.stringify(response)).not.toContain("\"neo\"");
   });
 
   it("redacts raw cloud request errors from backup responses", async () => {
@@ -594,8 +1193,13 @@ describe("message contracts", () => {
           lastSync: { message: "已导入 1 位佬朋友配置。" }
         },
         binding: { bound: true, linuxDoId: "42", lastRestoreAt: expect.any(String) },
+        archiveState: "same",
         status: { state: "remote_config", friendCount: 1 }
       }
+    });
+    expect(localStorage.dump()[CLOUD_AUTH_STORAGE_KEY]).toMatchObject({
+      lastConfigDigest: await createConfigFingerprintForTest((response as { ok: true; data: { state: AppState } }).data.state),
+      lastConfigSyncedAt: expect.any(String)
     });
     expect((localStorage.dump().linuxdoFriendsState as typeof defaultAppState).friends.old).toBeUndefined();
     expect((localStorage.dump().linuxdoFriendsState as typeof defaultAppState).currentAccount).toBeUndefined();
@@ -681,6 +1285,50 @@ describe("message contracts", () => {
       }
     });
     expect(fetch).toHaveBeenCalledWith("https://linux.do/u/neil.json", expect.any(Object));
+  });
+
+  it("invalidates stale no-rule timed session state when profile add creates a timed target", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => profileResponse("Neil", "Neo")));
+    const { send, sessionStorage } = await setupWorker({
+      initialState: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          timedActivityRefreshEnabled: false,
+          timedActivityRefreshScopeMode: "rules"
+        },
+        dredgeRules: [
+          {
+            id: "rule-neil",
+            name: "Neil",
+            enabled: true,
+            usernames: ["neil"],
+            kinds: ["topic"],
+            keywords: [],
+            createdAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:00.000Z"
+          }
+        ]
+      },
+      initialSession: {
+        [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+          noTargetAt: "2026-06-30T00:00:00.000Z",
+          noTargetMessage: "没有启用规则",
+          nextDueAt: "2026-06-30T02:00:00.000Z",
+          updatedAt: "2026-06-30T00:00:00.000Z"
+        }
+      }
+    });
+
+    const response = await send({ type: "addFriendByProfile", username: "Neil" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      data: { friends: { neil: { username: "neil" } }, lastSync: { ok: true, source: "direct_fetch" } }
+    });
+    const timedSession = sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY] as Record<string, unknown>;
+    expect(timedSession).not.toHaveProperty("noTargetAt");
+    expect(timedSession).not.toHaveProperty("noTargetMessage");
   });
 
   it("adds a known user locally without fetching a profile", async () => {
@@ -997,7 +1645,22 @@ describe("message contracts", () => {
 
   it("falls back to an existing linux.do tab when direct activity refresh hits a challenge", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
-    const state = addFriendFromProfile(defaultAppState, { username: "misaka7369", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const state: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "misaka7369", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      laoFindsStartedAt: "2026-06-26T00:00:00.000Z",
+      dredgeRules: [
+        {
+          id: "rule-activity",
+          name: "动态",
+          enabled: true,
+          usernames: ["misaka7369"],
+          kinds: ["reply"],
+          keywords: ["动态"],
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      ]
+    };
     const { send, tabs } = await setupWorker({
       initialState: state,
       tabs: {
@@ -1056,9 +1719,11 @@ describe("message contracts", () => {
       ok: true,
       data: {
         activity: { misaka7369: { items: [{ id: "42", title: "动态" }] } },
+        laoFindsItems: { "42": { matchedRuleIds: ["rule-activity"] } },
         lastSync: { ok: true, source: "existing_tab" }
       }
     });
+    expect(tabs.sendMessage).toHaveBeenCalledTimes(4);
     expect(tabs.sendMessage).toHaveBeenCalledWith(456, {
       type: "linuxdoFriends.extractActivity",
       username: "misaka7369",
@@ -1223,6 +1888,38 @@ describe("message contracts", () => {
       data: { lastSync: { ok: false, source: "manual", message: "已有刷新正在进行。" } }
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a stale site-data request slot before starting a later refresh", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    let releaseFirstFetch: (response: Response) => void = () => undefined;
+    const firstFetch = new Promise<Response>((resolve) => {
+      releaseFirstFetch = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(firstFetch).mockResolvedValue(profileResponse("Misaka7369", "Misaka")));
+    const state = addFriendFromProfile(defaultAppState, { username: "misaka7369", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const { send, sessionStorage } = await setupWorker({ initialState: state });
+
+    const staleRefresh = send({ type: "refreshFriendProfiles" });
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 1);
+    const laterRefresh = await send({ type: "refreshFriendProfiles" });
+    releaseFirstFetch(profileResponse("Misaka7369", "Old"));
+    await staleRefresh;
+
+    expect(laterRefresh).toMatchObject({
+      ok: true,
+      data: {
+        friendProfiles: { misaka7369: { name: "Misaka" } },
+        lastSync: { ok: true, source: "direct_fetch" }
+      }
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.dump()).toMatchObject({
+      [SITE_DATA_PROGRESS_STORAGE_KEY]: expect.objectContaining({ status: "success", currentLabel: "@misaka7369" })
+    });
+    vi.useRealTimers();
   });
 
   it("does not start manual add while another site-data request is pending", async () => {

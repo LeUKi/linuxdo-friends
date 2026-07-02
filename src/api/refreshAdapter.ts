@@ -18,6 +18,7 @@ import {
   type ActivityRequestStep
 } from "../domain/activityRefresh";
 import { addFriendFromProfile, normalizeUsername, upsertFollowedUser, upsertFriendProfile } from "../domain/friends";
+import { collectLaoFindsItems } from "../domain/laoFinds";
 import { nowIso } from "../shared/time";
 import type {
   ActivityItem,
@@ -188,9 +189,11 @@ export function createRefreshAdapter(fetchImpl: typeof fetch = fetch): RefreshAd
           { clearExistingNew: false, feedWaterlineAt }
         );
       }
+      const refreshedAt = nowIso();
+      const collected = collectLaoFindsItems(nextState, collectedTargets.flatMap((target) => target.items), refreshedAt);
       return {
-        state: nextState,
-        result: { ok: true, source: "direct_fetch", message: "好友动态已刷新。", refreshedAt: nowIso() }
+        state: collected.state,
+        result: { ok: true, source: "direct_fetch", message: "好友动态已刷新。", refreshedAt }
       };
     }
   };

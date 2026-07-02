@@ -66,7 +66,9 @@ describe("cloud auth storage", () => {
       (auth) => ({
         ...auth,
         lastStatus: { state: "remote_config", checkedAt: "2026-06-29T00:01:00.000Z", exportedAt: "2026-06-29T00:00:00.000Z", friendCount: 3 },
-        lastBackupAt: "2026-06-29T00:02:00.000Z"
+        lastBackupAt: "2026-06-29T00:02:00.000Z",
+        lastConfigDigest: "digest-1",
+        lastConfigSyncedAt: "2026-06-29T00:02:00.000Z"
       }),
       storage
     );
@@ -74,12 +76,16 @@ describe("cloud auth storage", () => {
     expect(updated).toMatchObject({
       token: "secret-token",
       lastBackupAt: "2026-06-29T00:02:00.000Z",
+      lastConfigDigest: "digest-1",
+      lastConfigSyncedAt: "2026-06-29T00:02:00.000Z",
       lastStatus: { state: "remote_config", friendCount: 3 }
     });
     expect(toPublicCloudBinding(updated)).toMatchObject({
       bound: true,
       lastStatus: { state: "remote_config", friendCount: 3 },
-      lastBackupAt: "2026-06-29T00:02:00.000Z"
+      lastBackupAt: "2026-06-29T00:02:00.000Z",
+      lastConfigDigest: "digest-1",
+      lastConfigSyncedAt: "2026-06-29T00:02:00.000Z"
     });
     expect(JSON.stringify(toPublicCloudBinding(updated))).not.toContain("secret-token");
   });

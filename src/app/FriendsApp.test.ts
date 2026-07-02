@@ -2,16 +2,19 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { addFriendFromProfile, updateFriend } from "../domain/friends";
+import { addFriendFromProfile, removeFriend, updateFriend } from "../domain/friends";
 import { defaultAppState } from "../domain/defaultState";
 import { createMockStorage } from "../test/mockStorage";
 import { SITE_DATA_PROGRESS_STORAGE_KEY } from "../storage/siteDataProgressStorage";
 import { uiSceneStorageKeys } from "../storage/uiSceneStorage";
+import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
 import { AUTO_REFRESH_SESSION_STORAGE_KEY, loadAutoRefreshSessionState } from "../storage/autoRefreshSessionStorage";
+import { loadTimedActivityRefreshSessionState, TIMED_ACTIVITY_CONTROLLER_STORAGE_KEY, TIMED_ACTIVITY_SESSION_STORAGE_KEY } from "../storage/timedActivityRefreshSessionStorage";
 import { resetRuntimeObserversForTest } from "../state/atoms";
 import { resetAutoRefreshSessionObserverForTest } from "../state/autoRefreshAtoms";
+import { resetTimedActivityRefreshSessionObserverForTest } from "../state/timedActivityRefreshAtoms";
 import { resetUiSceneObserverForTest } from "../state/uiSceneAtoms";
-import type { AppState, CloudConfigStatusResult, SiteDataTaskProgress } from "../shared/types";
+import type { ActivityRefreshScope, AppState, BackgroundResponse, CloudArchiveLocalStateResult, SiteDataTaskProgress } from "../shared/types";
 import { eventHappenedInside, isLinuxDoActivityHref, shouldHandleActivityLinkClick } from "./FriendsApp";
 import { FriendsApp } from "./FriendsApp";
 
@@ -102,6 +105,7 @@ describe("FriendsApp UI scene persistence", () => {
     vi.unstubAllGlobals();
     resetRuntimeObserversForTest();
     resetAutoRefreshSessionObserverForTest();
+    resetTimedActivityRefreshSessionObserverForTest();
     resetUiSceneObserverForTest();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });
@@ -133,7 +137,7 @@ describe("FriendsApp UI scene persistence", () => {
       getButton(container, "管理").click();
     });
     await act(async () => {
-      getButton(container, "佬友圈").click();
+      getButton(container, "佬有料").click();
     });
     await act(async () => {
       const input = container.querySelector<HTMLInputElement>(".modal-search-input");
@@ -144,7 +148,7 @@ describe("FriendsApp UI scene persistence", () => {
     });
 
     expect(session.dump()).toMatchObject({
-      [uiSceneStorageKeys.tab]: "feed",
+      [uiSceneStorageKeys.tab]: "finds",
       [uiSceneStorageKeys.addFriendModalOpen]: true,
       [uiSceneStorageKeys.addFriendQuery]: "neo"
     });
@@ -340,6 +344,8 @@ describe("FriendsApp UI scene persistence", () => {
   });
 
   it("shows running refresh progress in the in-page friends view", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:01.000Z"));
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
       [uiSceneStorageKeys.tab]: "friends"
@@ -364,9 +370,12 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.querySelector(".refresh-progress-track span")).toBeTruthy();
     expect(container.querySelector(".refresh-button-label")?.textContent).toBe("@neo");
     expect(container.querySelector(".spin-icon")).toBeTruthy();
+    vi.useRealTimers();
   });
 
   it("disables refresh actions while a shared site-data task is running", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:01.000Z"));
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
       [uiSceneStorageKeys.tab]: "friends"
@@ -388,6 +397,42 @@ describe("FriendsApp UI scene persistence", () => {
     const { container } = await renderFriendsApp("in-page");
 
     expect(getButton(container, "@neo").disabled).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("releases refresh actions when mounted shared site-data progress becomes stale", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "friends"
+    });
+    setupChrome({
+      session,
+      progress: {
+        taskId: "profiles-stale",
+        taskType: "profiles",
+        usernames: ["neo"],
+        status: "running",
+        completed: 0,
+        total: 1,
+        currentLabel: "@neo",
+        startedAt: "2026-06-28T00:00:00.000Z",
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(getButton(container, "@neo").disabled).toBe(true);
+    expect(container.querySelector(".refresh-button-inner.is-running")).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10 * 60_000 + 500);
+    });
+
+    expect(getButton(container, "刷新状态").disabled).toBe(false);
+    expect(container.querySelector(".refresh-button-inner.is-running")).toBeFalsy();
+    vi.useRealTimers();
   });
 
   it("renders friend status auto-refresh controls in the split refresh menu", async () => {
@@ -770,6 +815,8 @@ describe("FriendsApp UI scene persistence", () => {
   });
 
   it("updates in-page refresh progress from shared session state changes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:01.000Z"));
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
       [uiSceneStorageKeys.tab]: "friends"
@@ -804,6 +851,7 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.querySelector(".refresh-progress-track span")).toBeTruthy();
     expect(container.querySelector(".refresh-button-label")?.textContent).toBe("@neo");
     expect(container.querySelector(".spin-icon")).toBeTruthy();
+    vi.useRealTimers();
   });
 
   it("keeps bottom breathing space in both friends and feed tabs", async () => {
@@ -832,6 +880,143 @@ describe("FriendsApp UI scene persistence", () => {
     act(() => {
       feedRender.root.unmount();
     });
+
+    const findsSession = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    setupChrome({ session: findsSession, state: activityFeedState() });
+    const findsRender = await renderFriendsApp("side-panel");
+
+    expect(findsRender.container.querySelector(".tab-bottom-spacer")).toBeTruthy();
+
+    act(() => {
+      findsRender.root.unmount();
+    });
+  });
+
+  it("renders the lao finds tab empty by default", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    setupChrome({ session, state: activityFeedState() });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.textContent).toContain("佬有料");
+    expect(container.textContent).toContain("暂时没有佬料");
+    expect(container.textContent).toContain("手动刷新佬友圈或开启自动捞料");
+    expect(container.textContent).toContain("手动打捞");
+    expect(container.textContent).toContain("配置打捞规则");
+    expect(container.querySelector(".finds-title-with-icon .lucide-telescope")).toBeTruthy();
+    expect(getButton(container, "手动打捞").querySelector(".lucide-telescope")).toBeTruthy();
+    expect(container.querySelector(".dredge-rule-panel")).toBeFalsy();
+  });
+
+  it("opens lao finds rules in the options page from the lightweight management modal", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({ session, state: activityFeedState() });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      getButton(container, "管理").click();
+    });
+
+    expect(Array.from(container.querySelectorAll("button")).filter((button) => button.textContent?.includes("更多设置"))).toHaveLength(1);
+
+    await act(async () => {
+      getButton(container, "更多设置").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#lao-finds" });
+    expect(container.textContent).not.toContain("打捞规则");
+    expect(container.querySelector(".modal")).toBeFalsy();
+    expect(session.dump()).toMatchObject({
+      [uiSceneStorageKeys.addFriendModalOpen]: false
+    });
+  });
+
+  it("renders collected lao finds items and sends read/archive commands", async () => {
+    const state: AppState = {
+      ...activityFeedState(),
+      dredgeRules: [
+        {
+          id: "rule-ai",
+          name: "AI",
+          enabled: true,
+          usernames: "all",
+          kinds: ["topic"],
+          keywords: ["AI"],
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      ],
+      laoFindsItems: {
+        "topic:neo:1": {
+          id: "topic:neo:1",
+          activityId: "topic:neo:1",
+          activity: {
+            id: "topic:neo:1",
+            username: "neo",
+            kind: "topic",
+            title: "AI 新话题",
+            url: "/t/topic/1",
+            occurredAt: "2026-06-28T00:04:00.000Z"
+          },
+          collectedAt: "2026-06-28T00:05:00.000Z",
+          matchedRuleIds: ["rule-ai"]
+        }
+      }
+    };
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    const chromeMock = setupChrome({ session, state });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.textContent).toContain("AI 新话题");
+    expect(container.textContent).toContain("命中 AI");
+
+    await act(async () => {
+      getButton(container, "标为已读").click();
+    });
+    await act(async () => {
+      getButton(container, "归档").click();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "markLaoFindsItemRead", id: "topic:neo:1", read: true });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "archiveLaoFindsItem", id: "topic:neo:1", archived: true });
+  });
+
+  it("keeps lao finds rule CRUD out of the main plugin surface", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    setupChrome({
+      session,
+      state: {
+        ...activityFeedState(),
+        dredgeRules: [
+          {
+            id: "rule-ai",
+            name: "AI",
+            enabled: true,
+            usernames: "all",
+            kinds: ["topic"],
+            keywords: [],
+            createdAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:00.000Z"
+          }
+        ]
+      }
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.querySelector(".dredge-rule-panel")).toBeFalsy();
+    expect(Array.from(container.querySelectorAll("button")).some((button) => button.textContent?.trim() === "新建")).toBe(false);
   });
 
   it("uses compact side-panel and settings launchers in the in-page header instead of the linked-session tag", async () => {
@@ -858,33 +1043,84 @@ describe("FriendsApp UI scene persistence", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage" });
   });
 
-  it("shows cloud binding status inside the account tag and opens cloud settings", async () => {
+  it("renders version metadata under the main plugin brand instead of the right status area", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.querySelector(".header-brand .version-badge")).toBeTruthy();
+    expect(container.querySelector(".header-status .version-badge")).toBeFalsy();
+    expect(container.querySelector<HTMLAnchorElement>(".version-github-link")?.href).toBe("https://github.com/LeUKi/linuxdo-friends");
+  });
+
+  it("shows local cloud archive status inside the account tag and opens cloud settings", async () => {
     const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
     const chromeMock = setupChrome({ session });
     const { container } = await renderFriendsApp("side-panel");
 
-    const cloudButton = container.querySelector<HTMLButtonElement>(".cloud-sync-chip");
-    expect(cloudButton?.classList.contains("is-unbound")).toBe(true);
-    expect(cloudButton?.querySelector(".cloud-sync-cross")).toBeTruthy();
+    const cloudButton = container.querySelector<HTMLButtonElement>(".cloud-archive-chip");
+    expect(cloudButton?.classList.contains("cloud-archive-unbound")).toBe(true);
+    expect(cloudButton?.textContent).toContain("未绑定");
+    expect(cloudButton?.querySelector(".cloud-archive-cross")).toBeTruthy();
 
     await act(async () => {
       cloudButton?.click();
     });
 
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "getCloudArchiveLocalState" });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "getCloudConfigStatus" });
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#cloud-backup" });
   });
 
-  it("uses a bright cloud icon when cloud config is bound", async () => {
+  it("uses a bright cloud icon when local cloud archive state is same", async () => {
     const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
-    setupChrome({ session, cloudState: boundCloudState() });
+    setupChrome({ session, cloudState: sameCloudArchiveState() });
     const { container } = await renderFriendsApp("side-panel");
 
-    const cloudButton = container.querySelector<HTMLButtonElement>(".cloud-sync-chip");
-    expect(cloudButton?.classList.contains("is-bound")).toBe(true);
-    expect(cloudButton?.querySelector(".cloud-sync-cross")).toBeFalsy();
+    const cloudButton = container.querySelector<HTMLButtonElement>(".cloud-archive-chip");
+    expect(cloudButton?.classList.contains("cloud-archive-same")).toBe(true);
+    expect(cloudButton?.textContent?.trim()).toBe("");
+    expect(cloudButton?.querySelector(".cloud-archive-cross")).toBeFalsy();
   });
 
-  it("renders per-friend activity scope controls in the manage modal and updates scope", async () => {
+  it("shows pending backup copy when local cloud archive state differs", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    setupChrome({ session, cloudState: differentCloudArchiveState() });
+    const { container } = await renderFriendsApp("side-panel");
+
+    const cloudButton = container.querySelector<HTMLButtonElement>(".cloud-archive-chip");
+    expect(cloudButton?.classList.contains("cloud-archive-different")).toBe(true);
+    expect(cloudButton?.textContent).toContain("待备份");
+    expect(cloudButton?.textContent).not.toContain("不一致");
+  });
+
+  it("reloads local cloud archive state after cloud auth metadata changes", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({ session });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.querySelector(".cloud-archive-chip")?.textContent).toContain("未绑定");
+
+    chromeMock.setCloudState(sameCloudArchiveState());
+    await act(async () => {
+      chromeMock.emitStorageChange(
+        {
+          [CLOUD_AUTH_STORAGE_KEY]: {
+            oldValue: undefined,
+            newValue: { lastConfigDigest: "digest-1", lastConfigSyncedAt: "2026-06-28T00:01:00.000Z" }
+          }
+        },
+        "local"
+      );
+      await Promise.resolve();
+    });
+
+    const cloudButton = container.querySelector<HTMLButtonElement>(".cloud-archive-chip");
+    expect(cloudButton?.classList.contains("cloud-archive-same")).toBe(true);
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "getCloudArchiveLocalState" });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "getCloudConfigStatus" });
+  });
+
+  it("shows only remove for added users in the lightweight modal", async () => {
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
       [uiSceneStorageKeys.addFriendModalOpen]: true
@@ -903,36 +1139,26 @@ describe("FriendsApp UI scene persistence", () => {
     });
     const { container } = await renderFriendsApp("side-panel");
 
-    const trigger = container.querySelector<HTMLButtonElement>(".scope-select-trigger");
-    expect(trigger?.getAttribute("aria-label")).toBe("视奸范围：回复 / Boost");
-    expect(container.querySelector(".scope-trigger-icon.kind-reply")).toBeTruthy();
-    expect(container.querySelector(".scope-trigger-icon.kind-boost")).toBeTruthy();
-    expect(container.querySelector(".scope-trigger-icon.kind-topic")).toBeFalsy();
-    expect(container.querySelector(".scope-trigger-icon.kind-reaction")).toBeFalsy();
+    expect(container.textContent).not.toContain("已添加");
+    expect(container.textContent).not.toContain("去设置管理");
+    expect(container.querySelector(".scope-select-trigger")).toBeFalsy();
+    expect(container.querySelector(".candidate-action-remove")).toBeTruthy();
 
     await act(async () => {
-      trigger?.click();
-    });
-    await act(async () => {
-      const replyOption = Array.from(container.querySelectorAll<HTMLButtonElement>(".scope-select-menu > button")).find((button) =>
-        button.textContent?.includes("回复")
-      );
-      replyOption?.click();
+      getButton(container, "移除").click();
+      await Promise.resolve();
     });
 
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
-      type: "updateFriend",
-      username: "neo",
-      patch: { activityKinds: ["boost"] }
-    });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "removeFriend", username: "neo" });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#scope" });
   });
 
-  it("offers all and none quick actions in the activity scope menu", async () => {
+  it("keeps full activity scope quick actions out of the lightweight modal", async () => {
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
       [uiSceneStorageKeys.addFriendModalOpen]: true
     });
-    const chromeMock = setupChrome({
+    setupChrome({
       session,
       state: updateFriend(
         addFriendFromProfile(defaultAppState, {
@@ -946,30 +1172,12 @@ describe("FriendsApp UI scene persistence", () => {
     });
     const { container } = await renderFriendsApp("side-panel");
 
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>(".scope-select-trigger")?.click();
-    });
-    expect(container.querySelector(".scope-select-actions")).toBeTruthy();
-    await act(async () => {
-      getButton(container, "全不选").click();
-    });
-    await act(async () => {
-      getButton(container, "全选").click();
-    });
-
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
-      type: "updateFriend",
-      username: "neo",
-      patch: { activityKinds: [] }
-    });
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
-      type: "updateFriend",
-      username: "neo",
-      patch: { activityKinds: ["topic", "reply", "boost", "reaction"] }
-    });
+    expect(container.querySelector(".scope-select-actions")).toBeFalsy();
+    expect(Array.from(container.querySelectorAll("button")).some((button) => button.textContent?.includes("全选"))).toBe(false);
+    expect(Array.from(container.querySelectorAll("button")).some((button) => button.textContent?.includes("全不选"))).toBe(false);
   });
 
-  it("renders an empty activity scope as a compact none state", async () => {
+  it("keeps empty activity scope controls in settings instead of the lightweight modal", async () => {
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
       [uiSceneStorageKeys.addFriendModalOpen]: true
@@ -988,8 +1196,8 @@ describe("FriendsApp UI scene persistence", () => {
     });
     const { container } = await renderFriendsApp("side-panel");
 
-    expect(container.querySelector<HTMLButtonElement>(".scope-select-trigger")?.getAttribute("aria-label")).toBe("视奸范围：无");
-    expect(container.querySelector(".scope-trigger-empty")?.textContent).toBe("无");
+    expect(container.querySelector<HTMLButtonElement>(".scope-select-trigger")).toBeFalsy();
+    expect(container.querySelector(".scope-trigger-empty")).toBeFalsy();
     expect(container.querySelector(".scope-trigger-icon")).toBeFalsy();
   });
 
@@ -1128,6 +1336,30 @@ describe("FriendsApp UI scene persistence", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "identifyCurrentAccount" });
   });
 
+  it("shows account detection pending only for manual account probing", async () => {
+    const identify = createPendingIdentifyResponse();
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({ session, state: defaultAppState, identifyResponse: identify.promise });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.textContent).not.toContain("识别中");
+
+    await act(async () => {
+      getButton(container, "识别账号").click();
+    });
+
+    expect(container.textContent).toContain("识别中");
+    expect(container.querySelector(".account-badge .spin-icon")).toBeTruthy();
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "identifyCurrentAccount" });
+
+    await act(async () => {
+      identify.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).not.toContain("识别中");
+  });
+
   it("highlights a newer version in the main plugin surfaces", async () => {
     const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
     setupChrome({
@@ -1189,7 +1421,7 @@ describe("FriendsApp UI scene persistence", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage" });
   });
 
-  it("opens options from the feed background refresh entrypoint without refreshing activity", async () => {
+  it("renders feed refresh as a single current-filter action without a dredging dropdown", async () => {
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
       [uiSceneStorageKeys.tab]: "feed"
@@ -1197,15 +1429,919 @@ describe("FriendsApp UI scene persistence", () => {
     const chromeMock = setupChrome({ session });
     const { container } = await renderFriendsApp("side-panel");
 
+    expect(container.querySelector(".feed-refresh-button")).toBeTruthy();
+    expect(container.querySelector(".split-refresh-toggle")).toBeFalsy();
+    expect(container.querySelector(".refresh-menu-feed")).toBeFalsy();
+    expect(container.textContent).not.toContain("去设置");
+    expect(container.textContent).not.toContain("定时刷新只在侧栏打开时运行");
     await act(async () => {
-      container.querySelector<HTMLButtonElement>(".split-refresh-toggle")?.click();
-    });
-    await act(async () => {
-      getButton(container, "去设置").click();
+      getButton(container, "刷新动态").click();
+      await Promise.resolve();
     });
 
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage" });
-    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "refreshFriendActivity", scope: { kind: "all" } });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#lao-finds" });
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all" } }]);
+  });
+
+  it("shows a side-panel header automatic dredging capsule in the operation row", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({ session, state: timedActivityState({ timedActivityRefreshEnabled: false }) });
+    const { container } = await renderFriendsApp("side-panel");
+
+    const capsule = container.querySelector(".timed-refresh-control");
+    const accountBadge = container.querySelector(".account-badge");
+    const cloudBadge = container.querySelector(".cloud-archive-chip");
+    expect(capsule).toBeTruthy();
+    expect(accountBadge).toBeTruthy();
+    expect(cloudBadge).toBeTruthy();
+    expect(container.querySelector(".header-status .timed-refresh-control")).toBe(capsule);
+    expect(container.querySelector(".header-account-row .timed-refresh-control")).toBeFalsy();
+    expect(container.querySelector(".header-operation-row .timed-refresh-control")).toBe(capsule);
+    expect(container.querySelector(".tab-bar + .timed-refresh-control")).toBeFalsy();
+    expect(container.textContent).not.toContain("佬料打捞");
+    expect(container.textContent).toContain("未开启");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("开启自动捞料");
+    expect(container.textContent).toContain("手动打捞");
+    expect(container.textContent).toContain("配置打捞规则");
+    expect(container.querySelector(".timed-refresh-control .lucide-telescope")).toBeTruthy();
+    expect(container.querySelector(".timed-refresh-main .lucide-telescope")).toBeTruthy();
+    expect(container.querySelector(".timed-refresh-menu .refresh-menu-check")).toBeTruthy();
+    expect(container.querySelector(".timed-refresh-menu .refresh-menu-option.is-selected")).toBeFalsy();
+    expect(container.querySelector(".timed-refresh-menu .refresh-menu-check .lucide-check")).toBeFalsy();
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { timedActivityRefreshEnabled: true }
+    });
+
+    await act(async () => {
+      getButton(container, "开启自动捞料").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { timedActivityRefreshEnabled: true }
+    });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: expect.objectContaining({ timedActivityRefreshScopeMode: expect.anything() })
+    });
+  });
+
+  it("shows the timed dredging enabled option as checked in the dropdown", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    setupChrome({ session, state: timedActivityState({ timedActivityRefreshEnabled: true }) });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+
+    const selected = container.querySelector<HTMLButtonElement>(".timed-refresh-menu .refresh-menu-option.is-selected");
+    expect(selected?.textContent).toContain("关闭自动捞料");
+    expect(selected?.getAttribute("aria-pressed")).toBe("true");
+    expect(selected?.querySelector(".refresh-menu-check .lucide-check")).toBeTruthy();
+  });
+
+  it("does not render the dredging capsule inside the in-page menu surface", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    setupChrome({ session, state: timedActivityState({ timedActivityRefreshEnabled: true }) });
+    const { container } = await renderFriendsApp("in-page");
+
+    expect(container.querySelector(".timed-refresh-control")).toBeFalsy();
+  });
+
+  it("resumes paused timed refresh from the global side-panel control", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        pausedReason: "challenge",
+        pausedMessage: "遇到浏览器验证页面，已停止请求。",
+        pendingDue: false,
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    });
+    const chromeMock = setupChrome({ session, state: timedActivityState({ timedActivityRefreshEnabled: true }) });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.textContent).toContain("已暂停");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "开启自动捞料").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { timedActivityRefreshEnabled: true }
+    });
+  });
+
+  it("opens timed refresh settings from the side-panel timed control", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({ session });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "配置打捞规则").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#lao-finds" });
+  });
+
+  it("shows concise no-rule state in the header dredging capsule", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        noTargetMessage: "没有启用规则",
+        nextDueAt: "2026-06-28T02:00:00.000Z",
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    });
+    setupChrome({
+      session,
+      state: {
+        ...timedActivityState({ timedActivityRefreshEnabled: true }),
+        dredgeRules: []
+      }
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("无规则");
+    expect(container.querySelector(".timed-refresh-copy strong")).toBeFalsy();
+    expect(container.querySelector(".timed-refresh-copy span")).toBeFalsy();
+  });
+
+  it("clears stale no-rule copy when timed dredging is enabled after rules become available", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        noTargetAt: "2026-06-27T23:00:00.000Z",
+        noTargetMessage: "没有启用规则",
+        nextDueAt: "2026-06-28T02:00:00.000Z",
+        updatedAt: "2026-06-27T23:00:00.000Z"
+      }
+    });
+    setupChrome({
+      session,
+      state: timedActivityState({ timedActivityRefreshEnabled: false })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("未开启");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "开启自动捞料").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("下次打捞 02:00:00");
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession.noTargetMessage).toBeUndefined();
+    expect(timedSession.noTargetAt).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("shows current activity progress in the header dredging capsule", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:01.000Z"));
+    const runningActivity: SiteDataTaskProgress = {
+      taskId: "activity-live",
+      taskType: "activity",
+      scope: { kind: "all" },
+      status: "running",
+      completed: 1,
+      total: 4,
+      currentLabel: "话题 @neo",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      source: "existing_tab"
+    };
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    setupChrome({ session, progress: runningActivity, state: timedActivityState({ timedActivityRefreshEnabled: true }) });
+    const { container } = await renderFriendsApp("side-panel");
+
+    const capsule = container.querySelector(".timed-refresh-control");
+    expect(capsule?.querySelector(".timed-refresh-copy")?.textContent).toBe("话题 @neo · 1/4");
+    expect(capsule?.querySelector(".spin-icon")).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("updates the header dredging countdown while the side panel stays open", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        enabledAt: "2026-06-28T00:00:00.000Z",
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    });
+    setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshIntervalMinutes: 1
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("下次打捞 00:01:00");
+    expect(container.querySelector(".timed-refresh-control .spin-icon")).toBeFalsy();
+    expect(container.querySelector(".timed-refresh-control .timed-refresh-pulse-icon")).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("下次打捞 00:00:59");
+    vi.useRealTimers();
+  });
+
+  it("runs manual automatic dredging with timed rule scope instead of current feed filters", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds",
+      [uiSceneStorageKeys.feedKindFilter]: "boost",
+      [uiSceneStorageKeys.feedUserFilter]: "neo"
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      getButton(container, "手动打捞").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([
+      { type: "refreshFriendActivity", scope: { kind: "topic", usernames: ["neo"] } },
+      { type: "refreshFriendActivity", scope: { kind: "reaction", usernames: ["neo"] } }
+    ]);
+    expect(activityRefreshMessages(chromeMock)).not.toEqual([{ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neo"] } }]);
+    expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({
+      lastScopeMode: "rules",
+      lastFinishedAt: "2026-06-28T00:00:00.000Z"
+    });
+    vi.useRealTimers();
+  });
+
+  it("registers timed activity refresh surfaces only from the browser side panel", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const sidePanelSession = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    await renderFriendsAppWithChrome({ session: sidePanelSession, surface: "side-panel", pageStatus: missingPageStatus() });
+
+    expect(Object.keys((await loadTimedActivityRefreshSessionState(sidePanelSession)).visibleSurfaces)).toHaveLength(1);
+
+    const inPageSession = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    setupChrome({ session: inPageSession });
+    await renderFriendsApp("in-page");
+
+    expect(Object.keys((await loadTimedActivityRefreshSessionState(inPageSession)).visibleSurfaces)).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it("runs due timed activity refresh in all mode through the existing activity command", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "all",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all" } }]);
+    expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({
+      lastScopeMode: "all",
+      lastFinishedAt: "2026-06-28T00:00:00.000Z",
+      nextDueAt: "2026-06-28T02:00:00.000Z",
+      pendingDue: false
+    });
+    vi.useRealTimers();
+  });
+
+  it("runs due timed activity refresh in rule mode as the derived existing scope sequence", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([
+      { type: "refreshFriendActivity", scope: { kind: "topic", usernames: ["neo"] } },
+      { type: "refreshFriendActivity", scope: { kind: "reaction", usernames: ["neo"] } }
+    ]);
+    const commands = activityRefreshCommands(chromeMock);
+    expect(commands[0]).toMatchObject({ trigger: "timed", timedRunId: expect.stringMatching(/^timed-activity:/) });
+    expect(commands[1]?.timedRunId).toBe(commands[0]?.timedRunId);
+    expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({
+      lastScopeMode: "rules",
+      lastFinishedAt: "2026-06-28T00:00:00.000Z"
+    });
+    vi.useRealTimers();
+  });
+
+  it("records a no-target timed refresh without requesting activity", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({
+      session,
+      state: {
+        ...timedActivityState({
+          timedActivityRefreshEnabled: true,
+          timedActivityRefreshScopeMode: "rules",
+          timedActivityRefreshIntervalMinutes: 120
+        }),
+        dredgeRules: []
+      }
+    });
+    await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toHaveLength(0);
+    expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({
+      lastScopeMode: "rules",
+      noTargetAt: "2026-06-28T00:00:00.000Z",
+      noTargetMessage: "没有启用规则",
+      nextDueAt: "2026-06-28T02:00:00.000Z",
+      pendingDue: false
+    });
+    expect((await loadTimedActivityRefreshSessionState(session)).pausedReason).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("defers a due timed activity refresh while busy and retries it once after progress finishes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const runningProfiles: SiteDataTaskProgress = {
+      taskId: "profiles-live",
+      taskType: "profiles",
+      usernames: ["neo"],
+      status: "running",
+      completed: 0,
+      total: 1,
+      currentLabel: "@neo",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      updatedAt: "2026-06-28T00:00:00.000Z"
+    };
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({
+      session,
+      progress: runningProfiles,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "all",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toHaveLength(0);
+    expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({ pendingDue: true });
+
+    await act(async () => {
+      chromeMock.emitStorageChange(
+        {
+          [SITE_DATA_PROGRESS_STORAGE_KEY]: {
+            oldValue: runningProfiles,
+            newValue: {
+              ...runningProfiles,
+              status: "success",
+              completed: 1,
+              updatedAt: "2026-06-28T00:00:05.000Z",
+              finishedAt: "2026-06-28T00:00:05.000Z"
+            } satisfies SiteDataTaskProgress
+          }
+        },
+        "session"
+      );
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all" } }]);
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession.pendingDue).toBe(false);
+    expect(timedSession.lastFinishedAt).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("keeps timed activity refresh pending when service worker reports busy through lastSync", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({
+      session,
+      refreshActivityResponses: [
+        (state) => ({
+          ok: true,
+          data: {
+            ...state,
+            lastSync: {
+              ok: false,
+              source: "manual",
+              reason: "unavailable",
+              message: "已有刷新正在进行。",
+              refreshedAt: "2026-06-28T00:00:00.000Z"
+            }
+          }
+        })
+      ],
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "all",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all" } }]);
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession).toMatchObject({
+      pendingDue: true
+    });
+    expect(timedSession.pausedReason).toBeUndefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14_999);
+      await Promise.resolve();
+    });
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all" } }]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+    });
+    expect(activityRefreshMessages(chromeMock)).toEqual([
+      { type: "refreshFriendActivity", scope: { kind: "all" } },
+      { type: "refreshFriendActivity", scope: { kind: "all" } }
+    ]);
+    vi.useRealTimers();
+  });
+
+  it("pauses timed activity refresh and skips remaining derived scopes on challenge", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({
+      session,
+      refreshActivityResponses: [
+        (state) => ({ ok: true, data: state }),
+        (state) => ({
+          ok: true,
+          data: {
+            ...state,
+            lastSync: {
+              ok: false,
+              source: "direct_fetch",
+              reason: "challenge",
+              message: "遇到浏览器验证页面，已停止请求。",
+              refreshedAt: "2026-06-28T00:00:00.000Z"
+            }
+          }
+        })
+      ],
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([
+      { type: "refreshFriendActivity", scope: { kind: "topic", usernames: ["neo"] } },
+      { type: "refreshFriendActivity", scope: { kind: "reaction", usernames: ["neo"] } }
+    ]);
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession).toMatchObject({
+      pausedReason: "challenge",
+      pausedMessage: "遇到浏览器验证页面，已停止请求。",
+      pendingDue: false
+    });
+    expect(timedSession.lastFinishedAt).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("preserves direct refresh failure reasons in timed activity pause state", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    setupChrome({
+      session,
+      refreshActivityResponses: [
+        () => ({
+          ok: false,
+          reason: "rate_limited",
+          error: "429 Too Many Requests"
+        })
+      ],
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+    });
+
+    expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({
+      pausedReason: "rate_limited",
+      pausedMessage: "429 Too Many Requests"
+    });
+    vi.useRealTimers();
+  });
+
+  it("does not duplicate a timed activity scope sequence while one logical run is in flight", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    let releaseFirstRefresh: (() => void) | undefined;
+    const firstRefresh = new Promise<BackgroundResponse<AppState>>((resolve) => {
+      releaseFirstRefresh = () => resolve({ ok: true, data: timedActivityState({ timedActivityRefreshEnabled: true }) });
+    });
+    const chromeMock = setupChrome({
+      session,
+      refreshActivityResponses: [
+        () => firstRefresh,
+        (state) => ({ ok: true, data: state })
+      ],
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toHaveLength(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(240 * 60_000);
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toHaveLength(1);
+
+    await act(async () => {
+      releaseFirstRefresh?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([
+      { type: "refreshFriendActivity", scope: { kind: "topic", usernames: ["neo"] } },
+      { type: "refreshFriendActivity", scope: { kind: "reaction", usernames: ["neo"] } }
+    ]);
+    vi.useRealTimers();
+  });
+
+  it("invalidates an in-flight timed dredge when automatic dredging is disabled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    let releaseFirstRefresh: (() => void) | undefined;
+    const firstRefresh = new Promise<BackgroundResponse<AppState>>((resolve) => {
+      releaseFirstRefresh = () => resolve({ ok: true, data: timedActivityState({ timedActivityRefreshEnabled: true }) });
+    });
+    const chromeMock = setupChrome({
+      session,
+      refreshActivityResponses: [
+        () => firstRefresh,
+        (state) => ({ ok: true, data: state })
+      ],
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toHaveLength(1);
+    expect((await loadTimedActivityRefreshSessionState(session)).activeRunId).toBeTruthy();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "关闭自动捞料").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({
+      pendingDue: false
+    });
+    const disabledSession = await loadTimedActivityRefreshSessionState(session);
+    expect(disabledSession.activeRunId).toBeUndefined();
+    expect(disabledSession.controllerSurfaceId).toBeUndefined();
+    expect(disabledSession.controllerClaimedAt).toBeUndefined();
+    expect(disabledSession.controllerHeartbeatAt).toBeUndefined();
+
+    await act(async () => {
+      releaseFirstRefresh?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toHaveLength(1);
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession.lastFinishedAt).toBeUndefined();
+    expect(timedSession.pendingDue).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("does not start a fired timed dredge timer after automatic dredging is disabled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    let releaseControllerClaim: (() => void) | undefined;
+    const controllerClaim = new Promise<void>((resolve) => {
+      releaseControllerClaim = resolve;
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      }),
+      beforeTimedControllerClaim: () => controllerClaim
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "关闭自动捞料").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      releaseControllerClaim?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toHaveLength(0);
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession.activeRunId).toBeUndefined();
+    expect(timedSession.controllerSurfaceId).toBeUndefined();
+    expect(timedSession.pendingDue).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it("releases refresh buttons after disabling timed dredge while its command promise is still pending", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    let releaseFirstRefresh: (() => void) | undefined;
+    const firstRefresh = new Promise<BackgroundResponse<AppState>>((resolve) => {
+      releaseFirstRefresh = () => resolve({ ok: true, data: timedActivityState({ timedActivityRefreshEnabled: true }) });
+    });
+    setupChrome({
+      session,
+      refreshActivityResponses: [() => firstRefresh],
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "关闭自动捞料").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getButton(container, "刷新状态").disabled).toBe(false);
+    await act(async () => {
+      getButton(container, "佬友圈").click();
+      await Promise.resolve();
+    });
+    expect(getButton(container, "刷新动态").disabled).toBe(false);
+
+    await act(async () => {
+      releaseFirstRefresh?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+  });
+
+  it("suppresses a pending timed dredge after manual feed refresh without recording a full dredge finish", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "feed",
+      [uiSceneStorageKeys.feedKindFilter]: "boost",
+      [uiSceneStorageKeys.feedUserFilter]: "neo",
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        enabledAt: "2026-06-27T22:00:00.000Z",
+        nextDueAt: "2026-06-28T00:00:00.000Z",
+        pendingDue: false,
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: {
+        ...timedActivityState({
+          timedActivityRefreshEnabled: true,
+          timedActivityRefreshScopeMode: "all",
+          timedActivityRefreshIntervalMinutes: 120
+        }),
+        friends: {
+          neo: {
+            username: "neo",
+            note: "",
+            groups: [],
+            pinned: false,
+            activityKinds: ["topic", "reply", "boost", "reaction"],
+            upgradedAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:00.000Z"
+          }
+        }
+      }
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      getButton(container, "刷新动态").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neo"] } }]);
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession).toMatchObject({
+      pendingDue: false,
+      nextDueAt: "2026-06-28T02:00:00.000Z"
+    });
+    expect(timedSession.lastFinishedAt).toBeUndefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(119 * 60_000);
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neo"] } }]);
+    vi.useRealTimers();
+  });
+
+  it("suppresses a pending timed dredge after jumping from a friend row to filtered feed", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        enabledAt: "2026-06-27T22:00:00.000Z",
+        nextDueAt: "2026-06-28T00:00:00.000Z",
+        pendingDue: false,
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: true,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".friend-arrow-button")?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all", usernames: ["neo"] } }]);
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession).toMatchObject({
+      pendingDue: false,
+      nextDueAt: "2026-06-28T02:00:00.000Z"
+    });
+    expect(timedSession.lastFinishedAt).toBeUndefined();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all", usernames: ["neo"] } }]);
+    vi.useRealTimers();
   });
 });
 
@@ -1243,6 +2379,7 @@ function setInputValue(input: HTMLInputElement, value: string) {
 function setupChrome({
   pageStatus = { status: "missing", connectedCount: 0, staleCount: 0, heartbeats: [], updatedAt: new Date(0).toISOString() },
   progress = null,
+  refreshActivityResponses = [],
   session,
   state = addFriendFromProfile(defaultAppState, {
     username: "neo",
@@ -1250,6 +2387,7 @@ function setupChrome({
     refreshedAt: "2026-06-28T00:00:00.000Z"
   }),
   identifyFails = false,
+  identifyResponse,
   cloudState = unboundCloudState(),
   updateCheck = {
     installedVersion: "1.0.1",
@@ -1258,7 +2396,8 @@ function setupChrome({
     latestVersion: "1.0.1",
     checkedAt: "2026-06-28T00:00:00.000Z",
     source: "github_release" as const
-  }
+  },
+  beforeTimedControllerClaim
 }: {
   pageStatus?: {
     status: "connected" | "challenge" | "stale" | "missing";
@@ -1268,10 +2407,14 @@ function setupChrome({
     updatedAt: string;
   };
   progress?: SiteDataTaskProgress | null;
+  refreshActivityResponses?: Array<
+    (state: AppState, scope?: ActivityRefreshScope) => BackgroundResponse<AppState> | Promise<BackgroundResponse<AppState>>
+  >;
   session: ReturnType<typeof createMockStorage>;
-  state?: typeof defaultAppState;
+  state?: AppState;
   identifyFails?: boolean;
-  cloudState?: CloudConfigStatusResult;
+  identifyResponse?: Promise<unknown>;
+  cloudState?: CloudArchiveLocalStateResult;
   updateCheck?: {
     installedVersion: string;
     latestReleaseUrl: string;
@@ -1281,8 +2424,20 @@ function setupChrome({
     error?: string;
     source?: "github_release";
   };
+  beforeTimedControllerClaim?: () => Promise<void>;
 }) {
   const storageListeners: Array<(changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void> = [];
+  const activityResponseQueue = [...refreshActivityResponses];
+  let currentCloudState = cloudState;
+  if (beforeTimedControllerClaim) {
+    const setSession = session.set.bind(session);
+    session.set = async (value: Record<string, unknown>) => {
+      if (TIMED_ACTIVITY_CONTROLLER_STORAGE_KEY in value) {
+        await beforeTimedControllerClaim();
+      }
+      await setSession(value);
+    };
+  }
   const sendMessage = vi.fn(async (message) => {
     if (message.type === "getState") return { ok: true, data: state };
     if (message.type === "getPageScriptStatus") {
@@ -1291,8 +2446,9 @@ function setupChrome({
     if (message.type === "getSiteDataProgress") return { ok: true, data: progress };
     if (message.type === "getUpdateCheck") return { ok: true, data: updateCheck };
     if (message.type === "checkForUpdates") return { ok: true, data: updateCheck };
-    if (message.type === "getCloudConfigStatus") return { ok: true, data: cloudState };
+    if (message.type === "getCloudArchiveLocalState") return { ok: true, data: currentCloudState };
     if (message.type === "identifyCurrentAccount") {
+      if (identifyResponse) return identifyResponse;
       if (identifyFails) return { ok: false, error: "需要打开 linux.do 后识别。" };
       return {
         ok: true,
@@ -1304,9 +2460,62 @@ function setupChrome({
     }
     if (message.type === "openSidePanel") return { ok: true, data: { message: "已打开插件侧栏。" } };
     if (message.type === "openOptionsPage") return { ok: true, data: { message: "已打开配置页。" } };
+    if (message.type === "removeFriend") return { ok: true, data: removeFriend(state, message.username) };
     if (message.type === "updateFriend") return { ok: true, data: updateFriend(state, message.username, message.patch) };
+    if (message.type === "upsertDredgeRule") return { ok: true, data: state };
+    if (message.type === "removeDredgeRule") return { ok: true, data: state };
+    if (message.type === "markLaoFindsItemRead") return { ok: true, data: state };
+    if (message.type === "archiveLaoFindsItem") return { ok: true, data: state };
+    if (message.type === "updateSettings") {
+      const nextState = { ...state, settings: { ...state.settings, ...message.settings } };
+      if (typeof message.settings?.timedActivityRefreshEnabled === "boolean") {
+        const oldValue = session.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY];
+        const oldControllerValue = session.dump()[TIMED_ACTIVITY_CONTROLLER_STORAGE_KEY];
+        const current = typeof oldValue === "object" && oldValue != null && !Array.isArray(oldValue) ? oldValue : {};
+        const updatedAt = new Date().toISOString();
+        const nextValue =
+          message.settings.timedActivityRefreshEnabled === true
+            ? omitUndefined({
+                ...current,
+                activeRunId: undefined,
+                enabledAt: updatedAt,
+                lastFailureAt: undefined,
+                nextDueAt: new Date(Date.now() + nextState.settings.timedActivityRefreshIntervalMinutes * 60_000).toISOString(),
+                noTargetAt: undefined,
+                noTargetMessage: undefined,
+                pausedMessage: undefined,
+                pausedReason: undefined,
+                pendingDue: false,
+                updatedAt
+              })
+            : omitUndefined({
+                ...current,
+                activeRunId: undefined,
+                controllerClaimedAt: undefined,
+                controllerHeartbeatAt: undefined,
+                controllerSurfaceId: undefined,
+                pendingDue: false,
+                updatedAt
+              });
+        await session.set({ [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: nextValue });
+        if (message.settings.timedActivityRefreshEnabled === false) {
+          await session.remove(TIMED_ACTIVITY_CONTROLLER_STORAGE_KEY);
+        }
+        for (const listener of storageListeners) {
+          listener({ [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: { oldValue, newValue: nextValue } }, "session");
+          if (message.settings.timedActivityRefreshEnabled === false && oldControllerValue !== undefined) {
+            listener({ [TIMED_ACTIVITY_CONTROLLER_STORAGE_KEY]: { oldValue: oldControllerValue, newValue: undefined } }, "session");
+          }
+        }
+      }
+      state = nextState;
+      return { ok: true, data: nextState };
+    }
     if (message.type === "refreshFriendProfiles") return { ok: true, data: state };
-    if (message.type === "refreshFriendActivity") return { ok: true, data: state };
+    if (message.type === "refreshFriendActivity") {
+      const responder = activityResponseQueue.shift();
+      return responder ? responder(state, message.scope) : { ok: true, data: state };
+    }
     return { ok: true, data: state };
   });
   vi.stubGlobal("chrome", {
@@ -1328,10 +2537,26 @@ function setupChrome({
   });
   return {
     sendMessage,
+    setCloudState(nextState: CloudArchiveLocalStateResult) {
+      currentCloudState = nextState;
+    },
     emitStorageChange(changes: Record<string, chrome.storage.StorageChange>, areaName = "session") {
       for (const listener of storageListeners) listener(changes, areaName);
     }
   };
+}
+
+function activityRefreshMessages(chromeMock: ReturnType<typeof setupChrome>) {
+  return activityRefreshCommands(chromeMock).map(({ scope }) => ({ type: "refreshFriendActivity" as const, scope }));
+}
+
+function activityRefreshCommands(chromeMock: ReturnType<typeof setupChrome>) {
+  return chromeMock.sendMessage.mock.calls
+    .map(([message]) => message)
+    .filter(
+      (message): message is { type: "refreshFriendActivity"; scope?: ActivityRefreshScope; trigger?: string; timedRunId?: string } =>
+        message.type === "refreshFriendActivity"
+    );
 }
 
 async function enableAutoRefreshForTest({
@@ -1413,15 +2638,61 @@ function activityFeedState(url = "/t/topic/1"): AppState {
   };
 }
 
-function unboundCloudState(): CloudConfigStatusResult {
+function timedActivityState(settings: Partial<AppState["settings"]> = {}): AppState {
   return {
-    binding: { bound: false },
-    status: { state: "unchecked" },
-    message: "尚未绑定 linuxdo-cloud-save。"
+    ...defaultAppState,
+    friends: {
+      neo: {
+        username: "neo",
+        note: "",
+        groups: [],
+        pinned: false,
+        activityKinds: ["topic", "reaction"],
+        upgradedAt: "2026-06-28T00:00:00.000Z",
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    },
+    dredgeRules: [
+      {
+        id: "rule-neo",
+        name: "Neo",
+        enabled: true,
+        usernames: ["neo"],
+        kinds: ["topic", "reply", "reaction"],
+        keywords: [],
+        createdAt: "2026-06-28T00:00:00.000Z",
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    ],
+    settings: {
+      ...defaultAppState.settings,
+      ...settings
+    }
   };
 }
 
-function boundCloudState(): CloudConfigStatusResult {
+function omitUndefined<T extends Record<string, unknown>>(value: T): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function missingPageStatus() {
+  return {
+    status: "missing" as const,
+    connectedCount: 0,
+    staleCount: 0,
+    heartbeats: [] as [],
+    updatedAt: "2026-06-28T00:00:00.000Z"
+  };
+}
+
+function unboundCloudState(): CloudArchiveLocalStateResult {
+  return {
+    binding: { bound: false },
+    archiveState: "unbound"
+  };
+}
+
+function sameCloudArchiveState(): CloudArchiveLocalStateResult {
   return {
     binding: {
       bound: true,
@@ -1429,9 +2700,42 @@ function boundCloudState(): CloudConfigStatusResult {
       linuxDoId: "42",
       tokenType: "Bearer",
       tokenKind: "jwt",
-      boundAt: "2026-06-28T00:00:00.000Z"
+      boundAt: "2026-06-28T00:00:00.000Z",
+      lastConfigDigest: "digest-1",
+      lastConfigSyncedAt: "2026-06-28T00:01:00.000Z"
     },
-    status: { state: "remote_config", checkedAt: "2026-06-28T00:01:00.000Z", friendCount: 1 },
-    message: "云端配置：1 位佬朋友。"
+    archiveState: "same",
+    syncedAt: "2026-06-28T00:01:00.000Z"
   };
+}
+
+function differentCloudArchiveState(): CloudArchiveLocalStateResult {
+  return {
+    binding: {
+      bound: true,
+      app: "linuxdo-friends",
+      linuxDoId: "42",
+      tokenType: "Bearer",
+      tokenKind: "jwt",
+      boundAt: "2026-06-28T00:00:00.000Z",
+      lastConfigDigest: "digest-1",
+      lastConfigSyncedAt: "2026-06-28T00:01:00.000Z"
+    },
+    archiveState: "different"
+  };
+}
+
+function createPendingIdentifyResponse() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise((done) => {
+    resolve = () =>
+      done({
+        ok: true,
+        data: {
+          ...defaultAppState,
+          currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" }
+        }
+      });
+  });
+  return { promise, resolve };
 }

@@ -3,13 +3,18 @@ import type { Setter } from "jotai";
 import type {
   ActivityRefreshScope,
   AppState,
+  BackgroundCommand,
+  BackgroundResponse,
+  CloudArchiveLocalStateResult,
   CloudConfigStatusResult,
   ConfigExportFile,
   FollowedUserInput,
   FriendUser,
   FriendProfileSummary,
+  DredgeRule,
   PageRepairResult,
   PageScriptStatusSnapshot,
+  RefreshSettings,
   SiteDataTaskProgress,
   UpdateCheckState
 } from "../shared/types";
@@ -32,6 +37,7 @@ export const siteDataProgressAtom = atom<SiteDataTaskProgress | null>(null);
 export const pageScriptStatusAtom = atom<PageScriptStatusSnapshot>(defaultPageScriptStatus());
 export const updateCheckAtom = atom<UpdateCheckState>(defaultUpdateCheckState(installedVersion()));
 export const cloudConfigViewAtom = atom<CloudConfigStatusResult | null>(null);
+export const cloudArchiveLocalStateAtom = atom<CloudArchiveLocalStateResult | null>(null);
 export const clearStatusMessageAtom = atom(null, (_get, set) => {
   set(statusMessageAtom, null);
 });
@@ -148,6 +154,13 @@ export const loadCloudConfigViewAtom = atom(null, async (_get, set) => {
   }
 });
 
+export const loadCloudArchiveLocalStateAtom = atom(null, async (_get, set) => {
+  const response = await sendCommand<CloudArchiveLocalStateResult>({ type: "getCloudArchiveLocalState" });
+  if (response.ok) {
+    set(cloudArchiveLocalStateAtom, response.data);
+  }
+});
+
 export const observeSiteDataProgressAtom = atom(null, (_get, set) => {
   siteDataProgressSubscribers.add(set);
   if (typeof chrome !== "undefined" && chrome.storage?.onChanged && !siteDataProgressStorageListenerRegistered) {
@@ -217,20 +230,17 @@ export const observeUpdateCheckAtom = atom(null, (_get, set) => {
 });
 
 export const seedFollowedAtom = atom(null, async (_get, set, username: string) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "seedFollowedUser", user: { username } });
+  const response = await sendLoadingStateCommand(set, { type: "seedFollowedUser", user: { username } });
   applyStateResponse(set, response, "已添加到关注。");
 });
 
 export const addFriendByProfileAtom = atom(null, async (_get, set, username: string) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "addFriendByProfile", username });
+  const response = await sendLoadingStateCommand(set, { type: "addFriendByProfile", username });
   applyStateResponse(set, response);
 });
 
 export const addFriendFromKnownUserAtom = atom(null, async (_get, set, user: FollowedUserInput, profile?: FriendProfileSummary) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "addFriendFromKnownUser", user, profile });
+  const response = await sendLoadingStateCommand(set, { type: "addFriendFromKnownUser", user, profile });
   const username = user.username.trim().replace(/^@/, "").toLowerCase();
   applyStateResponse(set, response, response.ok ? `已添加 @${username} 为佬朋友。` : undefined);
 });
@@ -241,50 +251,84 @@ export const lookupFriendProfileAtom = atom(null, async (_get, _set, username: s
 });
 
 export const removeFriendAtom = atom(null, async (_get, set, username: string) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "removeFriend", username });
+  const response = await sendLoadingStateCommand(set, { type: "removeFriend", username });
   applyStateResponse(set, response, response.ok ? "已移除佬朋友。" : undefined);
 });
 
 export const updateFriendAtom = atom(null, async (_get, set, username: string, patch: Partial<Pick<FriendUser, "note" | "groups" | "pinned" | "activityKinds">>) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "updateFriend", username, patch });
+  const response = await sendLoadingStateCommand(set, { type: "updateFriend", username, patch });
   applyStateResponse(set, response, response.ok ? null : undefined);
 });
 
+export const upsertDredgeRuleAtom = atom(null, async (_get, set, rule: Partial<DredgeRule> & { id?: string }) => {
+  const response = await sendCommand<AppState>({ type: "upsertDredgeRule", rule });
+  applyStateResponse(set, response, response.ok ? null : undefined);
+});
+
+export const removeDredgeRuleAtom = atom(null, async (_get, set, id: string) => {
+  const response = await sendCommand<AppState>({ type: "removeDredgeRule", id });
+  applyStateResponse(set, response, response.ok ? null : undefined);
+});
+
+export const resetLaoFindsStartedAtAtom = atom(null, async (_get, set) => {
+  const response = await sendCommand<AppState>({ type: "resetLaoFindsStartedAt" });
+  applyStateResponse(set, response, response.ok ? null : undefined);
+});
+
+export const markLaoFindsItemReadAtom = atom(null, async (_get, set, id: string, read: boolean) => {
+  const response = await sendCommand<AppState>({ type: "markLaoFindsItemRead", id, read });
+  applyStateResponse(set, response, response.ok ? null : undefined);
+});
+
+export const archiveLaoFindsItemAtom = atom(null, async (_get, set, id: string, archived: boolean) => {
+  const response = await sendCommand<AppState>({ type: "archiveLaoFindsItem", id, archived });
+  applyStateResponse(set, response, response.ok ? null : undefined);
+});
+
+export const updateSettingsAtom = atom(null, async (_get, set, settings: Partial<RefreshSettings>) => {
+  const response = await sendLoadingStateCommand(set, { type: "updateSettings", settings });
+  applyStateResponse(set, response, response.ok ? null : undefined);
+  return response;
+});
+
 export const refreshFriendProfilesAtom = atom(null, async (_get, set) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "refreshFriendProfiles" });
+  const response = await sendLoadingStateCommand(set, { type: "refreshFriendProfiles" });
   applyStateResponse(set, response);
 });
 
 export const refreshFriendActivityAtom = atom(null, async (_get, set, scope?: ActivityRefreshScope) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "refreshFriendActivity", scope });
+  const response = await sendLoadingStateCommand(set, { type: "refreshFriendActivity", scope });
   applyStateResponse(set, response);
+  return response;
+});
+
+export const refreshFriendActivityForTimedRunAtom = atom(null, async (_get, set, scope: ActivityRefreshScope, timedRunId: string) => {
+  const response = await sendCommand<AppState>({ type: "refreshFriendActivity", scope, trigger: "timed", timedRunId });
+  if (response.ok) {
+    set(appStateAtom, response.data);
+  }
+  return response;
 });
 
 export const syncFollowsAtom = atom(null, async (_get, set) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "syncFollowedUsers" });
+  const response = await sendLoadingStateCommand(set, { type: "syncFollowedUsers" });
   applyStateResponse(set, response);
 });
 
 export const identifyCurrentAccountAtom = atom(null, async (_get, set, quiet?: boolean) => {
-  if (!quiet) set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "identifyCurrentAccount" });
+  const response = quiet
+    ? await sendCommand<AppState>({ type: "identifyCurrentAccount" })
+    : await sendLoadingStateCommand(set, { type: "identifyCurrentAccount" });
   applyStateResponse(set, response, response.ok && quiet ? null : undefined);
 });
 
 export const clearCacheAtom = atom(null, async (_get, set) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "clearCache" });
+  const response = await sendLoadingStateCommand(set, { type: "clearCache" });
   applyStateResponse(set, response);
 });
 
 export const resetExtensionAtom = atom(null, async (_get, set) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "resetExtension" });
+  const response = await sendLoadingStateCommand(set, { type: "resetExtension" });
   applyStateResponse(set, response);
 });
 
@@ -295,8 +339,7 @@ export const exportConfigAtom = atom(null, async (_get, set) => {
 });
 
 export const importConfigAtom = atom(null, async (_get, set, json: string) => {
-  set(loadingAtom, true);
-  const response = await sendCommand<AppState>({ type: "importConfig", json });
+  const response = await sendLoadingStateCommand(set, { type: "importConfig", json });
   applyStateResponse(set, response);
   return response;
 });
@@ -363,6 +406,17 @@ async function refreshPageScriptStatus(set: Setter) {
   }
 }
 
+async function sendLoadingStateCommand(set: Setter, command: BackgroundCommand): Promise<BackgroundResponse<AppState>> {
+  set(loadingAtom, true);
+  try {
+    return await sendCommand<AppState>(command);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "扩展后台没有响应。" };
+  } finally {
+    set(loadingAtom, false);
+  }
+}
+
 function applyStateResponse(
   set: Setter,
   response: { ok: true; data: AppState } | { ok: false; error: string },
@@ -420,11 +474,19 @@ function mergeObservedAppState(stored: Partial<AppState>): AppState {
     activityRefreshLedger: stored.activityRefreshLedger ?? {},
     activityWatermarks: stored.activityWatermarks ?? {},
     activityFeedWaterlineAt: stored.activityFeedWaterlineAt,
+    dredgeRules: stored.dredgeRules ?? [],
+    laoFindsStartedAt: normalizeOptionalTimestamp(stored.laoFindsStartedAt),
+    laoFindsItems: stored.laoFindsItems ?? {},
     avatarCache: stored.avatarCache ?? {},
     settings: mergeObservedSettings(stored.settings),
     currentAccount: stored.currentAccount,
     lastSync: stored.lastSync
   };
+}
+
+function normalizeOptionalTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return Number.isNaN(Date.parse(value)) ? undefined : value;
 }
 
 function mergeObservedSettings(settings: Partial<AppState["settings"]> | undefined): AppState["settings"] {

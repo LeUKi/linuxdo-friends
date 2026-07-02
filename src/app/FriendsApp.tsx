@@ -1,21 +1,17 @@
-import React, { type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import {
   Check,
   ChevronDown,
   Cloud,
   ExternalLink,
-  List,
   LoaderCircle,
-  MessageCircleReply,
   PanelRightOpen,
   RefreshCw,
-  Rocket,
-  Search,
   Settings,
-  Smile,
   Sparkles,
-  Users,
+  Telescope,
+  Timer,
   X
 } from "lucide-react";
 import {
@@ -34,21 +30,33 @@ import {
   type FriendStatusAutoRefreshIntervalMinutes,
   type FriendStatusAutoRefreshSession
 } from "../storage/autoRefreshSessionStorage";
+import { TIMED_ACTIVITY_HEARTBEAT_MS, type TimedActivityRefreshSession } from "../storage/timedActivityRefreshSessionStorage";
+import {
+  claimTimedActivityRefreshControllerAtom,
+  loadTimedActivityRefreshSessionAtom,
+  observeTimedActivityRefreshSessionAtom,
+  patchTimedActivityRefreshSessionAtom,
+  registerTimedActivityRefreshSurfaceAtom,
+  timedActivityRefreshSessionAtom,
+  unregisterTimedActivityRefreshSurfaceAtom
+} from "../state/timedActivityRefreshAtoms";
 import {
   addFriendFromKnownUserAtom,
+  archiveLaoFindsItemAtom,
   appStateAtom,
   cacheAvatarsAtom,
   checkForUpdatesAtom,
   clearStatusMessageAtom,
-  cloudConfigViewAtom,
+  cloudArchiveLocalStateAtom,
   identifyCurrentAccountAtom,
-  loadCloudConfigViewAtom,
+  loadCloudArchiveLocalStateAtom,
   loadPageScriptStatusAtom,
   loadingAtom,
   loadSiteDataProgressAtom,
   loadStateAtom,
   loadUpdateCheckAtom,
   lookupFriendProfileAtom,
+  markLaoFindsItemReadAtom,
   observeAppStateAtom,
   observePageScriptStatusAtom,
   observeSiteDataProgressAtom,
@@ -58,6 +66,7 @@ import {
   openOptionsPageAtom,
   openSidePanelAtom,
   pageScriptStatusAtom,
+  refreshFriendActivityForTimedRunAtom,
   refreshFriendActivityAtom,
   refreshFriendProfilesAtom,
   repairLinuxDoPageScriptAtom,
@@ -65,18 +74,26 @@ import {
   siteDataProgressAtom,
   statusMessageAtom,
   syncFollowsAtom,
-  updateCheckAtom,
-  updateFriendAtom
+  updateSettingsAtom,
+  updateCheckAtom
 } from "../state/atoms";
 import { VersionBadge } from "./VersionStatus";
+import { AvatarImageContext } from "./AvatarContext";
+import { FriendCandidateList } from "./FriendManagement";
+import { kindIcon, kindText } from "./activityKinds";
+import { UserIdentityRow } from "./UserIdentityRow";
 import { loadUiSceneAtom, observeUiSceneAtom, uiSceneAtom, updateUiSceneAtom } from "../state/uiSceneAtoms";
 import { formatRelativeTime } from "../shared/time";
+import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
+import { isStaleRunningSiteDataProgress, SITE_DATA_PROGRESS_RUNNING_TTL_MS } from "../storage/siteDataProgressStorage";
 import type {
   ActivityItem,
   ActivityKindFilter,
-  ActivityRefreshKind,
   ActivityRefreshScope,
+  AppState,
   BackgroundResponse,
+  CloudArchiveLocalStateResult,
+  RefreshFailureReason,
   FollowedUserInput,
   FriendProfileSummary,
   PageScriptStatusSnapshot,
@@ -84,6 +101,7 @@ import type {
   UiSceneState,
   Username
 } from "../shared/types";
+import { deriveTimedActivityRefreshScopes } from "../domain/activityRefresh";
 import {
   type UserIdentityView,
   deriveActivityRequestCounts,
@@ -94,15 +112,10 @@ import {
   deriveFeedUserOptions,
   deriveFollowedCandidates,
   deriveFriendList,
-  filterFriendCandidates,
+  deriveLaoFindsItems,
   identityForActivityItem,
-  identityForFollowedUser,
-  identityForUsername,
-  mergeFriendCandidates,
-  orderFollowedCandidates,
-  syntheticFriendCandidate
+  identityForUsername
 } from "../popup/selectors";
-import { ALL_ACTIVITY_KINDS, normalizeUsername } from "../domain/friends";
 import "../styles/app.css";
 
 type AppSurface = "side-panel" | "in-page";
@@ -118,8 +131,9 @@ type FilterOption<T extends string> = {
 
 const RELATIVE_TIME_TICK_MS = 30_000;
 const AUTO_REFRESH_COUNTDOWN_TICK_MS = 1_000;
+const TIMED_ACTIVITY_COUNTDOWN_TICK_MS = 1_000;
+const TIMED_ACTIVITY_BUSY_RETRY_DELAY_MS = 15_000;
 const FEED_SCROLL_TOP_GAP = 8;
-const AvatarImageContext = React.createContext(false);
 
 type AutoRefreshCountdownSchedule = {
   dueAt: number;
@@ -128,10 +142,10 @@ type AutoRefreshCountdownSchedule = {
 
 const activityKindOptions: Array<FilterOption<ActivityKindFilter>> = [
   { value: "all", label: "全部", icon: <Sparkles size={15} aria-hidden="true" /> },
-  { value: "topic", label: "话题", icon: <List size={15} aria-hidden="true" />, tone: "topic" },
-  { value: "reply", label: "回复", icon: <MessageCircleReply size={15} aria-hidden="true" />, tone: "reply" },
-  { value: "boost", label: "Boost", icon: <Rocket size={15} aria-hidden="true" />, tone: "boost" },
-  { value: "reaction", label: "回应", icon: <Smile size={15} aria-hidden="true" />, tone: "reaction" }
+  { value: "topic", label: "话题", icon: kindIcon("topic"), tone: "topic" },
+  { value: "reply", label: "回复", icon: kindIcon("reply"), tone: "reply" },
+  { value: "boost", label: "Boost", icon: kindIcon("boost"), tone: "boost" },
+  { value: "reaction", label: "回应", icon: kindIcon("reaction"), tone: "reaction" }
 ];
 
 function scrollTargetBelowSticky(target: HTMLElement) {
@@ -180,24 +194,29 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   const [siteDataProgress] = useAtom(siteDataProgressAtom);
   const [pageScriptStatus] = useAtom(pageScriptStatusAtom);
   const [updateCheck] = useAtom(updateCheckAtom);
-  const [cloudConfigView] = useAtom(cloudConfigViewAtom);
+  const [cloudArchiveLocalState] = useAtom(cloudArchiveLocalStateAtom);
   const [autoRefreshSession] = useAtom(autoRefreshSessionAtom);
+  const [timedActivityRefreshSession] = useAtom(timedActivityRefreshSessionAtom);
   const [uiScene] = useAtom(uiSceneAtom);
   const checkForUpdates = useSetAtom(checkForUpdatesAtom);
   const claimAutoRefreshController = useSetAtom(claimAutoRefreshControllerAtom);
+  const claimTimedActivityRefreshController = useSetAtom(claimTimedActivityRefreshControllerAtom);
   const loadAutoRefreshSession = useSetAtom(loadAutoRefreshSessionAtom);
-  const loadCloudConfigView = useSetAtom(loadCloudConfigViewAtom);
+  const loadTimedActivityRefreshSession = useSetAtom(loadTimedActivityRefreshSessionAtom);
+  const loadCloudArchiveLocalState = useSetAtom(loadCloudArchiveLocalStateAtom);
   const loadState = useSetAtom(loadStateAtom);
   const loadPageScriptStatus = useSetAtom(loadPageScriptStatusAtom);
   const loadSiteDataProgress = useSetAtom(loadSiteDataProgressAtom);
   const loadUpdateCheck = useSetAtom(loadUpdateCheckAtom);
   const loadUiScene = useSetAtom(loadUiSceneAtom);
   const lookupFriendProfile = useSetAtom(lookupFriendProfileAtom);
+  const markLaoFindsItemRead = useSetAtom(markLaoFindsItemReadAtom);
   const observeAppState = useSetAtom(observeAppStateAtom);
   const observePageScriptStatus = useSetAtom(observePageScriptStatusAtom);
   const observeSiteDataProgress = useSetAtom(observeSiteDataProgressAtom);
   const observeUpdateCheck = useSetAtom(observeUpdateCheckAtom);
   const observeAutoRefreshSession = useSetAtom(observeAutoRefreshSessionAtom);
+  const observeTimedActivityRefreshSession = useSetAtom(observeTimedActivityRefreshSessionAtom);
   const observeUiScene = useSetAtom(observeUiSceneAtom);
   const addFriendFromKnownUser = useSetAtom(addFriendFromKnownUserAtom);
   const cacheAvatars = useSetAtom(cacheAvatarsAtom);
@@ -206,21 +225,29 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   const openActivityLink = useSetAtom(openActivityLinkAtom);
   const openOptionsPage = useSetAtom(openOptionsPageAtom);
   const openSidePanel = useSetAtom(openSidePanelAtom);
-  const removeFriend = useSetAtom(removeFriendAtom);
   const refreshFriendProfiles = useSetAtom(refreshFriendProfilesAtom);
   const refreshFriendActivity = useSetAtom(refreshFriendActivityAtom);
+  const refreshFriendActivityForTimedRun = useSetAtom(refreshFriendActivityForTimedRunAtom);
   const repairLinuxDoPageScript = useSetAtom(repairLinuxDoPageScriptAtom);
+  const removeFriend = useSetAtom(removeFriendAtom);
   const registerAutoRefreshSurface = useSetAtom(registerAutoRefreshSurfaceAtom);
+  const registerTimedActivityRefreshSurface = useSetAtom(registerTimedActivityRefreshSurfaceAtom);
   const recordAutoRefreshFinished = useSetAtom(recordAutoRefreshFinishedAtom);
   const syncFollows = useSetAtom(syncFollowsAtom);
-  const updateFriend = useSetAtom(updateFriendAtom);
   const clearStatus = useSetAtom(clearStatusMessageAtom);
   const unregisterAutoRefreshSurface = useSetAtom(unregisterAutoRefreshSurfaceAtom);
+  const unregisterTimedActivityRefreshSurface = useSetAtom(unregisterTimedActivityRefreshSurfaceAtom);
+  const patchTimedActivityRefreshSession = useSetAtom(patchTimedActivityRefreshSessionAtom);
+  const updateSettings = useSetAtom(updateSettingsAtom);
   const updateAutoRefreshEnabled = useSetAtom(updateAutoRefreshEnabledAtom);
   const updateAutoRefreshInterval = useSetAtom(updateAutoRefreshIntervalAtom);
   const updateUiScene = useSetAtom(updateUiSceneAtom);
+  const archiveLaoFindsItem = useSetAtom(archiveLaoFindsItemAtom);
   const [appStateLoaded, setAppStateLoaded] = useState(false);
+  const [siteDataProgressLoaded, setSiteDataProgressLoaded] = useState(false);
+  const [accountDetecting, setAccountDetecting] = useState(false);
   const [relativeNow, setRelativeNow] = useState(() => Date.now());
+  const [progressNow, setProgressNow] = useState(() => Date.now());
   const surfaceIdRef = useRef(`${surface}:${Date.now()}:${Math.random().toString(36).slice(2)}`);
   const feedTopRef = useRef<HTMLElement>(null);
   const { tab, feedKindFilter: kindFilter, feedUserFilter: userFilter, addFriendModalOpen: modalOpen } = uiScene;
@@ -229,10 +256,10 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
     void loadUiScene();
     void loadState().finally(() => setAppStateLoaded(true));
     void loadPageScriptStatus();
-    void loadSiteDataProgress();
+    void loadSiteDataProgress().finally(() => setSiteDataProgressLoaded(true));
     void loadUpdateCheck();
-    void loadCloudConfigView();
     void loadAutoRefreshSession();
+    void loadTimedActivityRefreshSession();
     void checkForUpdates();
     const cleanupAppState = observeAppState();
     const cleanupUiScene = observeUiScene();
@@ -240,6 +267,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
     const cleanupSiteDataProgress = observeSiteDataProgress();
     const cleanupUpdateCheck = observeUpdateCheck();
     const cleanupAutoRefreshSession = observeAutoRefreshSession();
+    const cleanupTimedActivityRefreshSession = observeTimedActivityRefreshSession();
     return () => {
       cleanupAppState?.();
       cleanupUiScene?.();
@@ -247,11 +275,12 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
       cleanupSiteDataProgress?.();
       cleanupUpdateCheck?.();
       cleanupAutoRefreshSession?.();
+      cleanupTimedActivityRefreshSession?.();
     };
   }, [
     checkForUpdates,
     loadAutoRefreshSession,
-    loadCloudConfigView,
+    loadTimedActivityRefreshSession,
     loadPageScriptStatus,
     loadSiteDataProgress,
     loadState,
@@ -262,6 +291,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
     observeSiteDataProgress,
     observeUpdateCheck,
     observeAutoRefreshSession,
+    observeTimedActivityRefreshSession,
     observeUiScene
   ]);
 
@@ -278,33 +308,105 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   }, [registerAutoRefreshSurface, surface, unregisterAutoRefreshSurface]);
 
   useEffect(() => {
+    if (surface !== "side-panel") return;
+    const surfaceId = surfaceIdRef.current;
+    void registerTimedActivityRefreshSurface(surfaceId);
+    const heartbeat = window.setInterval(() => {
+      void registerTimedActivityRefreshSurface(surfaceId);
+    }, TIMED_ACTIVITY_HEARTBEAT_MS);
+    return () => {
+      window.clearInterval(heartbeat);
+      void unregisterTimedActivityRefreshSurface(surfaceId);
+    };
+  }, [registerTimedActivityRefreshSurface, surface, unregisterTimedActivityRefreshSurface]);
+
+  useEffect(() => {
     if (!appStateLoaded || state.currentAccount) return;
     void identifyCurrentAccount(true);
   }, [appStateLoaded, identifyCurrentAccount, state.currentAccount]);
+
+  useEffect(() => {
+    if (!appStateLoaded) return;
+    void loadCloudArchiveLocalState();
+  }, [appStateLoaded, loadCloudArchiveLocalState, state.dredgeRules, state.friends, state.settings]);
+
+  useEffect(() => {
+    if (!appStateLoaded || typeof chrome === "undefined" || !chrome.storage?.onChanged) return undefined;
+    const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName !== "local" || !changes[CLOUD_AUTH_STORAGE_KEY]) return;
+      void loadCloudArchiveLocalState();
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => {
+      chrome.storage.onChanged.removeListener?.(listener);
+    };
+  }, [appStateLoaded, loadCloudArchiveLocalState]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setRelativeNow(Date.now()), RELATIVE_TIME_TICK_MS);
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (siteDataProgress?.status !== "running") {
+      setProgressNow(Date.now());
+      return undefined;
+    }
+    const updatedAt = Date.parse(siteDataProgress.updatedAt);
+    if (!Number.isFinite(updatedAt)) {
+      setProgressNow(Date.now());
+      return undefined;
+    }
+    const expiresIn = updatedAt + SITE_DATA_PROGRESS_RUNNING_TTL_MS - Date.now() + 250;
+    if (expiresIn <= 0) {
+      setProgressNow(Date.now());
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setProgressNow(Date.now()), expiresIn);
+    return () => window.clearTimeout(timer);
+  }, [siteDataProgress]);
+
   const friends = useMemo(() => deriveFriendList(state), [state]);
   const followedCandidates = useMemo(() => deriveFollowedCandidates(state), [state]);
   const feedUserOptions = useMemo(() => deriveFeedUserOptions(state), [state]);
   const feedItems = useMemo(() => deriveFeedItems(state, { kind: kindFilter, username: userFilter }), [kindFilter, state, userFilter]);
   const feedEntries = useMemo(() => deriveFeedRenderEntries(state, { kind: kindFilter, username: userFilter }), [kindFilter, state, userFilter]);
+  const laoFindsItems = useMemo(() => deriveLaoFindsItems(state), [state]);
   const activityRefreshScope = useMemo(() => deriveActivityRefreshScope({ kind: kindFilter, username: userFilter }), [kindFilter, userFilter]);
   const activityRequestCounts = useMemo(() => deriveActivityRequestCounts(state, userFilter), [state, userFilter]);
   const activityFreshness = useMemo(() => deriveActivityFreshness(state, activityRefreshScope), [activityRefreshScope, state]);
   const profileFreshness = useMemo(() => deriveProfileFreshness(friends), [friends]);
-  const siteDataTaskRunning = siteDataProgress?.status === "running";
+  const visibleSiteDataProgress = useMemo(
+    () => (isStaleRunningSiteDataProgress(siteDataProgress, progressNow) ? null : siteDataProgress),
+    [progressNow, siteDataProgress]
+  );
+  const siteDataTaskRunning = visibleSiteDataProgress?.status === "running";
   const refreshDisabled = loading || siteDataTaskRunning || friends.length === 0;
+  const timedActivityAutoRunEnabledRef = useRef(false);
+  useEffect(() => {
+    timedActivityAutoRunEnabledRef.current = appStateLoaded && surface === "side-panel" && state.settings.timedActivityRefreshEnabled;
+  }, [appStateLoaded, state.settings.timedActivityRefreshEnabled, surface]);
   useFriendStatusAutoRefresh({
     autoRefreshSession,
     claimController: claimAutoRefreshController,
     friendsCount: friends.length,
-    progress: siteDataProgress,
+    progress: visibleSiteDataProgress,
+    progressLoaded: siteDataProgressLoaded,
     recordFinished: recordAutoRefreshFinished,
     refresh: refreshFriendProfiles,
+    surfaceId: surfaceIdRef.current
+  });
+  const timedActivityRefresh = useTimedActivityRefresh({
+    appStateLoaded,
+    claimController: claimTimedActivityRefreshController,
+    patchSession: patchTimedActivityRefreshSession,
+    progress: visibleSiteDataProgress,
+    progressLoaded: siteDataProgressLoaded,
+    refresh: refreshFriendActivityForTimedRun,
+    session: timedActivityRefreshSession,
+    state,
+    surface,
+    autoRunEnabledRef: timedActivityAutoRunEnabledRef,
     surfaceId: surfaceIdRef.current
   });
 
@@ -332,7 +434,12 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   function jumpToUserFeed(username: Username) {
     void updateUiScene({ feedUserFilter: username, tab: "feed" });
     clearStatus();
-    void refreshFriendActivity({ kind: kindFilter, usernames: [username] });
+    void refreshVisibleFeedActivity({ kind: kindFilter, usernames: [username] });
+  }
+
+  async function refreshVisibleFeedActivity(scope: ActivityRefreshScope) {
+    await timedActivityRefresh.suppressPending();
+    await refreshFriendActivity(scope);
   }
 
   function scrollFeedToTop() {
@@ -352,8 +459,23 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   function changeTab(nextTab: typeof uiScene.tab) {
     void updateUiScene({ tab: nextTab });
     clearStatus();
-    if (nextTab === "feed") {
+    if (nextTab === "feed" || nextTab === "finds") {
       scheduleFeedScrollToTop();
+    }
+  }
+
+  function openDredgeRules() {
+    void updateUiScene({ addFriendModalOpen: false });
+    clearStatus();
+    void openOptionsPage("#lao-finds");
+  }
+
+  async function handleManualIdentifyCurrentAccount() {
+    setAccountDetecting(true);
+    try {
+      await identifyCurrentAccount(false);
+    } finally {
+      setAccountDetecting(false);
     }
   }
 
@@ -370,33 +492,45 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
       <main className={`shell shell-${surface}`}>
         <div className="sticky-top">
           <header className="header">
-            <div>
+            <div className="header-brand">
               <p className="eyebrow">LinuxDo Friends</p>
               <h1>佬朋友</h1>
+              <VersionBadge state={updateCheck} />
             </div>
             <div className="header-status">
-              <VersionBadge state={updateCheck} />
-              {surface === "in-page" ? (
-                <div className="header-actions">
+              <div className="header-actions">
+                {surface === "in-page" ? (
                   <SidePanelLauncherButton status={pageScriptStatus} onOpen={() => void openSidePanel()} />
-                  <OptionsPageButton onOpen={() => void openOptionsPage()} />
-                </div>
-              ) : (
-                <div className="header-actions">
+                ) : (
                   <PageScriptStatusBadge status={pageScriptStatus} />
-                  <OptionsPageButton onOpen={() => void openOptionsPage()} />
+                )}
+                <OptionsPageButton onOpen={() => void openOptionsPage()} />
+              </div>
+              <div className="header-account-row">
+                <AccountDetectTag
+                  detecting={accountDetecting}
+                  username={state.currentAccount?.username}
+                  onDetect={() => void handleManualIdentifyCurrentAccount()}
+                />
+                <CloudArchiveTag state={cloudArchiveLocalState} onOpen={() => void openOptionsPage("#cloud-backup")} />
+              </div>
+              {surface === "side-panel" ? (
+                <div className="header-operation-row">
+                  <TimedActivityRefreshControl
+                    disabled={siteDataTaskRunning}
+                    now={relativeNow}
+                    onManualRefresh={() => void timedActivityRefresh.runNow()}
+                    onOpenSettings={() => void openOptionsPage("#lao-finds")}
+                    onToggle={(enabled) => {
+                      timedActivityAutoRunEnabledRef.current = enabled;
+                      void updateSettings({ timedActivityRefreshEnabled: enabled });
+                    }}
+                    progress={visibleSiteDataProgress}
+                    session={timedActivityRefreshSession}
+                    settings={state.settings}
+                  />
                 </div>
-              )}
-              {state.currentAccount ? (
-                <span className="badge account-badge">
-                  <span>@{state.currentAccount.username}</span>
-                  <CloudSyncButton bound={cloudConfigView?.binding.bound === true} onOpen={() => void openOptionsPage("#cloud-backup")} />
-                </span>
-              ) : (
-                <button className="badge badge-button" type="button" onClick={() => void identifyCurrentAccount(false)} disabled={loading}>
-                  识别账号
-                </button>
-              )}
+              ) : null}
             </div>
           </header>
 
@@ -407,6 +541,9 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
               </button>
               <button className={tab === "feed" ? "active" : ""} onClick={() => changeTab("feed")} type="button">
                 佬友圈
+              </button>
+              <button className={tab === "finds" ? "active" : ""} onClick={() => changeTab("finds")} type="button">
+                佬有料
               </button>
             </nav>
           </section>
@@ -436,12 +573,12 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
           onRefresh={() => void refreshFriendProfiles()}
           onAutoRefreshEnabledChange={(enabled) => void updateAutoRefreshEnabled(enabled)}
           onAutoRefreshIntervalChange={(interval) => void updateAutoRefreshInterval(interval)}
-          progress={siteDataProgress}
+          progress={visibleSiteDataProgress}
           profileFreshness={profileFreshness}
           refreshDisabled={refreshDisabled}
           autoRefresh={autoRefreshSession}
         />
-      ) : (
+      ) : tab === "feed" ? (
         <FeedTab
           activityFreshness={activityFreshness}
           friendsCount={friends.length}
@@ -450,14 +587,13 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
           feedTopRef={feedTopRef}
           kindFilter={kindFilter}
           now={relativeNow}
-          onRefresh={() => void refreshFriendActivity(activityRefreshScope)}
-          onOpenOptions={() => void openOptionsPage()}
+          onRefresh={() => void refreshVisibleFeedActivity(activityRefreshScope)}
           onKindFilterChange={(value) => void updateUiScene({ feedKindFilter: value })}
           onOpenActivityLink={handleActivityLinkClick}
           onUserFilterChange={(value) => void updateUiScene({ feedUserFilter: value })}
           onActivityKindPopoverChange={(activityKindPopover) => void updateUiScene({ activityKindPopover })}
           onFeedUserPopoverChange={(feedUserPopover) => void updateUiScene({ feedUserPopover })}
-          progress={siteDataProgress}
+          progress={visibleSiteDataProgress}
           requestCounts={activityRequestCounts}
           refreshDisabled={refreshDisabled}
           scope={activityRefreshScope}
@@ -465,6 +601,19 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
           uiScene={uiScene}
           userFilter={userFilter}
           userOptions={feedUserOptions}
+        />
+      ) : (
+        <LaoFindsTab
+          feedTopRef={feedTopRef}
+          items={laoFindsItems}
+          now={relativeNow}
+          onArchive={(id, archived) => void archiveLaoFindsItem(id, archived)}
+          onMarkRead={(id, read) => void markLaoFindsItemRead(id, read)}
+          onManualRefresh={() => void timedActivityRefresh.runNow()}
+          onOpenActivityLink={handleActivityLinkClick}
+          onOpenRules={() => void openOptionsPage("#lao-finds")}
+          refreshDisabled={refreshDisabled}
+          state={state}
         />
       )}
 
@@ -479,10 +628,10 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
           onClose={() => void updateUiScene({ addFriendModalOpen: false })}
           onQueryChange={(query) => void updateUiScene({ addFriendQuery: query })}
           onLookup={(target) => lookupFriendProfile(target)}
-          onRemove={(target) => void removeFriend(target)}
-          onUpdateScope={(username, activityKinds) => void updateFriend(username, { activityKinds })}
           onOpenLinuxDoHome={() => void openLinuxDoHome()}
+          onOpenDredgeRules={openDredgeRules}
           onRepairPageScript={() => void repairLinuxDoPageScript()}
+          onRemove={(target) => void removeFriend(target)}
           onSync={() => void syncFollows()}
           status={status}
         />
@@ -587,7 +736,6 @@ function FeedTab({
   kindFilter,
   now,
   onRefresh,
-  onOpenOptions,
   onActivityKindPopoverChange,
   onFeedUserPopoverChange,
   onKindFilterChange,
@@ -610,7 +758,6 @@ function FeedTab({
   kindFilter: ActivityKindFilter;
   now: number;
   onRefresh: () => void;
-  onOpenOptions: () => void;
   onActivityKindPopoverChange: (scene: { open?: boolean; query?: string }) => void;
   onFeedUserPopoverChange: (scene: { open?: boolean; query?: string }) => void;
   onKindFilterChange: (value: ActivityKindFilter) => void;
@@ -626,8 +773,6 @@ function FeedTab({
   userOptions: UserIdentityView[];
 }) {
   const activityProgress = progress?.taskType === "activity" ? progress : null;
-  const [backgroundMenuOpen, setBackgroundMenuOpen] = useState(false);
-  const backgroundMenuRef = useRef<HTMLDivElement>(null);
   const selectedIdentity = userFilter === "all" ? undefined : identityForUsername(state, userFilter);
   const userFilterOptions = useMemo<Array<FilterOption<"all" | Username>>>(
     () => [
@@ -655,64 +800,19 @@ function FeedTab({
     }
   }
 
-  useEffect(() => {
-    if (!backgroundMenuOpen) return;
-    function handlePointerDown(event: PointerEvent) {
-      if (backgroundMenuRef.current && !eventHappenedInside(event, backgroundMenuRef.current)) {
-        setBackgroundMenuOpen(false);
-      }
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setBackgroundMenuOpen(false);
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [backgroundMenuOpen]);
-
   return (
     <section ref={feedTopRef}>
       <div className="tab-action-row">
-        <div className="split-refresh" ref={backgroundMenuRef}>
-          <button className="refresh-button refresh-button-with-meta split-refresh-main" onClick={onRefresh} disabled={refreshDisabled} type="button">
-            <RefreshButtonContent
-              idleLabel="刷新动态"
-              idleMetaMode="freshness"
-              now={now}
-              progress={activityProgress}
-              progressMatches={Boolean(activityProgress && sameScope(activityProgress.scope, scope))}
-              freshness={activityFreshness}
-            />
-          </button>
-          <button
-            className="split-refresh-toggle"
-            type="button"
-            onClick={() => setBackgroundMenuOpen((open) => !open)}
-            aria-expanded={backgroundMenuOpen}
-            aria-label="后台刷新设置"
-          >
-            <ChevronDown size={15} aria-hidden="true" />
-          </button>
-          {backgroundMenuOpen ? (
-            <div className="refresh-menu refresh-menu-feed">
-              <p className="refresh-menu-title">后台刷新</p>
-              <p className="refresh-menu-warning">可在设置页查看插件偏好。</p>
-              <button
-                className="refresh-menu-action"
-                type="button"
-                onClick={() => {
-                  setBackgroundMenuOpen(false);
-                  onOpenOptions();
-                }}
-              >
-                去设置
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <button className="refresh-button refresh-button-with-meta feed-refresh-button" onClick={onRefresh} disabled={refreshDisabled} type="button">
+          <RefreshButtonContent
+            idleLabel="刷新动态"
+            idleMetaMode="freshness"
+            now={now}
+            progress={activityProgress}
+            progressMatches={Boolean(activityProgress && sameScope(activityProgress.scope, scope))}
+            freshness={activityFreshness}
+          />
+        </button>
       </div>
       <div className="filters">
         <FilterPopover
@@ -758,6 +858,248 @@ function FeedTab({
       <div className="tab-bottom-spacer" aria-hidden="true" />
     </section>
   );
+}
+
+function LaoFindsTab({
+  feedTopRef,
+  items,
+  now,
+  onArchive,
+  onMarkRead,
+  onManualRefresh,
+  onOpenActivityLink,
+  onOpenRules,
+  refreshDisabled,
+  state
+}: {
+  feedTopRef: React.RefObject<HTMLElement | null>;
+  items: ReturnType<typeof deriveLaoFindsItems>;
+  now: number;
+  onArchive: (id: string, archived: boolean) => void;
+  onMarkRead: (id: string, read: boolean) => void;
+  onManualRefresh: () => void;
+  onOpenActivityLink: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
+  onOpenRules: () => void;
+  refreshDisabled: boolean;
+  state: Parameters<typeof identityForActivityItem>[0];
+}) {
+  return (
+    <section ref={feedTopRef}>
+      <div className="finds-layout">
+        <section className="finds-section">
+          <div className="finds-section-head">
+            <div>
+              <h2 className="finds-title-with-icon">
+                <Telescope size={16} aria-hidden="true" />
+                <span>佬有料</span>
+              </h2>
+            </div>
+            <div className="finds-section-actions">
+              <span className="badge">共 {items.length} 条</span>
+              <button className="small-action primary-action" type="button" onClick={onManualRefresh} disabled={refreshDisabled}>
+                <Telescope size={14} aria-hidden="true" />
+                <span>手动打捞</span>
+              </button>
+              <button className="small-action" type="button" onClick={onOpenRules}>
+                配置打捞规则
+              </button>
+            </div>
+          </div>
+          {items.length === 0 ? (
+            <p className="empty finds-empty">
+              暂时没有佬料。先到设置页新建打捞规则，然后手动刷新佬友圈或开启自动捞料。
+            </p>
+          ) : (
+            <div className="list">
+              {items.map(({ item, identity, matchedRules }) => (
+                <article className={`finds-card${item.readAt ? " is-read" : ""}`} key={item.id}>
+                  <div className="finds-card-head">
+                    <UserIdentityRow identity={identity} compact />
+                    <div className="finds-card-meta">
+                      <time dateTime={item.collectedAt}>{formatRelativeTime(item.collectedAt, now)}打捞</time>
+                      {!item.readAt ? <span className="new-dot" aria-label="未读" /> : null}
+                    </div>
+                  </div>
+                  <ActivityCardBody item={item.activity} onOpenActivityLink={onOpenActivityLink} />
+                  <div className="finds-card-foot">
+                    <span title={matchedRules.map((rule) => rule.name).join("、")}>
+                      {matchedRules.length ? `命中 ${matchedRules.map((rule) => rule.name).join("、")}` : "规则已删除"}
+                    </span>
+                    <div className="finds-card-actions">
+                      <button type="button" onClick={() => onMarkRead(item.id, !item.readAt)}>
+                        {item.readAt ? "标为未读" : "标为已读"}
+                      </button>
+                      <button type="button" onClick={() => onArchive(item.id, true)}>
+                        归档
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+      <div className="tab-bottom-spacer" aria-hidden="true" />
+    </section>
+  );
+}
+
+function TimedActivityRefreshControl({
+  disabled,
+  now,
+  onManualRefresh,
+  onOpenSettings,
+  onToggle,
+  progress,
+  session,
+  settings
+}: {
+  disabled: boolean;
+  now: number;
+  onManualRefresh: () => void;
+  onOpenSettings: () => void;
+  onToggle: (enabled: boolean) => void;
+  progress: SiteDataTaskProgress | null;
+  session: TimedActivityRefreshSession;
+  settings: AppState["settings"];
+}) {
+  const [open, setOpen] = useState(false);
+  const [countdownNow, setCountdownNow] = useState(now);
+  const menuRef = useRef<HTMLElement>(null);
+  const runningProgress = progress?.taskType === "activity" && progress.status === "running" ? progress : null;
+  const model = deriveTimedActivityRefreshControlModel({ now: countdownNow, progress: runningProgress, session, settings });
+  const nextEnabled = settings.timedActivityRefreshEnabled && !session.pausedReason ? false : true;
+  const toggleLabel = nextEnabled ? "开启自动捞料" : "关闭自动捞料";
+
+  useEffect(() => {
+    setCountdownNow(now);
+  }, [now]);
+
+  useEffect(() => {
+    if (!model.countdownActive) return;
+    const timer = window.setTimeout(() => setCountdownNow(Date.now()), TIMED_ACTIVITY_COUNTDOWN_TICK_MS);
+    return () => window.clearTimeout(timer);
+  }, [countdownNow, model.countdownActive]);
+
+  useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (menuRef.current && !eventHappenedInside(event, menuRef.current)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <section className={`timed-refresh-control timed-refresh-${model.tone}`} aria-label="自动捞料状态" ref={menuRef}>
+      <button className="timed-refresh-main" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <span className="timed-refresh-icon" aria-hidden="true">
+          {model.spinning ? <LoaderCircle className="spin-icon" size={15} /> : <Telescope className={model.blinking ? "timed-refresh-pulse-icon" : undefined} size={15} />}
+        </span>
+        <span className="timed-refresh-copy" title={model.copy}>
+          {model.copy}
+        </span>
+        <ChevronDown size={13} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="refresh-menu timed-refresh-menu">
+          <button
+            className={`refresh-menu-option${settings.timedActivityRefreshEnabled && !session.pausedReason ? " is-selected" : ""}`}
+            type="button"
+            aria-pressed={settings.timedActivityRefreshEnabled && !session.pausedReason}
+            onClick={() => {
+              setOpen(false);
+              onToggle(nextEnabled);
+            }}
+          >
+            <span>{toggleLabel}</span>
+            <span className="refresh-menu-check" aria-hidden="true">
+              {settings.timedActivityRefreshEnabled && !session.pausedReason ? <Check size={16} /> : null}
+            </span>
+          </button>
+          <button
+            className="refresh-menu-option"
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              setOpen(false);
+              onManualRefresh();
+            }}
+          >
+            <span>手动打捞</span>
+            <Telescope size={15} aria-hidden="true" />
+          </button>
+          <div className="refresh-menu-group">
+            <button
+              className="refresh-menu-option"
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onOpenSettings();
+              }}
+            >
+              <span>配置打捞规则</span>
+              <Settings size={15} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function deriveTimedActivityRefreshControlModel({
+  now,
+  progress,
+  session,
+  settings
+}: {
+  now: number;
+  progress: SiteDataTaskProgress | null;
+  session: TimedActivityRefreshSession;
+  settings: AppState["settings"];
+}) {
+  if (!settings.timedActivityRefreshEnabled) {
+    return { copy: "未开启", tone: "idle", spinning: false, blinking: false, countdownActive: false };
+  }
+  if (session.pausedReason) {
+    return { copy: "已暂停", tone: "paused", spinning: false, blinking: false, countdownActive: false };
+  }
+  if (progress?.status === "running") {
+    return {
+      copy: `${progress.currentLabel ?? "自动捞料中"} · ${progress.completed}/${progress.total}`,
+      tone: "running",
+      spinning: true,
+      blinking: false,
+      countdownActive: false
+    };
+  }
+  if (session.pendingDue) {
+    return { copy: "等待空闲", tone: "waiting", spinning: false, blinking: true, countdownActive: false };
+  }
+  if (session.noTargetMessage) {
+    return { copy: "无规则", tone: "waiting", spinning: false, blinking: false, countdownActive: false };
+  }
+  const intervalMs = settings.timedActivityRefreshIntervalMinutes * 60_000;
+  const dueAt = deriveTimedActivityDueAt(session, intervalMs, now);
+  const remainingMs = Math.max(0, dueAt - now);
+  return {
+    copy: remainingMs <= 0 ? "即将打捞" : `下次打捞 ${formatLongCountdown(remainingMs)}`,
+    tone: "waiting",
+    spinning: false,
+    blinking: true,
+    countdownActive: true
+  };
 }
 
 function SplitRefreshButton({
@@ -868,6 +1210,7 @@ function useFriendStatusAutoRefresh({
   claimController,
   friendsCount,
   progress,
+  progressLoaded,
   recordFinished,
   refresh,
   surfaceId
@@ -876,6 +1219,7 @@ function useFriendStatusAutoRefresh({
   claimController: (surfaceId: string) => Promise<FriendStatusAutoRefreshSession>;
   friendsCount: number;
   progress: SiteDataTaskProgress | null;
+  progressLoaded: boolean;
   recordFinished: (finishedAt: string) => Promise<void>;
   refresh: () => Promise<void>;
   surfaceId: string;
@@ -899,6 +1243,7 @@ function useFriendStatusAutoRefresh({
   }, [progress, recordFinished]);
 
   useEffect(() => {
+    if (!progressLoaded) return;
     if (!autoRefreshSession.enabled || friendsCount === 0) return;
     if (autoRefreshSession.controllerSurfaceId && autoRefreshSession.controllerSurfaceId !== surfaceId) return;
     let cancelled = false;
@@ -939,7 +1284,328 @@ function useFriendStatusAutoRefresh({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [autoRefreshSession, claimController, friendsCount, progress, recordFinished, refresh, surfaceId]);
+  }, [autoRefreshSession, claimController, friendsCount, progress, progressLoaded, recordFinished, refresh, surfaceId]);
+}
+
+function useTimedActivityRefresh({
+  appStateLoaded,
+  claimController,
+  patchSession,
+  progress,
+  progressLoaded,
+  refresh,
+  session,
+  state,
+  surface,
+  autoRunEnabledRef,
+  surfaceId
+}: {
+  appStateLoaded: boolean;
+  claimController: (surfaceId: string) => Promise<TimedActivityRefreshSession>;
+  patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>;
+  progress: SiteDataTaskProgress | null;
+  progressLoaded: boolean;
+  refresh: (scope: ActivityRefreshScope, timedRunId: string) => Promise<BackgroundResponse<AppState> | void>;
+  session: TimedActivityRefreshSession;
+  state: AppState;
+  surface: AppSurface;
+  autoRunEnabledRef: React.MutableRefObject<boolean>;
+  surfaceId: string;
+}) {
+  const refreshInFlightRef = useRef(false);
+  const pendingDueRef = useRef(false);
+  const latestRef = useRef({ progress, session, state });
+
+  useEffect(() => {
+    latestRef.current = { progress, session, state };
+    if (session.pendingDue) pendingDueRef.current = true;
+  }, [progress, session, state]);
+
+  const enabled = appStateLoaded && progressLoaded && surface === "side-panel" && state.settings.timedActivityRefreshEnabled;
+  const intervalMinutes = state.settings.timedActivityRefreshIntervalMinutes;
+  const scopeMode = state.settings.timedActivityRefreshScopeMode;
+  const controllerSurfaceId = session.controllerSurfaceId;
+  const pausedReason = session.pausedReason;
+  const lastFinishedAt = session.lastFinishedAt;
+  const enabledAt = session.enabledAt;
+  const nextDueAt = session.nextDueAt;
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (pausedReason) return;
+    if (controllerSurfaceId && controllerSurfaceId !== surfaceId) return;
+    if (refreshInFlightRef.current) return;
+    const intervalMs = state.settings.timedActivityRefreshIntervalMinutes * 60_000;
+    const dueAt = deriveTimedActivityDueAt(latestRef.current.session, intervalMs);
+    const delay = Math.max(0, dueAt - Date.now());
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        if (cancelled) return;
+        if (!autoRunEnabledRef.current || !latestRef.current.state.settings.timedActivityRefreshEnabled) return;
+        const latestIntervalMs = latestRef.current.state.settings.timedActivityRefreshIntervalMinutes * 60_000;
+        if (deriveTimedActivityDueAt(latestRef.current.session, latestIntervalMs) > Date.now()) return;
+        if (refreshInFlightRef.current || latestRef.current.progress?.status === "running") {
+          markTimedActivityPending(pendingDueRef, latestRef.current.session, patchSession);
+          return;
+        }
+        await runTimedActivityRefresh({
+          claimController,
+          getState: () => latestRef.current.state,
+          patchSession,
+          refresh,
+          shouldRun: () => autoRunEnabledRef.current && latestRef.current.state.settings.timedActivityRefreshEnabled,
+          surfaceId,
+          refreshInFlightRef
+        });
+      })();
+    }, delay);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    claimController,
+    autoRunEnabledRef,
+    controllerSurfaceId,
+    enabled,
+    enabledAt,
+    intervalMinutes,
+    lastFinishedAt,
+    nextDueAt,
+    patchSession,
+    pausedReason,
+    refresh,
+    scopeMode,
+    surfaceId,
+    state.settings.timedActivityRefreshIntervalMinutes
+  ]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (pausedReason) return;
+    if (controllerSurfaceId && controllerSurfaceId !== surfaceId) return;
+    if (!pendingDueRef.current && !session.pendingDue) return;
+    if (progress?.status === "running" || refreshInFlightRef.current) return;
+    const intervalMs = state.settings.timedActivityRefreshIntervalMinutes * 60_000;
+    if (deriveTimedActivityDueAt(latestRef.current.session, intervalMs) > Date.now()) return;
+    if (!autoRunEnabledRef.current || !latestRef.current.state.settings.timedActivityRefreshEnabled) return;
+    pendingDueRef.current = false;
+    void runTimedActivityRefresh({
+      claimController,
+      getState: () => latestRef.current.state,
+      patchSession,
+      refresh,
+      shouldRun: () => autoRunEnabledRef.current && latestRef.current.state.settings.timedActivityRefreshEnabled,
+      surfaceId,
+      refreshInFlightRef
+    });
+  }, [claimController, autoRunEnabledRef, controllerSurfaceId, enabled, patchSession, pausedReason, progress?.status, refresh, session.pendingDue, surfaceId]);
+
+  function runNow() {
+    if (surface !== "side-panel") return Promise.resolve();
+    if (refreshInFlightRef.current || latestRef.current.progress?.status === "running") return Promise.resolve();
+    return runTimedActivityRefresh({
+      claimController,
+      getState: () => latestRef.current.state,
+      patchSession,
+      refresh,
+      surfaceId,
+      refreshInFlightRef
+    });
+  }
+
+  async function suppressPending() {
+    if (!enabled) return;
+    const latest = latestRef.current;
+    if (latest.session.pausedReason) return;
+    const intervalMs = latest.state.settings.timedActivityRefreshIntervalMinutes * 60_000;
+    const dueAt = deriveTimedActivityDueAt(latest.session, intervalMs);
+    if (!pendingDueRef.current && !latest.session.pendingDue && dueAt > Date.now()) return;
+    pendingDueRef.current = false;
+    const nextSession = await patchSession({
+      nextDueAt: new Date(Date.now() + intervalMs).toISOString(),
+      pendingDue: false
+    });
+    latestRef.current = { ...latestRef.current, session: nextSession };
+  }
+
+  return { runNow, suppressPending };
+}
+
+async function runTimedActivityRefresh({
+  claimController,
+  getState,
+  patchSession,
+  refresh,
+  refreshInFlightRef,
+  shouldRun,
+  surfaceId
+}: {
+  claimController: (surfaceId: string) => Promise<TimedActivityRefreshSession>;
+  getState: () => AppState;
+  patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>;
+  refresh: (scope: ActivityRefreshScope, timedRunId: string) => Promise<BackgroundResponse<AppState> | void>;
+  refreshInFlightRef?: React.MutableRefObject<boolean>;
+  shouldRun?: () => boolean;
+  surfaceId: string;
+}) {
+  const localRefreshInFlightRef = refreshInFlightRef ?? { current: false };
+  if (localRefreshInFlightRef.current) return;
+  if (shouldRun && !shouldRun()) return;
+  localRefreshInFlightRef.current = true;
+  const claimed = await claimController(surfaceId);
+  if (shouldRun && !shouldRun()) {
+    await clearTimedActivityControllerLease(patchSession);
+    localRefreshInFlightRef.current = false;
+    return;
+  }
+  if (claimed.controllerSurfaceId !== surfaceId || !claimed.controllerHeartbeatAt) {
+    localRefreshInFlightRef.current = false;
+    return;
+  }
+  const state = getState();
+  if (shouldRun && !shouldRun()) {
+    await clearTimedActivityControllerLease(patchSession);
+    localRefreshInFlightRef.current = false;
+    return;
+  }
+  const scopes = deriveTimedActivityRefreshScopes(state, state.settings.timedActivityRefreshScopeMode);
+  const now = new Date();
+  if (scopes.length === 0) {
+    const nextDueAt = new Date(now.getTime() + state.settings.timedActivityRefreshIntervalMinutes * 60_000).toISOString();
+    await patchSession({
+      activeRunId: undefined,
+      enabledAt: claimed.enabledAt ?? now.toISOString(),
+      lastScopeMode: state.settings.timedActivityRefreshScopeMode,
+      noTargetAt: now.toISOString(),
+      noTargetMessage: "没有启用规则",
+      nextDueAt,
+      pendingDue: false,
+      pausedReason: undefined,
+      pausedMessage: undefined
+    });
+    localRefreshInFlightRef.current = false;
+    return;
+  }
+
+  const runId = `timed-activity:${now.getTime()}:${Math.random().toString(36).slice(2)}`;
+  await patchSession({
+    activeRunId: runId,
+    enabledAt: claimed.enabledAt ?? now.toISOString(),
+    lastStartedAt: now.toISOString(),
+    lastScopeMode: state.settings.timedActivityRefreshScopeMode,
+    pendingDue: false,
+    pausedReason: undefined,
+    pausedMessage: undefined,
+    noTargetMessage: undefined
+  });
+  try {
+    for (const scope of scopes) {
+      const response = await refresh(scope, runId);
+      if (!(await timedRunStillActive(patchSession, runId))) return;
+      if (response && !response.ok) {
+        if (isBusyRefreshError(response.error)) {
+          await patchTimedActivityBusy(patchSession);
+          return;
+        }
+        const reason = isTimedActivityPauseReason(response.reason) ? response.reason : "unavailable";
+        await patchTimedActivityFailure(patchSession, response.error, reason);
+        return;
+      }
+      const lastSync = response?.ok ? response.data.lastSync : undefined;
+      if (lastSync && !lastSync.ok && isBusyRefreshError(lastSync.message)) {
+        await patchTimedActivityBusy(patchSession);
+        return;
+      }
+      if (lastSync && !lastSync.ok && isTimedActivityPauseReason(lastSync.reason)) {
+        await patchTimedActivityFailure(patchSession, lastSync.message, lastSync.reason);
+        return;
+      }
+    }
+    if (!(await timedRunStillActive(patchSession, runId))) return;
+    const finishedAt = new Date().toISOString();
+    await patchSession({
+      activeRunId: undefined,
+      lastFinishedAt: finishedAt,
+      nextDueAt: new Date(Date.parse(finishedAt) + state.settings.timedActivityRefreshIntervalMinutes * 60_000).toISOString(),
+      pendingDue: false,
+      pausedReason: undefined,
+      pausedMessage: undefined,
+      noTargetMessage: undefined
+    });
+  } finally {
+    localRefreshInFlightRef.current = false;
+  }
+}
+
+async function clearTimedActivityControllerLease(patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>) {
+  await patchSession({
+    controllerSurfaceId: undefined,
+    controllerClaimedAt: undefined,
+    controllerHeartbeatAt: undefined
+  });
+}
+
+async function timedRunStillActive(patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>, runId: string) {
+  const latest = await patchSession({});
+  return latest.activeRunId === runId;
+}
+
+async function patchTimedActivityFailure(
+  patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>,
+  message: string,
+  reason: TimedActivityRefreshSession["pausedReason"] = "unavailable"
+) {
+  const failureAt = new Date().toISOString();
+  await patchSession({
+    activeRunId: undefined,
+    lastFailureAt: failureAt,
+    pausedReason: reason,
+    pausedMessage: message,
+    pendingDue: false
+  });
+}
+
+async function patchTimedActivityBusy(patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>) {
+  await patchSession({
+    activeRunId: undefined,
+    nextDueAt: new Date(Date.now() + TIMED_ACTIVITY_BUSY_RETRY_DELAY_MS).toISOString(),
+    pendingDue: true
+  });
+}
+
+function markTimedActivityPending(
+  pendingDueRef: React.MutableRefObject<boolean>,
+  session: TimedActivityRefreshSession,
+  patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>
+) {
+  pendingDueRef.current = true;
+  if (!session.pendingDue) void patchSession({ pendingDue: true });
+}
+
+function deriveTimedActivityDueAt(session: TimedActivityRefreshSession, intervalMs: number, now = Date.now()) {
+  const nextDue = parseTimestamp(session.nextDueAt);
+  if (session.pendingDue && nextDue !== undefined) return nextDue;
+  const lastFinished = parseTimestamp(session.lastFinishedAt);
+  if (lastFinished !== undefined) return lastFinished + intervalMs;
+  if (nextDue !== undefined) return nextDue;
+  const enabledAt = parseTimestamp(session.enabledAt);
+  if (enabledAt !== undefined) return enabledAt + intervalMs;
+  return now;
+}
+
+function parseTimestamp(value: string | undefined) {
+  const timestamp = Date.parse(value ?? "");
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function isBusyRefreshError(message: string) {
+  return message.includes("已有刷新正在进行");
+}
+
+function isTimedActivityPauseReason(reason: unknown): reason is NonNullable<TimedActivityRefreshSession["pausedReason"]> {
+  return reason === "challenge" || reason === "blocked" || reason === "rate_limited" || reason === "unavailable" || reason === "network_error";
 }
 
 function FeedActivityCard({
@@ -1274,9 +1940,9 @@ function AddFriendModal({
   onQueryChange,
   onLookup,
   onOpenLinuxDoHome,
-  onRemove,
-  onUpdateScope,
+  onOpenDredgeRules,
   onRepairPageScript,
+  onRemove,
   onSync,
   status
 }: {
@@ -1290,66 +1956,13 @@ function AddFriendModal({
   onQueryChange: (query: string) => void;
   onLookup: (username: Username) => Promise<BackgroundResponse<FriendProfileSummary>>;
   onOpenLinuxDoHome: () => void;
-  onRemove: (username: Username) => void;
-  onUpdateScope: (username: Username, activityKinds: ActivityRefreshKind[]) => void;
+  onOpenDredgeRules: () => void;
   onRepairPageScript: () => void;
+  onRemove: (username: Username) => void;
   onSync: () => void;
   status: string | null;
 }) {
-  const [lookupProfiles, setLookupProfiles] = useState<Record<Username, FriendProfileSummary>>({});
-  const [lookupErrors, setLookupErrors] = useState<Record<Username, string>>({});
-  const [lookupPending, setLookupPending] = useState<Username | null>(null);
-  const baseCandidates = useMemo(() => mergeFriendCandidates(friends, candidates), [candidates, friends]);
-  const [snapshotOrder] = useState(() => baseCandidates.map((candidate) => candidate.user.username));
-  const orderedCandidates = useMemo(() => orderFollowedCandidates(baseCandidates, snapshotOrder), [baseCandidates, snapshotOrder]);
-  const filteredCandidates = useMemo(() => filterFriendCandidates(orderedCandidates, query), [orderedCandidates, query]);
-  const syntheticCandidate = useMemo(() => {
-    const candidate = syntheticFriendCandidate(friends, orderedCandidates, query);
-    if (!candidate) return null;
-    const profile = lookupProfiles[candidate.user.username];
-    if (!profile) return candidate;
-    const username = normalizeUsername(profile.username);
-    return {
-      user: {
-        username,
-        name: profile.name,
-        avatarUrl: profile.avatarUrl,
-        source: "manual" as const,
-        followedAt: "",
-        updatedAt: profile.refreshedAt
-      },
-      identity: identityForFollowedUser(profile),
-      isFriend: friends.some((item) => item.friend.username === username),
-      isSynthetic: true
-    };
-  }, [friends, lookupProfiles, orderedCandidates, query]);
-  const visibleCandidates = syntheticCandidate ? [syntheticCandidate, ...filteredCandidates] : filteredCandidates;
   const statusAction = status ? repairActionForStatus(status, onRepairPageScript, onOpenLinuxDoHome) : null;
-  const actionDisabled = loading || lookupPending != null;
-
-  async function handleLookup(usernameInput: Username) {
-    const username = normalizeUsername(usernameInput);
-    if (!username || lookupPending) return;
-    setLookupPending(username);
-    setLookupErrors((current) => omitKey(current, username));
-    const response = await onLookup(username);
-    setLookupPending(null);
-    if (response.ok) {
-      const resolvedUsername = normalizeUsername(response.data.username);
-      const profile = { ...response.data, username: resolvedUsername };
-      setLookupProfiles((current) => ({
-        ...current,
-        [username]: profile,
-        [resolvedUsername]: profile
-      }));
-      setLookupErrors((current) => omitKeys(current, [username, resolvedUsername]));
-    } else {
-      setLookupErrors((current) => ({
-        ...current,
-        [username]: response.error || "用户不存在或公开资料不可用。"
-      }));
-    }
-  }
 
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
@@ -1392,6 +2005,14 @@ function AddFriendModal({
         ) : null}
 
         <section className="modal-section">
+          <div className="modal-section-head">
+            <div>
+              <h3>快速添加</h3>
+            </div>
+            <button className="small-action" type="button" onClick={onOpenDredgeRules}>
+              更多设置
+            </button>
+          </div>
           <input
             className="modal-search-input"
             value={query}
@@ -1399,206 +2020,20 @@ function AddFriendModal({
             placeholder="筛选已关注，或输入用户名"
             autoFocus
           />
-          {visibleCandidates.length === 0 ? (
-            <p className="empty">没有匹配项。输入完整用户名后先查找用户。</p>
-          ) : (
-            <div className="list modal-list">
-              {visibleCandidates.map((candidate) => (
-                <div className="candidate-row" key={candidate.user.username}>
-                  <UserIdentityRow identity={candidate.identity} />
-                  <CandidateAction
-                    candidate={candidate}
-                    disabled={actionDisabled}
-                    lookupError={lookupErrors[candidate.user.username]}
-                    lookupPending={lookupPending === candidate.user.username}
-                    lookupVerified={Boolean(lookupProfiles[candidate.user.username])}
-                    onAdd={(user) => onAdd(user, lookupProfiles[user.username])}
-                    onLookup={handleLookup}
-                    onRemove={onRemove}
-                    onUpdateScope={onUpdateScope}
-                    scope={friends.find((item) => item.friend.username === candidate.user.username)?.friend.activityKinds}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
+          <FriendCandidateList
+            candidates={candidates}
+            friends={friends}
+            loading={loading}
+            mode="light"
+            onAdd={onAdd}
+            onLookup={onLookup}
+            onRemove={onRemove}
+            query={query}
+          />
         </section>
       </section>
     </div>
   );
-}
-
-function CandidateAction({
-  candidate,
-  disabled,
-  lookupError,
-  lookupPending,
-  lookupVerified,
-  onAdd,
-  onLookup,
-  onRemove,
-  onUpdateScope,
-  scope
-}: {
-  candidate: ReturnType<typeof mergeFriendCandidates>[number];
-  disabled: boolean;
-  lookupError?: string;
-  lookupPending: boolean;
-  lookupVerified: boolean;
-  onAdd: (user: FollowedUserInput) => void;
-  onLookup: (username: Username) => void;
-  onRemove: (username: Username) => void;
-  onUpdateScope: (username: Username, activityKinds: ActivityRefreshKind[]) => void;
-  scope?: ActivityRefreshKind[];
-}) {
-  if (candidate.isFriend) {
-    return (
-      <div className="candidate-manage-actions">
-        <ActivityScopeSelect
-          disabled={disabled}
-          value={scope ?? ALL_ACTIVITY_KINDS}
-          onChange={(activityKinds) => onUpdateScope(candidate.user.username, activityKinds)}
-        />
-        <button className="candidate-action-remove" onClick={() => onRemove(candidate.user.username)} disabled={disabled} type="button">
-          移除
-        </button>
-      </div>
-    );
-  }
-
-  if (candidate.isSynthetic && !lookupVerified) {
-    if (lookupError) {
-      return (
-        <span className="candidate-lookup-status" title={lookupError}>
-          {lookupError}
-        </span>
-      );
-    }
-    return (
-      <button className="candidate-action-lookup" onClick={() => onLookup(candidate.user.username)} disabled={disabled} type="button">
-        {lookupPending ? <LoaderCircle className="spin-icon" size={13} aria-hidden="true" /> : <Search size={13} aria-hidden="true" />}
-        {lookupPending ? "查找中" : "查找用户"}
-      </button>
-    );
-  }
-
-  return (
-    <button className="candidate-action-add" onClick={() => onAdd(candidate.user)} disabled={disabled} type="button">
-      视奸 ta
-    </button>
-  );
-}
-
-function ActivityScopeSelect({
-  disabled,
-  onChange,
-  value
-}: {
-  disabled: boolean;
-  onChange: (activityKinds: ActivityRefreshKind[]) => void;
-  value: ActivityRefreshKind[];
-}) {
-  const [open, setOpen] = useState(false);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const selectedKinds = useMemo(() => ALL_ACTIVITY_KINDS.filter((kind) => value.includes(kind)), [value]);
-
-  useEffect(() => {
-    if (!open) return;
-    function handlePointerDown(event: PointerEvent) {
-      if (popoverRef.current && !eventHappenedInside(event, popoverRef.current)) {
-        setOpen(false);
-      }
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [open]);
-
-  function toggleKind(kind: ActivityRefreshKind) {
-    if (selectedKinds.includes(kind)) {
-      onChange(selectedKinds.filter((item) => item !== kind));
-      return;
-    }
-    onChange(ALL_ACTIVITY_KINDS.filter((item) => item === kind || selectedKinds.includes(item)));
-  }
-
-  const triggerLabel = `视奸范围：${scopeSummary(selectedKinds)}`;
-
-  return (
-    <div className="scope-select" ref={popoverRef}>
-      <button
-        className="scope-select-trigger"
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
-        aria-expanded={open}
-        aria-label={triggerLabel}
-        title={triggerLabel}
-      >
-        <span className={`scope-trigger-card${selectedKinds.length === 0 ? " is-empty" : ""}`} aria-hidden="true">
-          {selectedKinds.length === 0 ? (
-            <span className="scope-trigger-empty">无</span>
-          ) : (
-            selectedKinds.map((kind) => (
-              <span className={`scope-trigger-icon kind-${kind}`} key={kind}>
-                {kindIcon(kind, 13)}
-              </span>
-            ))
-          )}
-        </span>
-        <ChevronDown className="scope-trigger-arrow" size={12} aria-hidden="true" />
-      </button>
-      {open ? (
-        <div className="scope-select-menu">
-          <div className="scope-select-actions">
-            <button type="button" onClick={() => onChange(ALL_ACTIVITY_KINDS)}>
-              全选
-            </button>
-            <button type="button" onClick={() => onChange([])}>
-              全不选
-            </button>
-          </div>
-          {ALL_ACTIVITY_KINDS.map((kind) => {
-            const selected = selectedKinds.includes(kind);
-            return (
-              <button className={selected ? "selected" : ""} key={kind} type="button" onClick={() => toggleKind(kind)}>
-                <span className={`filter-option-icon kind-${kind}`}>{kindIcon(kind)}</span>
-                <span>{kindText(kind)}</span>
-                {selected ? <Check size={13} aria-hidden="true" /> : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function scopeSummary(kinds: ActivityRefreshKind[]) {
-  if (kinds.length === ALL_ACTIVITY_KINDS.length) return "全部";
-  if (kinds.length === 0) return "无";
-  return kinds.map(kindText).join(" / ");
-}
-
-function omitKey<T>(record: Record<Username, T>, key: Username): Record<Username, T> {
-  const { [key]: _removed, ...rest } = record;
-  return rest;
-}
-
-function omitKeys<T>(record: Record<Username, T>, keys: Username[]): Record<Username, T> {
-  let next = record;
-  for (const key of keys) {
-    next = omitKey(next, key);
-  }
-  return next;
 }
 
 function PageScriptStatusBadge({ status }: { status: PageScriptStatusSnapshot }) {
@@ -1619,18 +2054,49 @@ function SidePanelLauncherButton({ status, onOpen }: { status: PageScriptStatusS
   );
 }
 
-function CloudSyncButton({ bound, onOpen }: { bound: boolean; onOpen: () => void }) {
-  const label = bound ? "云端配置已绑定" : "云端配置未绑定";
+function AccountDetectTag({
+  detecting,
+  onDetect,
+  username
+}: {
+  detecting: boolean;
+  onDetect: () => void;
+  username?: Username;
+}) {
+  const label = username ? `重新探测本地账号：@${username}` : "探测本地账号";
   return (
     <button
-      className={`cloud-sync-chip${bound ? " is-bound" : " is-unbound"}`}
+      className={`badge badge-button account-badge${detecting ? " is-loading" : ""}`}
+      type="button"
+      onClick={onDetect}
+      disabled={detecting}
+      title={label}
+      aria-label={label}
+    >
+      {detecting ? <LoaderCircle className="spin-icon" size={13} aria-hidden="true" /> : username ? null : <RefreshCw size={13} aria-hidden="true" />}
+      <span>{detecting ? "识别中" : username ? `@${username}` : "识别账号"}</span>
+    </button>
+  );
+}
+
+function CloudArchiveTag({ state, onOpen }: { state: CloudArchiveLocalStateResult | null; onOpen: () => void }) {
+  const archiveState = state?.archiveState ?? "unbound";
+  const same = archiveState === "same";
+  const text = archiveState === "different" ? "待备份" : archiveState === "unbound" ? "未绑定" : "";
+  const label = same ? "云存档已备份" : archiveState === "different" ? "云存档待备份" : "云存档未绑定";
+  return (
+    <button
+      className={`cloud-archive-chip cloud-archive-${archiveState}`}
       type="button"
       onClick={onOpen}
       title={`${label}，打开云端备份设置`}
       aria-label={`${label}，打开云端备份设置`}
     >
-      <Cloud size={12} aria-hidden="true" />
-      {!bound ? <span className="cloud-sync-cross" aria-hidden="true" /> : null}
+      <span className="cloud-archive-icon" aria-hidden="true">
+        <Cloud size={13} />
+        {archiveState === "unbound" ? <span className="cloud-archive-cross" /> : null}
+      </span>
+      {text ? <span className="cloud-archive-text">{text}</span> : null}
     </button>
   );
 }
@@ -1666,32 +2132,6 @@ function repairActionForStatus(status: string, onRepairPageScript: () => void, o
   return null;
 }
 
-function UserIdentityRow({ identity, compact = false }: { identity: UserIdentityView; compact?: boolean }) {
-  const allowRemoteAvatar = useContext(AvatarImageContext);
-  const [avatarFailed, setAvatarFailed] = useState(false);
-  const shouldRenderImage = identity.avatarUrl && (allowRemoteAvatar || identity.avatarUrl.startsWith("data:image/")) && !avatarFailed;
-
-  useEffect(() => {
-    setAvatarFailed(false);
-  }, [identity.avatarUrl]);
-
-  return (
-    <div className={`identity-row${compact ? " compact-identity" : ""}`}>
-      {shouldRenderImage ? (
-        <img className="avatar" src={identity.avatarUrl} alt="" onError={() => setAvatarFailed(true)} />
-      ) : (
-        <span className="avatar avatar-fallback" aria-hidden="true">
-          {identity.username.slice(0, 1).toUpperCase()}
-        </span>
-      )}
-      <div className="identity-text">
-        <strong>{identity.primary}</strong>
-        <span>{identity.secondary}</span>
-      </div>
-    </div>
-  );
-}
-
 function optionContent<T extends string>(option: FilterOption<T>) {
   return option.content ?? (
     <span className="filter-option-content">
@@ -1704,22 +2144,6 @@ function optionContent<T extends string>(option: FilterOption<T>) {
 
 function optionSearchText<T extends string>(option: FilterOption<T>) {
   return (option.searchText ?? `${option.label} ${option.value}`).toLowerCase();
-}
-
-function kindText(kind: ActivityItem["kind"]) {
-  if (kind === "topic") return "话题";
-  if (kind === "reply") return "回复";
-  if (kind === "boost") return "Boost";
-  if (kind === "reaction") return "回应";
-  return "动态";
-}
-
-function kindIcon(kind: ActivityItem["kind"], size = 15) {
-  if (kind === "topic") return <List size={size} aria-hidden="true" />;
-  if (kind === "reply") return <MessageCircleReply size={size} aria-hidden="true" />;
-  if (kind === "boost") return <Rocket size={size} aria-hidden="true" />;
-  if (kind === "reaction") return <Smile size={size} aria-hidden="true" />;
-  return <Users size={size} aria-hidden="true" />;
 }
 
 function sameScope(left: ActivityRefreshScope, right: ActivityRefreshScope) {
@@ -1767,6 +2191,14 @@ function formatCountdown(milliseconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatLongCountdown(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function absoluteLinuxDoUrl(url?: string) {

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useAtom, useSetAtom } from "jotai";
-import { Cloud, Send } from "lucide-react";
+import { Cloud, Send, Telescope } from "lucide-react";
 import {
+  addFriendFromKnownUserAtom,
   appStateAtom,
   checkForUpdatesAtom,
   clearCacheAtom,
@@ -11,30 +12,102 @@ import {
   importConfigAtom,
   loadStateAtom,
   loadUpdateCheckAtom,
+  lookupFriendProfileAtom,
+  loadSiteDataProgressAtom,
+  observeAppStateAtom,
   observeUpdateCheckAtom,
+  observeSiteDataProgressAtom,
+  removeFriendAtom,
+  removeDredgeRuleAtom,
+  resetLaoFindsStartedAtAtom,
   resetExtensionAtom,
-  updateCheckAtom
+  siteDataProgressAtom,
+  syncFollowsAtom,
+  updateFriendAtom,
+  updateCheckAtom,
+  upsertDredgeRuleAtom
 } from "../state/atoms";
 import { sendCommand } from "../messages/client";
+import { ActivityScopeSelect, FriendCandidateList } from "../app/FriendManagement";
+import { DredgeRuleEditor } from "../app/DredgeRuleEditor";
+import { UserIdentityRow } from "../app/UserIdentityRow";
 import { VersionBadge, VersionDiagnostics } from "../app/VersionStatus";
 import type {
+  ActivityRefreshKind,
+  CloudArchiveLocalState,
+  CloudArchiveLocalStateResult,
   CloudConfigBackupResult,
   CloudConfigBindResult,
   CloudConfigClearBindingResult,
   CloudConfigRestoreResult,
   CloudConfigStatus,
   CloudConfigStatusResult,
-  CloudConfigViewState
+  CloudConfigViewState,
+  Username
 } from "../shared/types";
+import { deriveFollowedCandidates, deriveFriendList } from "../popup/selectors";
 import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
+import { formatRelativeTime } from "../shared/time";
 import "../styles/app.css";
 
 const LDC_SPONSOR_20_URL = "https://credit.linux.do/paying/online?token=3b78efe60d34a77c55d52e84d60e33270b5cc69f7aa8979bbab4d1b41b6f95b7";
 const LDC_SPONSOR_200_URL = "https://credit.linux.do/paying/online?token=276b84998e7864428f277f6d7260f7e65e8c531cda5413cb061ff4a91cc3caa4";
 
+type OptionsSectionId = "basic" | "scope" | "lao-finds" | "notifications" | "data" | "sponsor";
+
+const OPTIONS_SECTIONS: Array<{ id: OptionsSectionId; hash: string; label: string }> = [
+  { id: "basic", hash: "#basic", label: "基础" },
+  { id: "scope", hash: "#scope", label: "视奸范围" },
+  { id: "lao-finds", hash: "#lao-finds", label: "佬有料" },
+  { id: "notifications", hash: "#notifications", label: "通知渠道" },
+  { id: "data", hash: "#data", label: "数据管理" },
+  { id: "sponsor", hash: "#sponsor", label: "赞助" }
+];
+
+const SECTION_BY_HASH = new Map(OPTIONS_SECTIONS.map((section) => [section.hash, section.id]));
+const HASH_ALIASES = new Map<string, { hash: string; preserve?: boolean }>([
+  ["#friends", { hash: "#scope" }],
+  ["#sync", { hash: "#data" }],
+  ["#maintenance", { hash: "#data" }],
+  ["#cloud-backup", { hash: "#data", preserve: true }]
+]);
+
+function sectionFromHash(hash: string): OptionsSectionId {
+  const canonicalHash = canonicalizeOptionsHash(hash);
+  return SECTION_BY_HASH.get(canonicalHash === "#cloud-backup" ? "#data" : canonicalHash) ?? "basic";
+}
+
+function canonicalizeOptionsHash(hash: string) {
+  const alias = HASH_ALIASES.get(hash);
+  if (alias?.preserve) return hash;
+  if (alias) return alias.hash;
+  if (SECTION_BY_HASH.has(hash)) return hash;
+  return "#basic";
+}
+
+function useCloudAuthStorageRefresh(
+  refreshCloudStatus: (options?: { silent?: boolean }) => Promise<void>,
+  refreshCloudArchiveState: () => Promise<void>
+) {
+  useEffect(() => {
+    if (typeof chrome === "undefined" || !chrome.storage?.onChanged) return undefined;
+    const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+      if (areaName !== "local" || !changes[CLOUD_AUTH_STORAGE_KEY]) return;
+      void refreshCloudStatus({ silent: true });
+      void refreshCloudArchiveState();
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => {
+      chrome.storage.onChanged.removeListener?.(listener);
+    };
+  }, [refreshCloudArchiveState, refreshCloudStatus]);
+}
+
 export function OptionsApp() {
   const [state, setState] = useAtom(appStateAtom);
+  const [siteDataProgress] = useAtom(siteDataProgressAtom);
   const [updateCheck] = useAtom(updateCheckAtom);
+  const addFriendFromKnownUser = useSetAtom(addFriendFromKnownUserAtom);
   const loadState = useSetAtom(loadStateAtom);
   const loadUpdateCheck = useSetAtom(loadUpdateCheckAtom);
   const checkForUpdates = useSetAtom(checkForUpdatesAtom);
@@ -42,36 +115,84 @@ export function OptionsApp() {
   const exportConfig = useSetAtom(exportConfigAtom);
   const identifyCurrentAccount = useSetAtom(identifyCurrentAccountAtom);
   const importConfig = useSetAtom(importConfigAtom);
+  const lookupFriendProfile = useSetAtom(lookupFriendProfileAtom);
+  const loadSiteDataProgress = useSetAtom(loadSiteDataProgressAtom);
+  const observeAppState = useSetAtom(observeAppStateAtom);
   const observeUpdateCheck = useSetAtom(observeUpdateCheckAtom);
+  const observeSiteDataProgress = useSetAtom(observeSiteDataProgressAtom);
+  const removeFriend = useSetAtom(removeFriendAtom);
+  const removeDredgeRule = useSetAtom(removeDredgeRuleAtom);
+  const resetLaoFindsStartedAt = useSetAtom(resetLaoFindsStartedAtAtom);
   const resetExtension = useSetAtom(resetExtensionAtom);
+  const syncFollows = useSetAtom(syncFollowsAtom);
+  const updateFriend = useSetAtom(updateFriendAtom);
+  const upsertDredgeRule = useSetAtom(upsertDredgeRuleAtom);
   const [relativeNow, setRelativeNow] = useState(() => Date.now());
+  const [activeHash, setActiveHash] = useState(() => canonicalizeOptionsHash(window.location.hash));
   const [configMessage, setConfigMessage] = useState<string | null>(null);
   const [cloudState, setCloudState] = useState<CloudConfigViewState | null>(null);
+  const [cloudArchiveState, setCloudArchiveState] = useState<CloudArchiveLocalStateResult | null>(null);
   const [cloudBusy, setCloudBusy] = useState<"bind" | "status" | "backup" | "restore" | "clear" | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
+  const [friendsQuery, setFriendsQuery] = useState("");
+  const [syncBusy, setSyncBusy] = useState(false);
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
   const [telegramToken, setTelegramToken] = useState("");
   const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramMessage, setTelegramMessage] = useState<string | null>(null);
   const [telegramBusy, setTelegramBusy] = useState<"save" | "test" | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const cloudBackupRef = useRef<HTMLDivElement | null>(null);
+  const activeSection = sectionFromHash(activeHash);
+  const friends = deriveFriendList(state);
+  const followedCandidates = deriveFollowedCandidates(state);
+  const cloudBinding = cloudArchiveState?.binding.bound ? cloudArchiveState.binding : cloudState?.binding.bound ? cloudState.binding : null;
+  const cloudBound = cloudBinding != null;
+  const dredgeRulesLocked = state.settings.timedActivityRefreshEnabled || (siteDataProgress?.taskType === "activity" && siteDataProgress.status === "running");
+  const dredgeRulesLockReason =
+    siteDataProgress?.taskType === "activity" && siteDataProgress.status === "running"
+      ? "刷新动态运行中，完成后可修改规则。"
+      : state.settings.timedActivityRefreshEnabled
+        ? "关闭自动捞料后可修改规则。"
+        : undefined;
 
   useEffect(() => {
     void loadState();
+    void loadSiteDataProgress();
     void loadUpdateCheck();
     void checkForUpdates();
+    const cleanupAppState = observeAppState();
+    const cleanupSiteDataProgress = observeSiteDataProgress();
     const cleanupUpdateCheck = observeUpdateCheck();
     const interval = window.setInterval(() => setRelativeNow(Date.now()), 30_000);
     return () => {
+      cleanupAppState?.();
+      cleanupSiteDataProgress?.();
       cleanupUpdateCheck?.();
       window.clearInterval(interval);
     };
-  }, [checkForUpdates, loadState, loadUpdateCheck, observeUpdateCheck]);
+  }, [checkForUpdates, loadSiteDataProgress, loadState, loadUpdateCheck, observeAppState, observeSiteDataProgress, observeUpdateCheck]);
 
   useEffect(() => {
     setTelegramToken(state.settings.telegramBotToken ?? "");
     setTelegramChatId(state.settings.telegramChatId ?? "");
   }, [state.settings.telegramBotToken, state.settings.telegramChatId]);
+
+  useEffect(() => {
+    function applyCurrentHash() {
+      const nextHash = canonicalizeOptionsHash(window.location.hash);
+      if (window.location.hash !== nextHash) {
+        window.history.replaceState(null, "", nextHash);
+      }
+      setActiveHash(nextHash);
+    }
+    applyCurrentHash();
+    function handleHashChange() {
+      applyCurrentHash();
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   const refreshCloudStatus = useCallback(async (options: { silent?: boolean } = {}) => {
     if (!options.silent) setCloudBusy("status");
@@ -85,35 +206,52 @@ export function OptionsApp() {
     if (!options.silent) setCloudBusy(null);
   }, []);
 
-  useEffect(() => {
-    void refreshCloudStatus({ silent: true });
-  }, [refreshCloudStatus]);
+  const refreshCloudArchiveState = useCallback(async () => {
+    const response = await sendCommand<CloudArchiveLocalStateResult>({ type: "getCloudArchiveLocalState" });
+    if (response.ok) setCloudArchiveState(response.data);
+  }, []);
 
   useEffect(() => {
-    if (window.location.hash !== "#cloud-backup") return;
-    const scrollToCloudBackup = () => document.getElementById("cloud-backup")?.scrollIntoView?.({ block: "start" });
+    void refreshCloudStatus({ silent: true });
+    void refreshCloudArchiveState();
+  }, [refreshCloudArchiveState, refreshCloudStatus]);
+
+  useEffect(() => {
+    void refreshCloudArchiveState();
+  }, [refreshCloudArchiveState, state.friends, state.dredgeRules, state.laoFindsStartedAt, state.settings]);
+
+  useEffect(() => {
+    if (window.location.hash !== "#cloud-backup" || activeSection !== "data") return;
+    const scrollToCloudBackup = () => cloudBackupRef.current?.scrollIntoView?.({ block: "start" });
     if (typeof window.requestAnimationFrame === "function") {
       window.requestAnimationFrame(scrollToCloudBackup);
       return;
     }
     window.setTimeout(scrollToCloudBackup, 0);
-  }, []);
+  }, [activeHash, activeSection]);
 
-  useEffect(() => {
-    if (typeof chrome === "undefined" || !chrome.storage?.onChanged) return undefined;
-    const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
-      if (areaName !== "local" || !cloudAuthBindingChanged(changes)) return;
-      void refreshCloudStatus({ silent: true });
-    };
-    chrome.storage.onChanged.addListener(listener);
-    return () => {
-      chrome.storage.onChanged.removeListener?.(listener);
-    };
-  }, [refreshCloudStatus]);
+  useCloudAuthStorageRefresh(refreshCloudStatus, refreshCloudArchiveState);
 
   async function updateSettings(patch: Partial<typeof state.settings>) {
     const response = await sendCommand<typeof state>({ type: "updateSettings", settings: patch });
     if (response.ok) setState(response.data);
+  }
+
+  async function handleResetLaoFindsStartedAt() {
+    const confirmed = window.confirm("重设后只会打捞此刻之后命中规则的公开动态，旧动态不会补录。");
+    if (!confirmed) return;
+    await resetLaoFindsStartedAt();
+  }
+
+  function switchSection(section: OptionsSectionId) {
+    const target = OPTIONS_SECTIONS.find((item) => item.id === section);
+    const hash = target?.hash ?? "#basic";
+    if (window.location.hash === hash) {
+      setActiveHash(hash);
+      return;
+    }
+    window.location.hash = hash;
+    setActiveHash(hash);
   }
 
   async function handleSaveTelegram() {
@@ -155,6 +293,19 @@ export function OptionsApp() {
     }
   }
 
+  async function handleSyncFollows() {
+    setSyncBusy(true);
+    try {
+      await syncFollows();
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  function handleUpdateFriendScope(username: Username, activityKinds: ActivityRefreshKind[]) {
+    void updateFriend(username, { activityKinds });
+  }
+
   async function handleClearCache() {
     await clearCache();
   }
@@ -183,6 +334,7 @@ export function OptionsApp() {
       if (response.ok) {
         setState(response.data);
         setConfigMessage(response.data.lastSync?.message ?? "已导入配置。");
+        void refreshCloudArchiveState();
       } else {
         setConfigMessage(response.error);
       }
@@ -199,6 +351,7 @@ export function OptionsApp() {
     if (response.ok) {
       setCloudState(response.data);
       setCloudMessage(response.data.message);
+      void refreshCloudArchiveState();
     } else {
       setCloudMessage(response.error);
     }
@@ -210,6 +363,7 @@ export function OptionsApp() {
     const response = await sendCommand<CloudConfigBackupResult>({ type: "backupCloudConfig" });
     if (response.ok) {
       setCloudState(response.data);
+      setCloudArchiveState({ binding: response.data.binding, archiveState: response.data.archiveState, syncedAt: response.data.binding.bound ? response.data.binding.lastConfigSyncedAt : undefined });
       setCloudMessage(response.data.message);
     } else {
       setCloudMessage(response.error);
@@ -223,6 +377,7 @@ export function OptionsApp() {
     const response = await sendCommand<CloudConfigRestoreResult>({ type: "restoreCloudConfig" });
     if (response.ok) {
       setCloudState(response.data);
+      setCloudArchiveState({ binding: response.data.binding, archiveState: response.data.archiveState, syncedAt: response.data.binding.bound ? response.data.binding.lastConfigSyncedAt : undefined });
       if (response.data.state) setState(response.data.state);
       setCloudMessage(response.data.message);
     } else {
@@ -236,6 +391,7 @@ export function OptionsApp() {
     const response = await sendCommand<CloudConfigClearBindingResult>({ type: "clearCloudBinding" });
     if (response.ok) {
       setCloudState(response.data);
+      setCloudArchiveState({ binding: response.data.binding, archiveState: "unbound" });
       setCloudMessage(response.data.message);
     } else {
       setCloudMessage(response.error);
@@ -244,7 +400,7 @@ export function OptionsApp() {
   }
 
   return (
-    <main className="options-shell">
+    <main className="options-shell options-shell-wide">
       <header className="header">
         <div>
           <p className="eyebrow">LinuxDo Friends</p>
@@ -255,225 +411,373 @@ export function OptionsApp() {
         </div>
       </header>
 
-      <VersionDiagnostics now={relativeNow} onCheck={() => void checkForUpdates(true)} state={updateCheck} />
-
-      <section className="panel">
-        <div className="panel-title-row">
-          <div>
-            <h2>本地账号探测</h2>
-            <p className="panel-subtitle">
-              {state.currentAccount
-                ? `当前探测为 @${state.currentAccount.username}`
-                : "尚未探测到 linux.do 登录账号。"}
-            </p>
-          </div>
-          <button className="small-action" type="button" disabled={accountBusy} onClick={() => void handleIdentifyAccount()}>
-            {accountBusy ? "探测中" : "重新探测"}
-          </button>
-        </div>
-        {state.currentAccount?.verifiedAt ? (
-          <p className="settings-meta">上次探测：{new Date(state.currentAccount.verifiedAt).toLocaleString()}</p>
-        ) : (
-          <p className="settings-meta">打开已登录的 linux.do 页面后可探测当前账号。</p>
-        )}
-      </section>
-
-      <section className="panel">
-        <h2>偏好设置</h2>
-        <div className="settings-placeholder" style={{ marginTop: 12 }}>
-          <h3>动态跳转</h3>
-          <div className="segmented-control" role="radiogroup" aria-label="动态跳转">
+      <div className="options-layout">
+        <nav className="options-nav" aria-label="设置导航">
+          {OPTIONS_SECTIONS.map((section) => (
             <button
-              className={`segmented-option${state.settings.openActivityLinksInPage ? " active" : ""}`}
+              className={activeSection === section.id ? "active" : ""}
+              key={section.id}
               type="button"
-              aria-pressed={state.settings.openActivityLinksInPage}
-              onClick={() => void updateSettings({ openActivityLinksInPage: true })}
+              onClick={() => switchSection(section.id)}
             >
-              页内跳转
+              {section.label}
             </button>
-            <button
-              className={`segmented-option${!state.settings.openActivityLinksInPage ? " active" : ""}`}
-              type="button"
-              aria-pressed={!state.settings.openActivityLinksInPage}
-              onClick={() => void updateSettings({ openActivityLinksInPage: false })}
-            >
-              新标签页
-            </button>
-          </div>
-          <p className="settings-meta">页内跳转会优先使用当前 linux.do 标签页；不可用时仍打开新标签。</p>
-        </div>
-        <div className="settings-placeholder" style={{ marginTop: 12 }}>
-          <h3>
-            <Send size={13} aria-hidden="true" style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-            Telegram 通知
-          </h3>
-          <div>
-            <label className="settings-meta" htmlFor="tg-bot-token" style={{ display: "block", marginBottom: 4 }}>
-              Bot Token
-            </label>
-            <input
-              id="tg-bot-token"
-              type="password"
-              placeholder="123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
-              value={telegramToken}
-              onChange={(e) => setTelegramToken(e.currentTarget.value)}
-              autoComplete="off"
-            />
-          </div>
-          <div>
-            <label className="settings-meta" htmlFor="tg-chat-id" style={{ display: "block", marginBottom: 4 }}>
-              Chat ID
-            </label>
-            <input
-              id="tg-chat-id"
-              type="text"
-              placeholder="123456789"
-              value={telegramChatId}
-              onChange={(e) => setTelegramChatId(e.currentTarget.value)}
-              autoComplete="off"
-            />
-          </div>
-          <div className="maintenance-actions">
-            <button className="small-action" type="button" disabled={telegramBusy != null} onClick={() => void handleSaveTelegram()}>
-              {telegramBusy === "save" ? "保存中" : "保存"}
-            </button>
-            <button className="small-action" type="button" disabled={telegramBusy != null} onClick={() => void handleTestTelegram()}>
-              {telegramBusy === "test" ? "发送中" : "发送测试消息"}
-            </button>
-          </div>
-          {telegramMessage ? <p className="settings-meta">{telegramMessage}</p> : null}
-          <p className="settings-meta">
-            刷新到新动态时自动推送 Telegram 消息。需自行创建 Bot（向 @BotFather 发送 /newbot）并使用 @userinfobot 获取自己的 Chat ID。
-          </p>
-        </div>
-        <div className="settings-construction-card" aria-label="后台刷新设置正在施工">
-          <div>
-            <h3>后台刷新</h3>
-            <p>正在施工</p>
-          </div>
-          <span className="construction-badge">WIP</span>
-        </div>
-      </section>
+          ))}
+        </nav>
 
-      <section className="panel">
-        <div className="settings-group">
-          <div className="panel-title-row">
-            <div>
-              <h2>配置迁移</h2>
-              <p className="panel-subtitle">只导入导出佬朋友和刷新设置，不包含账号、动态、头像缓存、页面现场或 Cookie。</p>
-            </div>
-            <div className="maintenance-actions">
-              <button className="small-action" type="button" onClick={() => void handleExportConfig()}>
-                导出配置
-              </button>
-              <button className="small-action" type="button" onClick={() => importInputRef.current?.click()}>
-                导入配置
-              </button>
+        <div className="options-content">
+          {activeSection === "basic" ? (
+            <>
+              <VersionDiagnostics now={relativeNow} onCheck={() => void checkForUpdates(true)} state={updateCheck} />
+              <section className="panel">
+                <div className="panel-title-row">
+                  <div>
+                    <h2>本地账号探测</h2>
+                    <p className="panel-subtitle">
+                      {state.currentAccount
+                        ? `当前探测为 @${state.currentAccount.username}`
+                        : "尚未探测到 linux.do 登录账号。"}
+                    </p>
+                  </div>
+                  <button className="small-action" type="button" disabled={accountBusy} onClick={() => void handleIdentifyAccount()}>
+                    {accountBusy ? "探测中" : "重新探测"}
+                  </button>
+                </div>
+                {state.currentAccount?.verifiedAt ? (
+                  <p className="settings-meta">上次探测：{new Date(state.currentAccount.verifiedAt).toLocaleString()}</p>
+                ) : (
+                  <p className="settings-meta">打开已登录的 linux.do 页面后可探测当前账号。</p>
+                )}
+              </section>
+              <section className="panel">
+                <h2>动态跳转</h2>
+                <div className="settings-placeholder" style={{ marginTop: 12 }}>
+                  <div className="segmented-control" role="radiogroup" aria-label="动态跳转">
+                    <button
+                      className={`segmented-option${state.settings.openActivityLinksInPage ? " active" : ""}`}
+                      type="button"
+                      aria-pressed={state.settings.openActivityLinksInPage}
+                      onClick={() => void updateSettings({ openActivityLinksInPage: true })}
+                    >
+                      页内跳转
+                    </button>
+                    <button
+                      className={`segmented-option${!state.settings.openActivityLinksInPage ? " active" : ""}`}
+                      type="button"
+                      aria-pressed={!state.settings.openActivityLinksInPage}
+                      onClick={() => void updateSettings({ openActivityLinksInPage: false })}
+                    >
+                      新标签页
+                    </button>
+                  </div>
+                  <p className="settings-meta">页内跳转会优先使用当前 linux.do 标签页；不可用时仍打开新标签。</p>
+                </div>
+              </section>
+            </>
+          ) : null}
+
+          {activeSection === "scope" ? (
+            <section className="panel">
+              <div className="panel-title-row">
+                <div>
+                  <h2>视奸范围</h2>
+                </div>
+                <button className="small-action" type="button" disabled={syncBusy} onClick={() => void handleSyncFollows()}>
+                  {syncBusy ? "获取中" : "获取我的关注列表"}
+                </button>
+              </div>
               <input
-                ref={importInputRef}
-                className="visually-hidden-file"
-                type="file"
-                accept="application/json,.json"
-                onChange={(event) => void handleImportConfig(event.currentTarget.files?.[0])}
+                className="modal-search-input settings-search-input"
+                value={friendsQuery}
+                onChange={(event) => setFriendsQuery(event.target.value)}
+                placeholder="筛选已关注，或输入用户名"
               />
-            </div>
-          </div>
-          {configMessage ? <p className="settings-meta">{configMessage}</p> : null}
-        </div>
-
-        <div className="settings-section-divider" />
-
-        <div className="settings-group" id="cloud-backup">
-          <div className="panel-title-row">
-            <div>
-              <h2 className="settings-title-with-icon">
-                <Cloud size={16} aria-hidden="true" />
-                <span>云端备份</span>
-              </h2>
-              <p className="panel-subtitle">{cloudBindingText(cloudState)}</p>
-            </div>
-            <div className="maintenance-actions">
-              <button className="small-action" type="button" disabled={cloudBusy != null} onClick={() => void handleBindCloudSave()}>
-                {cloudBusy === "bind" ? "绑定中" : cloudState?.binding.bound ? "重新绑定" : "绑定"}
-              </button>
-              <button className="small-action" type="button" disabled={cloudBusy != null} onClick={() => void refreshCloudStatus()}>
-                {cloudBusy === "status" ? "检查中" : "检查云端"}
-              </button>
-              <button
-                className="small-action"
-                type="button"
-                disabled={cloudBusy != null || cloudState?.binding.bound !== true}
-                onClick={() => void handleBackupCloudConfig()}
-              >
-                {cloudBusy === "backup" ? "备份中" : "备份到云端"}
-              </button>
-              <button
-                className="small-action"
-                type="button"
-                disabled={cloudBusy != null || cloudState?.binding.bound !== true}
-                onClick={() => void handleRestoreCloudConfig()}
-              >
-                {cloudBusy === "restore" ? "恢复中" : "从云端恢复"}
-              </button>
-              <button
-                className="small-action danger-action"
-                type="button"
-                disabled={cloudBusy != null || cloudState?.binding.bound !== true}
-                onClick={() => void handleClearCloudBinding()}
-              >
-                断开绑定
-              </button>
-            </div>
-          </div>
-          <p className="settings-meta">{cloudStatusText(cloudState?.status)}</p>
-          {cloudState?.binding.bound ? (
-            <p className="settings-meta">
-              绑定账号 ID：{cloudState.binding.linuxDoId}；绑定时间：{new Date(cloudState.binding.boundAt).toLocaleString()}
-            </p>
+              <FriendCandidateList
+                candidates={followedCandidates}
+                friends={friends}
+                loading={syncBusy}
+                mode="full"
+                onAdd={(target, profile) => void addFriendFromKnownUser(target, profile)}
+                onLookup={(target) => lookupFriendProfile(target)}
+                onRemove={(target) => void removeFriend(target)}
+                onUpdateScope={handleUpdateFriendScope}
+                query={friendsQuery}
+              />
+              {friends.length > 0 ? <p className="friend-count-footer">共 {friends.length} 位佬朋友</p> : null}
+            </section>
           ) : null}
-          {cloudState?.binding.bound && cloudState.binding.lastBackupAt ? (
-            <p className="settings-meta">上次备份：{new Date(cloudState.binding.lastBackupAt).toLocaleString()}</p>
-          ) : null}
-          {cloudState?.binding.bound && cloudState.binding.lastRestoreAt ? (
-            <p className="settings-meta">上次恢复：{new Date(cloudState.binding.lastRestoreAt).toLocaleString()}</p>
-          ) : null}
-          {cloudMessage ? <p className="settings-meta">{cloudMessage}</p> : null}
-        </div>
-      </section>
 
-      <section className="panel danger-panel">
-        <div className="panel-title-row">
-          <div>
-            <h2>数据维护</h2>
-            <p className="panel-subtitle">清理缓存会保留佬朋友、设置和当前账号；全量重置会恢复到刚安装状态。</p>
-          </div>
-          <div className="maintenance-actions">
-            <button className="small-action" type="button" onClick={() => void handleClearCache()}>
-              清理缓存
-            </button>
-            <button className="small-action danger-action" type="button" onClick={() => void handleResetExtension()}>
-              全量重置
-            </button>
-          </div>
-        </div>
-      </section>
+          {activeSection === "notifications" ? (
+            <section className="panel">
+              <h2>通知渠道</h2>
+              <div className="settings-placeholder" style={{ marginTop: 12 }}>
+                <h3>
+                  <Send size={13} aria-hidden="true" style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
+                  Telegram
+                </h3>
+                <div>
+                  <label className="settings-meta" htmlFor="tg-bot-token" style={{ display: "block", marginBottom: 4 }}>
+                    Bot Token
+                  </label>
+                  <input
+                    id="tg-bot-token"
+                    type="password"
+                    placeholder="123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+                    value={telegramToken}
+                    onChange={(e) => setTelegramToken(e.currentTarget.value)}
+                    autoComplete="off"
+                  />
+                </div>
+                <div>
+                  <label className="settings-meta" htmlFor="tg-chat-id" style={{ display: "block", marginBottom: 4 }}>
+                    Chat ID
+                  </label>
+                  <input
+                    id="tg-chat-id"
+                    type="text"
+                    placeholder="123456789"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.currentTarget.value)}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="maintenance-actions">
+                  <button className="small-action" type="button" disabled={telegramBusy != null} onClick={() => void handleSaveTelegram()}>
+                    {telegramBusy === "save" ? "保存中" : "保存"}
+                  </button>
+                  <button className="small-action" type="button" disabled={telegramBusy != null} onClick={() => void handleTestTelegram()}>
+                    {telegramBusy === "test" ? "发送中" : "发送测试消息"}
+                  </button>
+                </div>
+                {telegramMessage ? <p className="settings-meta">{telegramMessage}</p> : null}
+                <p className="settings-meta">
+                  刷新到新动态时自动推送 Telegram 消息。需自行创建 Bot（向 @BotFather 发送 /newbot）并使用 @userinfobot 获取自己的 Chat ID。
+                </p>
+              </div>
+              <div className="settings-construction-card" aria-label="Webhook 通知正在施工">
+                <div>
+                  <h3>Webhook</h3>
+                  <p>正在施工</p>
+                </div>
+                <span className="construction-badge">WIP</span>
+              </div>
+            </section>
+          ) : null}
 
-      <section className="panel sponsor-panel">
-        <div className="panel-title-row">
-          <div>
-            <h2>赞助本项目</h2>
-            <p className="panel-subtitle">给佬朋友续一口 LDC。</p>
-          </div>
-          <div className="maintenance-actions sponsor-actions">
-            <a className="small-action sponsor-action" href={LDC_SPONSOR_20_URL} target="_blank" rel="noreferrer">
-              20 LDC
-            </a>
-            <a className="small-action sponsor-action" href={LDC_SPONSOR_200_URL} target="_blank" rel="noreferrer">
-              200 LDC
-            </a>
-          </div>
+          {activeSection === "lao-finds" ? (
+            <>
+              <section className="panel">
+                <div className="panel-title-row">
+                  <div>
+                    <h2 className="settings-title-with-icon">
+                      <Telescope size={16} aria-hidden="true" />
+                      <span>佬有料</span>
+                    </h2>
+                    <p className="panel-subtitle">侧栏打开时运行定时刷新。</p>
+                  </div>
+                </div>
+                <div className="timed-settings-grid">
+                  <div className="timed-setting-row">
+                    <div>
+                      <strong>启用定时刷新</strong>
+                      <span>保持插件界面打开，自动捞料才会运行。</span>
+                    </div>
+                    <button
+                      className={`switch-button${state.settings.timedActivityRefreshEnabled ? " active" : ""}`}
+                      type="button"
+                      aria-pressed={state.settings.timedActivityRefreshEnabled}
+                      onClick={() => void updateSettings({ timedActivityRefreshEnabled: !state.settings.timedActivityRefreshEnabled })}
+                    >
+                      {state.settings.timedActivityRefreshEnabled ? "已启用" : "未启用"}
+                    </button>
+                  </div>
+                  <div className="timed-setting-row">
+                    <div>
+                      <strong>刷新范围</strong>
+                      <span>按规则会从启用的打捞规则反推请求范围；全量会按每位用户的视奸范围刷新。</span>
+                    </div>
+                    <div className="segmented-control timed-mode-control" role="radiogroup" aria-label="定时刷新范围">
+                      <button
+                        className={`segmented-option${state.settings.timedActivityRefreshScopeMode === "rules" ? " active" : ""}`}
+                        type="button"
+                        aria-pressed={state.settings.timedActivityRefreshScopeMode === "rules"}
+                        onClick={() => void updateSettings({ timedActivityRefreshScopeMode: "rules" })}
+                      >
+                        按规则
+                      </button>
+                      <button
+                        className={`segmented-option${state.settings.timedActivityRefreshScopeMode === "all" ? " active" : ""}`}
+                        type="button"
+                        aria-pressed={state.settings.timedActivityRefreshScopeMode === "all"}
+                        onClick={() => void updateSettings({ timedActivityRefreshScopeMode: "all" })}
+                      >
+                        全量
+                      </button>
+                    </div>
+                  </div>
+                  <div className="timed-setting-row">
+                    <div>
+                      <strong>刷新间隔</strong>
+                      <span>范围 30 到 720 分钟。</span>
+                    </div>
+                    <input
+                      className="timed-interval-input"
+                      type="number"
+                      min={30}
+                      max={720}
+                      step={30}
+                      value={state.settings.timedActivityRefreshIntervalMinutes}
+                      onChange={(event) => {
+                        const value = Number(event.currentTarget.value);
+                        if (!Number.isFinite(value)) return;
+                        void updateSettings({ timedActivityRefreshIntervalMinutes: value });
+                      }}
+                      aria-label="定时刷新间隔分钟"
+                    />
+                  </div>
+                  <div className="timed-setting-row">
+                    <div>
+                      <strong>打捞起点</strong>
+                      <span>{formatLaoFindsStartedAt(state.laoFindsStartedAt, relativeNow)}</span>
+                    </div>
+                    <button className="small-action" type="button" onClick={() => void handleResetLaoFindsStartedAt()} disabled={dredgeRulesLocked}>
+                      重设为现在
+                    </button>
+                  </div>
+                </div>
+              </section>
+              <DredgeRuleEditor
+                locked={dredgeRulesLocked}
+                lockReason={dredgeRulesLockReason}
+                rules={state.dredgeRules}
+                state={state}
+                onRemoveRule={(id) => void removeDredgeRule(id)}
+                onUpsertRule={(rule) => void upsertDredgeRule(rule)}
+              />
+            </>
+          ) : null}
+
+          {activeSection === "data" ? (
+            <section className="panel">
+              <div className="settings-group">
+                <div className="panel-title-row">
+                  <div>
+                    <h2>配置迁移</h2>
+                    <p className="panel-subtitle">只导入导出佬朋友和刷新设置，不包含账号、动态、头像缓存、页面现场或 Cookie。</p>
+                  </div>
+                  <div className="maintenance-actions">
+                    <button className="small-action" type="button" onClick={() => void handleExportConfig()}>
+                      导出配置
+                    </button>
+                    <button className="small-action" type="button" onClick={() => importInputRef.current?.click()}>
+                      导入配置
+                    </button>
+                    <input
+                      ref={importInputRef}
+                      className="visually-hidden-file"
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={(event) => void handleImportConfig(event.currentTarget.files?.[0])}
+                    />
+                  </div>
+                </div>
+                {configMessage ? <p className="settings-meta">{configMessage}</p> : null}
+              </div>
+
+              <div className="settings-section-divider" />
+
+              <div className="settings-group" id="cloud-backup" ref={cloudBackupRef}>
+                <div className="panel-title-row">
+                  <div>
+                    <h2 className="settings-title-with-icon">
+                      <Cloud size={16} aria-hidden="true" />
+                      <span>云端备份</span>
+                    </h2>
+                    <p className="panel-subtitle">{cloudArchiveStatusDescription(cloudArchiveState)}</p>
+                  </div>
+                  <div className="maintenance-actions">
+                    <button className="small-action" type="button" disabled={cloudBusy != null} onClick={() => void handleBindCloudSave()}>
+                      {cloudBusy === "bind" ? "绑定中" : cloudBound ? "重新绑定" : "绑定"}
+                    </button>
+                    <button className="small-action" type="button" disabled={cloudBusy != null} onClick={() => void refreshCloudStatus()}>
+                      {cloudBusy === "status" ? "检查中" : "检查云端"}
+                    </button>
+                    <button
+                      className={`small-action${cloudArchiveState?.archiveState === "different" ? " primary-action" : ""}`}
+                      type="button"
+                      disabled={cloudBusy != null || !cloudBound}
+                      onClick={() => void handleBackupCloudConfig()}
+                    >
+                      {cloudBusy === "backup" ? "备份中" : "备份到云端"}
+                    </button>
+                    <button
+                      className="small-action"
+                      type="button"
+                      disabled={cloudBusy != null || !cloudBound}
+                      onClick={() => void handleRestoreCloudConfig()}
+                    >
+                      {cloudBusy === "restore" ? "恢复中" : "从云端恢复"}
+                    </button>
+                    <button
+                      className="small-action danger-action"
+                      type="button"
+                      disabled={cloudBusy != null || !cloudBound}
+                      onClick={() => void handleClearCloudBinding()}
+                    >
+                      断开绑定
+                    </button>
+                  </div>
+                </div>
+                <div className={`cloud-backup-status cloud-backup-${cloudArchiveState?.archiveState ?? "unbound"}`}>
+                  <strong>{cloudArchiveStatusTitle(cloudArchiveState)}</strong>
+                  <span>{cloudArchiveStatusHint(cloudArchiveState)}</span>
+                </div>
+                <p className="settings-meta cloud-backup-remote">{cloudStatusText(cloudState?.status)}</p>
+                {cloudBinding ? <p className="settings-meta cloud-backup-meta">{cloudBindingMetaText(cloudBinding)}</p> : null}
+                {cloudMessage ? <p className="settings-meta">{cloudMessage}</p> : null}
+              </div>
+
+              <div className="settings-section-divider" />
+
+              <div className="settings-group danger-panel">
+                <div className="panel-title-row">
+                  <div>
+                    <h2>数据维护</h2>
+                    <p className="panel-subtitle">清理缓存会保留佬朋友、设置和当前账号；全量重置会恢复到刚安装状态。</p>
+                  </div>
+                  <div className="maintenance-actions">
+                    <button className="small-action" type="button" onClick={() => void handleClearCache()}>
+                      清理缓存
+                    </button>
+                    <button className="small-action danger-action" type="button" onClick={() => void handleResetExtension()}>
+                      全量重置
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          {activeSection === "sponsor" ? (
+            <section className="panel sponsor-panel">
+              <div className="panel-title-row">
+                <div>
+                  <h2>赞助本项目</h2>
+                  <p className="panel-subtitle">给佬朋友续一口 LDC。</p>
+                </div>
+                <div className="maintenance-actions sponsor-actions">
+                  <a className="small-action sponsor-action" href={LDC_SPONSOR_20_URL} target="_blank" rel="noreferrer">
+                    20 LDC
+                  </a>
+                  <a className="small-action sponsor-action" href={LDC_SPONSOR_200_URL} target="_blank" rel="noreferrer">
+                    200 LDC
+                  </a>
+                </div>
+              </div>
+            </section>
+          ) : null}
         </div>
-      </section>
+      </div>
     </main>
   );
 }
@@ -494,10 +798,39 @@ function configFileName(exportedAt: string) {
   return `linuxdo-friends-config-${exportedAt.replace(/[:.]/g, "-")}.json`;
 }
 
-function cloudBindingText(state: CloudConfigViewState | null): string {
-  if (!state) return "正在检查 linuxdo-cloud-save 绑定状态。";
-  if (!state.binding.bound) return "尚未绑定 linuxdo-cloud-save。";
-  return "已绑定 linuxdo-cloud-save。";
+function cloudArchiveStatusTitle(state: CloudArchiveLocalStateResult | null): string {
+  return cloudArchiveStatusCopy(state).title;
+}
+
+function cloudArchiveStatusDescription(state: CloudArchiveLocalStateResult | null): string {
+  return cloudArchiveStatusCopy(state).description;
+}
+
+function cloudArchiveStatusHint(state: CloudArchiveLocalStateResult | null): string {
+  return cloudArchiveStatusCopy(state).hint;
+}
+
+function cloudArchiveStatusCopy(state: CloudArchiveLocalStateResult | null): { title: string; description: string; hint: string } {
+  const archiveState: CloudArchiveLocalState = state?.archiveState ?? "unbound";
+  if (archiveState === "same") {
+    return {
+      title: "已备份",
+      description: "本地配置已备份到云端。",
+      hint: state?.syncedAt ? `同步于 ${new Date(state.syncedAt).toLocaleString()}` : "本地配置已备份到云端。"
+    };
+  }
+  if (archiveState === "different") {
+    return {
+      title: "待备份",
+      description: "本地配置有更新，尚未备份到云端。",
+      hint: "建议备份到云端。"
+    };
+  }
+  return {
+    title: "未绑定",
+    description: "绑定后可以把佬朋友和设置备份到云端。",
+    hint: "尚未绑定 linuxdo-cloud-save。"
+  };
 }
 
 function cloudStatusText(status: CloudConfigStatus | undefined): string {
@@ -509,30 +842,16 @@ function cloudStatusText(status: CloudConfigStatus | undefined): string {
   return status.message ?? "云端配置状态未知。";
 }
 
-function cloudAuthBindingChanged(changes: Record<string, chrome.storage.StorageChange>): boolean {
-  const change = changes[CLOUD_AUTH_STORAGE_KEY];
-  if (!change) return false;
-  return cloudAuthBindingSignature(change.oldValue) !== cloudAuthBindingSignature(change.newValue);
+function cloudBindingMetaText(binding: Extract<CloudConfigViewState["binding"], { bound: true }>): string {
+  const parts = [`账号 ${binding.linuxDoId}`, `绑定于 ${new Date(binding.boundAt).toLocaleString()}`];
+  if (binding.lastBackupAt) parts.push(`上次备份 ${new Date(binding.lastBackupAt).toLocaleString()}`);
+  if (binding.lastRestoreAt) parts.push(`上次恢复 ${new Date(binding.lastRestoreAt).toLocaleString()}`);
+  return parts.join(" · ");
 }
 
-function cloudAuthBindingSignature(value: unknown): string {
-  if (!isRecord(value)) return "unbound";
-  if (
-    value.app !== "linuxdo-friends" ||
-    value.tokenType !== "Bearer" ||
-    value.tokenKind !== "jwt" ||
-    typeof value.linuxDoId !== "string" ||
-    !value.linuxDoId.trim() ||
-    typeof value.boundAt !== "string" ||
-    !value.boundAt.trim()
-  ) {
-    return "unbound";
-  }
-  return `${value.app}:${value.linuxDoId}:${value.boundAt}`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value != null && !Array.isArray(value);
+function formatLaoFindsStartedAt(value: string | undefined, now: number): string {
+  if (!value || Number.isNaN(Date.parse(value))) return "未设置，首次打捞会从当前时间开始。";
+  return `${new Date(value).toLocaleString()}（${formatRelativeTime(value, now)}）`;
 }
 
 const rootElement = document.getElementById("root");

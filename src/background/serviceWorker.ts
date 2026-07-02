@@ -4,6 +4,7 @@ import { maybeSendTelegramNotifications, sendTelegramMessage } from "../domain/t
 import {
   applyScopedActivityRefresh,
   clearActivityNewFlags,
+  deriveTimedActivityRefreshScopes,
   latestActivityRefreshAt,
   normalizeActivityRefreshScope,
   normalizeRefreshTargets,
@@ -23,8 +24,16 @@ import {
   sanitizeCloudErrorMessage,
   summarizeCloudConfigPayload
 } from "../domain/cloudConfig";
-import { applyConfigImport, createConfigExport, parseConfigImportJson } from "../domain/configTransfer";
+import { applyConfigImport, createConfigExport, createConfigFingerprint, parseConfigImportJson } from "../domain/configTransfer";
 import { addFriendFromKnownUser, addFriendFromProfile, removeFriend, updateFriend, upsertFollowedUser, upsertFriendProfile } from "../domain/friends";
+import {
+  archiveLaoFindsItem,
+  collectLaoFindsItems,
+  markLaoFindsItemRead,
+  removeDredgeRule,
+  resetLaoFindsStartedAt,
+  upsertDredgeRule
+} from "../domain/laoFinds";
 import {
   defaultUpdateCheckState,
   GITHUB_LATEST_RELEASE_API,
@@ -34,6 +43,7 @@ import {
   updateCheckStateFromRelease
 } from "../domain/versionCheck";
 import { isBackgroundCommand } from "../messages/contracts";
+import { base64urlFromBytes, sha256Base64url } from "../shared/crypto";
 import { nowIso } from "../shared/time";
 import type {
   ActivityItem,
@@ -45,6 +55,7 @@ import type {
   BackgroundCommand,
   BackgroundResponse,
   CloudAuthState,
+  CloudArchiveLocalStateResult,
   CloudConfigBackupResult,
   CloudConfigBindResult,
   CloudConfigClearBindingResult,
@@ -64,6 +75,7 @@ import type {
   PageScriptStatusSnapshot,
   ProfileRefreshTaskProgress,
   RefreshResult,
+  SiteDataTaskTrigger,
   SiteDataTaskProgress,
   UpdateCheckState,
   Username
@@ -77,7 +89,16 @@ import {
   updateCloudAuth
 } from "../storage/cloudAuthStorage";
 import { PAGE_SCRIPT_STATUS_STORAGE_KEY, savePageScriptStatusState } from "../storage/pageScriptStatusStorage";
-import { SITE_DATA_PROGRESS_STORAGE_KEY, saveSiteDataProgressState } from "../storage/siteDataProgressStorage";
+import {
+  isStaleRunningSiteDataProgress,
+  SITE_DATA_PROGRESS_STORAGE_KEY,
+  saveSiteDataProgressState
+} from "../storage/siteDataProgressStorage";
+import {
+  invalidateTimedActivityNoTargetSessionState,
+  loadTimedActivityRefreshSessionState,
+  patchTimedActivityRefreshSessionState
+} from "../storage/timedActivityRefreshSessionStorage";
 import { loadState, saveState } from "../storage/storage";
 import { UPDATE_CHECK_STORAGE_KEY, loadUpdateCheckState, saveUpdateCheckState } from "../storage/updateCheckStorage";
 import { allUiSceneStorageKeys } from "../storage/uiSceneStorage";
@@ -86,9 +107,14 @@ const refreshAdapter = createRefreshAdapter();
 interface ActiveSiteDataTask {
   taskId: string;
   generation: number;
+  trigger?: SiteDataTaskTrigger;
+  timedRunId?: string;
   promise: Promise<BackgroundResponse>;
   progress?: SiteDataTaskProgress;
 }
+
+type SiteDataTaskContext = Pick<ActiveSiteDataTask, "taskId" | "generation" | "trigger" | "timedRunId">;
+type SiteDataTaskOwnership = Pick<ActiveSiteDataTask, "trigger" | "timedRunId">;
 
 let activeSiteDataTask: ActiveSiteDataTask | null = null;
 let activeUpdateCheck: Promise<UpdateCheckState> | null = null;
@@ -158,26 +184,51 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
     case "lookupFriendProfile":
       return lookupFriendProfileWithFallback(command.username);
     case "addFriendFromKnownUser":
-      return ok(await updateAppState((state) => addFriendFromKnownUser(state, command.user, command.profile)));
-    case "addFriendByProfile":
-      return runSiteDataTask(() => refreshState((state) => addFriendByProfileWithFallback(state, command.username)));
+      return ok(await updateTimedActivityTargetInputs((state) => addFriendFromKnownUser(state, command.user, command.profile)));
+    case "addFriendByProfile": {
+      const beforeSignature = timedActivityTargetSignature(await loadState());
+      const response = await runSiteDataTask(() => refreshState((state) => addFriendByProfileWithFallback(state, command.username)));
+      if (response.ok) {
+        const responseState = response.data as AppState;
+        if (timedActivityTargetSignature(responseState) !== beforeSignature) {
+          await invalidateTimedActivityNoTargetSessionStateIfTargetable(responseState);
+        }
+      }
+      return response;
+    }
     case "removeFriend":
-      return ok(await updateAppState((state) => removeFriend(state, command.username)));
+      return ok(await updateTimedActivityTargetInputs((state) => removeFriend(state, command.username)));
     case "updateFriend":
-      return ok(await updateAppState((state) => updateFriend(state, command.username, command.patch)));
+      return ok(
+        command.patch.activityKinds === undefined
+          ? await updateAppState((state) => updateFriend(state, command.username, command.patch))
+          : await updateTimedActivityTargetInputs((state) => updateFriend(state, command.username, command.patch))
+      );
     case "syncFollowedUsers":
       return runSiteDataTask(() => refreshState(syncFollowedUsersWithFallback));
     case "refreshFriendProfiles":
       return runSiteDataTask(() => refreshState((state) => refreshFriendProfilesWithFallback(state, command.usernames)));
     case "refreshFriendActivity": {
-      const activityResponse = await runSiteDataTask(() =>
-        refreshState((state) => refreshFriendActivityWithFallback(state, command.scope ?? { kind: "all", usernames: command.usernames }))
+      const ownership = siteDataTaskOwnershipFromCommand(command);
+      const activityResponse = await runSiteDataTask((taskContext) =>
+        refreshState((state) => refreshFriendActivityWithFallback(state, command.scope ?? { kind: "all", usernames: command.usernames }, taskContext)),
+        ownership
       );
       if (activityResponse.ok) {
         void maybeSendTelegramNotifications(activityResponse.data as AppState);
       }
       return activityResponse;
     }
+    case "upsertDredgeRule":
+      return ok(await updateTimedActivityTargetInputs((state) => upsertDredgeRule(state, command.rule)));
+    case "removeDredgeRule":
+      return ok(await updateTimedActivityTargetInputs((state) => removeDredgeRule(state, command.id)));
+    case "resetLaoFindsStartedAt":
+      return ok(await updateAppState((state) => resetLaoFindsStartedAt(state)));
+    case "markLaoFindsItemRead":
+      return ok(await updateAppState((state) => markLaoFindsItemRead(state, command.id, command.read)));
+    case "archiveLaoFindsItem":
+      return ok(await updateAppState((state) => archiveLaoFindsItem(state, command.id, command.archived)));
     case "cacheAvatars":
       return ok(await cacheAvatarsFromExistingTab(command.usernames));
     case "getSiteDataProgress":
@@ -188,6 +239,8 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
       return ok(await loadUpdateCheckState(installedVersion()));
     case "checkForUpdates":
       return ok(await checkForUpdates(command.force === true));
+    case "getCloudArchiveLocalState":
+      return ok(await getCloudArchiveLocalState());
     case "getCloudConfigStatus":
       return ok(await runCloudCommand(getCloudConfigStatus));
     case "bindCloudSave":
@@ -214,15 +267,7 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
     case "openActivityLink":
       return ok(await openActivityLink(command.url));
     case "updateSettings":
-      return ok(
-        await updateAppState((state) => ({
-          ...state,
-          settings: {
-            ...state.settings,
-            ...applyMvpSettingsGuard(command.settings)
-          }
-        }))
-      );
+      return ok(await updateSettings(command.settings));
     case "exportConfig":
       return ok(createConfigExport(await loadState()));
     case "importConfig":
@@ -251,6 +296,7 @@ async function importConfig(json: string): Promise<AppState> {
   await saveState(next);
   await removeLocalStorageKeys([UPDATE_CHECK_STORAGE_KEY]);
   await removeSessionStorageKeys([SITE_DATA_PROGRESS_STORAGE_KEY, PAGE_SCRIPT_STATUS_STORAGE_KEY, ...allUiSceneStorageKeys]);
+  await invalidateTimedActivityNoTargetSessionStateIfTargetable(next);
   pageScriptHeartbeats.clear();
   lastSiteDataProgress = null;
   return next;
@@ -309,6 +355,7 @@ async function clearCache(): Promise<AppState> {
     activityRefreshLedger: {},
     activityWatermarks: {},
     activityFeedWaterlineAt: undefined,
+    laoFindsItems: {},
     avatarCache: {},
     lastSync: {
       ok: true,
@@ -338,6 +385,7 @@ async function resetExtension(): Promise<AppState> {
   await removeLocalStorageKeys([UPDATE_CHECK_STORAGE_KEY, CLOUD_AUTH_VERIFIER_STORAGE_KEY, CLOUD_AUTH_WINDOW_STORAGE_KEY]);
   await clearCloudAuth();
   await removeSessionStorageKeys([SITE_DATA_PROGRESS_STORAGE_KEY, PAGE_SCRIPT_STATUS_STORAGE_KEY, ...allUiSceneStorageKeys]);
+  await invalidateTimedActivityNoTargetSessionStateIfTargetable(next);
   pageScriptHeartbeats.clear();
   lastSiteDataProgress = null;
   return next;
@@ -446,9 +494,28 @@ async function getCloudConfigStatus(): Promise<CloudConfigStatusResult> {
   };
 }
 
+async function getCloudArchiveLocalState(): Promise<CloudArchiveLocalStateResult> {
+  const auth = await loadCloudAuth();
+  if (!auth) {
+    return {
+      binding: { bound: false },
+      archiveState: "unbound"
+    };
+  }
+  const currentDigest = await createConfigFingerprint(await loadState());
+  const archiveState = auth.lastConfigDigest && auth.lastConfigDigest === currentDigest ? "same" : "different";
+  return {
+    binding: toPublicCloudBinding(auth),
+    archiveState,
+    syncedAt: archiveState === "same" ? auth.lastConfigSyncedAt : undefined
+  };
+}
+
 async function backupCloudConfig(): Promise<CloudConfigBackupResult> {
   const auth = await requireCloudAuth();
-  const payload = createConfigExport(await loadState());
+  const state = await loadState();
+  const payload = createConfigExport(state);
+  const configDigest = await createConfigFingerprint(state);
   const response = await fetchCloudConfig("PUT", auth, payload);
   if (!response.ok) {
     const status = cloudStatusFromResponse(response);
@@ -460,11 +527,14 @@ async function backupCloudConfig(): Promise<CloudConfigBackupResult> {
   const updated = await updateCloudAuth((current) => ({
     ...current,
     lastStatus: status,
-    lastBackupAt: backedUpAt
+    lastBackupAt: backedUpAt,
+    lastConfigDigest: configDigest,
+    lastConfigSyncedAt: backedUpAt
   }));
   return {
     binding: toPublicCloudBinding(updated ?? auth),
     status,
+    archiveState: "same",
     message: `已备份 ${status.friendCount ?? 0} 位佬朋友到云端。`
   };
 }
@@ -482,14 +552,18 @@ async function restoreCloudConfig(): Promise<CloudConfigRestoreResult> {
   const nextState = await importConfig(JSON.stringify(file));
   const restoredAt = nowIso();
   const status = summarizeCloudConfigPayload(file, restoredAt);
+  const configDigest = await createConfigFingerprint(nextState);
   const updated = await updateCloudAuth((current) => ({
     ...current,
     lastStatus: status,
-    lastRestoreAt: restoredAt
+    lastRestoreAt: restoredAt,
+    lastConfigDigest: configDigest,
+    lastConfigSyncedAt: restoredAt
   }));
   return {
     binding: toPublicCloudBinding(updated ?? auth),
     status,
+    archiveState: "same",
     state: nextState,
     message: nextState.lastSync?.message ?? "已从云端恢复配置。"
   };
@@ -555,20 +629,7 @@ async function closeCloudAuthWindow(): Promise<void> {
 function randomCloudVerifier(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
-  return base64url(bytes.buffer);
-}
-
-async function sha256Base64url(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  return base64url(await crypto.subtle.digest("SHA-256", data));
-}
-
-function base64url(bytes: ArrayBuffer): string {
-  let value = "";
-  for (const byte of new Uint8Array(bytes)) {
-    value += String.fromCharCode(byte);
-  }
-  return btoa(value).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  return base64urlFromBytes(bytes.buffer);
 }
 
 function cloudExchangeFailureMessage(payload: Record<string, unknown>): string {
@@ -746,12 +807,38 @@ async function openSidePanel(sender: chrome.runtime.MessageSender): Promise<{ me
 }
 
 async function openOptionsPage(hash?: string): Promise<{ message: string }> {
-  if (!hash && chrome.runtime.openOptionsPage) {
-    await chrome.runtime.openOptionsPage();
+  const url = optionsPageUrl(hash);
+  const existing = await findExistingOptionsTab();
+  if (existing?.id != null) {
+    await chrome.tabs.update(existing.id, { url, active: true });
+    if (typeof existing.windowId === "number") {
+      try {
+        await chrome.windows?.update?.(existing.windowId, { focused: true });
+      } catch {
+        // Focusing another window is best effort; updating the tab is enough.
+      }
+    }
     return { message: "已打开配置页。" };
   }
-  await chrome.tabs.create({ url: chrome.runtime.getURL(`src/options/index.html${hash ?? ""}`), active: true });
+  await chrome.tabs.create({ url, active: true });
   return { message: "已打开配置页。" };
+}
+
+function optionsPageUrl(hash?: string): string {
+  return chrome.runtime.getURL(`src/options/index.html${hash ?? ""}`);
+}
+
+async function findExistingOptionsTab(): Promise<chrome.tabs.Tab | null> {
+  const optionsPageBase = chrome.runtime.getURL("src/options/index.html");
+  const currentWindowTabs = await chrome.tabs.query({ currentWindow: true });
+  const currentWindowTab = currentWindowTabs.find((tab) => isOptionsPageTab(tab, optionsPageBase));
+  if (currentWindowTab?.id != null) return currentWindowTab;
+  const allTabs = await chrome.tabs.query({});
+  return allTabs.find((tab) => isOptionsPageTab(tab, optionsPageBase)) ?? null;
+}
+
+function isOptionsPageTab(tab: chrome.tabs.Tab, optionsPageBase: string): boolean {
+  return typeof tab.url === "string" && (tab.url === optionsPageBase || tab.url.startsWith(`${optionsPageBase}#`));
 }
 
 async function addFriendByProfileWithFallback(
@@ -799,7 +886,11 @@ async function lookupFriendProfileWithFallback(username: Username): Promise<Back
   return ok(response.profile);
 }
 
-async function runSiteDataTask(run: () => Promise<BackgroundResponse>): Promise<BackgroundResponse> {
+async function runSiteDataTask(
+  run: (taskContext: SiteDataTaskContext) => Promise<BackgroundResponse>,
+  ownership: SiteDataTaskOwnership = {}
+): Promise<BackgroundResponse> {
+  releaseStaleActiveSiteDataTask();
   if (activeSiteDataTask) {
     const current = await loadState();
     return ok({
@@ -817,38 +908,58 @@ async function runSiteDataTask(run: () => Promise<BackgroundResponse>): Promise<
   const taskRecord: ActiveSiteDataTask = {
     taskId,
     generation: stateWriteGeneration,
+    trigger: ownership.trigger,
+    timedRunId: ownership.timedRunId,
     promise: Promise.resolve({ ok: false, error: "任务尚未开始。" } satisfies BackgroundResponse)
   };
   activeSiteDataTask = taskRecord;
-  const task = run();
+  const taskContext = taskContextFromRecord(taskRecord);
+  const task = run(taskContext);
   taskRecord.promise = task;
   try {
     return await task;
   } finally {
-    if (activeSiteDataTask === taskRecord) activeSiteDataTask = null;
+    if (taskMatchesActiveIdentity(taskContext)) {
+      if (activeSiteDataTask.progress?.status === "running") {
+        if (taskCanWriteProgress(taskContext)) {
+          finishSiteDataProgress(taskContext, "error", "刷新任务异常中断。");
+        } else {
+          finishInvalidatedSiteDataProgress(taskContext);
+        }
+      }
+      activeSiteDataTask = null;
+    }
   }
+}
+
+function releaseStaleActiveSiteDataTask() {
+  if (!activeSiteDataTask || !isStaleRunningSiteDataProgress(activeSiteDataTask.progress)) return;
+  finishSiteDataProgress(taskContextFromRecord(activeSiteDataTask), "error", "刷新任务超时，已释放刷新锁。");
+  activeSiteDataTask = null;
+  invalidateStateWriters();
 }
 
 async function refreshFriendProfilesWithFallback(
   state: AppState,
   usernames?: Username[]
 ): Promise<{ state: AppState; result: RefreshResult }> {
-  startProfileProgress(state, usernames, "direct_fetch");
-  const direct = await refreshAdapter.refreshFriendProfiles(state, usernames, (username) => incrementProfileProgress(username, "direct_fetch"));
+  const taskContext = activeSiteDataTask ? taskContextFromRecord(activeSiteDataTask) : undefined;
+  startProfileProgress(state, usernames, "direct_fetch", taskContext);
+  const direct = await refreshAdapter.refreshFriendProfiles(state, usernames, (username) => incrementProfileProgress(username, "direct_fetch", taskContext));
   if (direct.result?.ok) {
-    finishSiteDataProgress("success");
+    finishSiteDataProgress(taskContext, "success");
     return direct;
   }
   if (!shouldTryExistingTab(direct.result)) {
-    finishSiteDataProgress("error", direct.result.message);
+    finishSiteDataProgress(taskContext, "error", direct.result.message);
     return direct;
   }
 
-  finishSiteDataProgress("error", direct.result.message);
-  startProfileProgress(direct.state, usernames, "existing_tab");
-  const existingTab = await refreshFriendProfilesFromExistingTab(direct.state, usernames);
+  finishSiteDataProgress(taskContext, "error", direct.result.message);
+  startProfileProgress(direct.state, usernames, "existing_tab", taskContext);
+  const existingTab = await refreshFriendProfilesFromExistingTab(direct.state, usernames, taskContext);
   if (existingTab) {
-    finishSiteDataProgress(existingTab.result.ok ? "success" : "error", existingTab.result.ok ? undefined : existingTab.result.message);
+    finishSiteDataProgress(taskContext, existingTab.result.ok ? "success" : "error", existingTab.result.ok ? undefined : existingTab.result.message);
     return existingTab;
   }
   const missingTabResult: { state: AppState; result: RefreshResult } = {
@@ -861,7 +972,7 @@ async function refreshFriendProfilesWithFallback(
       refreshedAt: nowIso()
     }
   };
-  finishSiteDataProgress("error", missingTabResult.result.message);
+  finishSiteDataProgress(taskContext, "error", missingTabResult.result.message);
   return missingTabResult;
 }
 
@@ -915,7 +1026,8 @@ async function addFriendByProfileFromExistingTab(
 
 async function refreshFriendProfilesFromExistingTab(
   state: AppState,
-  usernames?: Username[]
+  usernames?: Username[],
+  taskContext?: SiteDataTaskContext
 ): Promise<{ state: AppState; result: RefreshResult } | null> {
   const targets = normalizeRefreshTargets(state, usernames);
   let nextState = state;
@@ -937,7 +1049,7 @@ async function refreshFriendProfilesFromExistingTab(
     }
     nextState = upsertFriendProfile(nextState, response.profile);
     refreshedCount += 1;
-    incrementProfileProgress(username, "existing_tab");
+    incrementProfileProgress(username, "existing_tab", taskContext);
   }
   return {
     state: nextState,
@@ -952,25 +1064,26 @@ async function refreshFriendProfilesFromExistingTab(
 
 async function refreshFriendActivityWithFallback(
   state: AppState,
-  scopeInput?: ActivityRefreshScope
+  scopeInput?: ActivityRefreshScope,
+  taskContext?: SiteDataTaskContext
 ): Promise<{ state: AppState; result: RefreshResult }> {
   const scope = normalizeActivityRefreshScope(scopeInput);
-  startActivityProgress(state, scope, "direct_fetch");
-  const direct = await refreshAdapter.refreshFriendActivity(state, scope, (step) => incrementActivityProgress(step, "direct_fetch"));
+  startActivityProgress(state, scope, "direct_fetch", taskContext);
+  const direct = await refreshAdapter.refreshFriendActivity(state, scope, (step) => incrementActivityProgress(step, "direct_fetch", taskContext));
   if (direct.result?.ok) {
-    finishActivityProgress("success");
+    finishActivityProgress(taskContext, "success");
     return direct;
   }
   const directFailure = direct.result as Exclude<RefreshResult, { ok: true }>;
   if (!shouldTryExistingTab(directFailure)) {
-    finishActivityProgress("error", directFailure.message);
+    finishActivityProgress(taskContext, "error", directFailure.message);
     return direct;
   }
 
-  startActivityProgress(direct.state, scope, "existing_tab");
-  const existingTab = await refreshFriendActivityFromExistingTab(direct.state, scope);
+  startActivityProgress(direct.state, scope, "existing_tab", taskContext);
+  const existingTab = await refreshFriendActivityFromExistingTab(direct.state, scope, taskContext);
   if (existingTab) {
-    finishActivityProgress(existingTab.result.ok ? "success" : "error", existingTab.result.ok ? undefined : existingTab.result.message);
+    finishActivityProgress(taskContext, existingTab.result.ok ? "success" : "error", existingTab.result.ok ? undefined : existingTab.result.message);
     return existingTab;
   }
   const missingTabResult: { state: AppState; result: RefreshResult } = {
@@ -983,7 +1096,7 @@ async function refreshFriendActivityWithFallback(
       refreshedAt: nowIso()
     }
   };
-  finishActivityProgress("error", missingTabResult.result.message);
+  finishActivityProgress(taskContext, "error", missingTabResult.result.message);
   return missingTabResult;
 }
 
@@ -991,14 +1104,16 @@ function shouldTryExistingTab(result: RefreshResult): boolean {
   return !result.ok && ["challenge", "blocked", "rate_limited", "unavailable", "network_error"].includes(result.reason);
 }
 
-function startActivityProgress(state: AppState, scope: ActivityRefreshScope, source: RefreshResult["source"]) {
-  if (!activeSiteDataTask) return;
+function startActivityProgress(state: AppState, scope: ActivityRefreshScope, source: RefreshResult["source"], taskContext?: SiteDataTaskContext) {
+  if (!taskContext || !taskCanWriteProgress(taskContext)) return;
   const targets = planActivityRefreshTargets(state, scope);
   const now = nowIso();
   const progress: ActivityRefreshTaskProgress = {
-    taskId: activeSiteDataTask.taskId,
+    taskId: taskContext.taskId,
     taskType: "activity",
     status: "running",
+    trigger: taskContext.trigger,
+    timedRunId: taskContext.timedRunId,
     scope,
     completed: 0,
     total: targets.reduce((sum, target) => sum + target.steps.length, 0),
@@ -1006,17 +1121,19 @@ function startActivityProgress(state: AppState, scope: ActivityRefreshScope, sou
     startedAt: now,
     updatedAt: now
   };
-  setActivityProgress(progress);
+  setActivityProgress(taskContext, progress);
 }
 
-function startProfileProgress(state: AppState, usernames: Username[] | undefined, source: RefreshResult["source"]) {
-  if (!activeSiteDataTask) return;
+function startProfileProgress(state: AppState, usernames: Username[] | undefined, source: RefreshResult["source"], taskContext?: SiteDataTaskContext) {
+  if (!taskContext || !taskCanWriteProgress(taskContext)) return;
   const targets = normalizeRefreshTargets(state, usernames);
   const now = nowIso();
   const progress: ProfileRefreshTaskProgress = {
-    taskId: activeSiteDataTask.taskId,
+    taskId: taskContext.taskId,
     taskType: "profiles",
     status: "running",
+    trigger: taskContext.trigger,
+    timedRunId: taskContext.timedRunId,
     usernames: targets,
     completed: 0,
     total: targets.length,
@@ -1024,12 +1141,12 @@ function startProfileProgress(state: AppState, usernames: Username[] | undefined
     startedAt: now,
     updatedAt: now
   };
-  setSiteDataProgress(progress);
+  setSiteDataProgress(taskContext, progress);
 }
 
-function incrementActivityProgress(step: ActivityRequestStep, source: RefreshResult["source"]) {
-  if (!activeSiteDataTask?.progress || activeSiteDataTask.progress.taskType !== "activity") return;
-  setActivityProgress({
+function incrementActivityProgress(step: ActivityRequestStep, source: RefreshResult["source"], taskContext?: SiteDataTaskContext) {
+  if (!taskContext || !taskCanWriteProgress(taskContext) || !activeSiteDataTask?.progress || activeSiteDataTask.progress.taskType !== "activity") return;
+  setActivityProgress(taskContext, {
     ...activeSiteDataTask.progress,
     status: "running",
     completed: Math.min(activeSiteDataTask.progress.completed + 1, activeSiteDataTask.progress.total),
@@ -1039,9 +1156,9 @@ function incrementActivityProgress(step: ActivityRequestStep, source: RefreshRes
   });
 }
 
-function incrementProfileProgress(username: Username, source: RefreshResult["source"]) {
-  if (!activeSiteDataTask?.progress || activeSiteDataTask.progress.taskType !== "profiles") return;
-  setSiteDataProgress({
+function incrementProfileProgress(username: Username, source: RefreshResult["source"], taskContext?: SiteDataTaskContext) {
+  if (!taskContext || !taskCanWriteProgress(taskContext) || !activeSiteDataTask?.progress || activeSiteDataTask.progress.taskType !== "profiles") return;
+  setSiteDataProgress(taskContext, {
     ...activeSiteDataTask.progress,
     status: "running",
     completed: Math.min(activeSiteDataTask.progress.completed + 1, activeSiteDataTask.progress.total),
@@ -1051,14 +1168,14 @@ function incrementProfileProgress(username: Username, source: RefreshResult["sou
   });
 }
 
-function finishActivityProgress(status: "success" | "error", error?: string) {
-  finishSiteDataProgress(status, error);
+function finishActivityProgress(taskContext: SiteDataTaskContext | undefined, status: "success" | "error", error?: string) {
+  finishSiteDataProgress(taskContext, status, error);
 }
 
-function finishSiteDataProgress(status: "success" | "error", error?: string) {
-  if (!activeSiteDataTask?.progress) return;
+function finishSiteDataProgress(taskContext: SiteDataTaskContext | undefined, status: "success" | "error", error?: string) {
+  if (!taskContext || !taskCanWriteProgress(taskContext) || !activeSiteDataTask?.progress) return;
   const now = nowIso();
-  setSiteDataProgress({
+  setSiteDataProgress(taskContext, {
     ...activeSiteDataTask.progress,
     status,
     updatedAt: now,
@@ -1067,21 +1184,94 @@ function finishSiteDataProgress(status: "success" | "error", error?: string) {
   });
 }
 
-function setActivityProgress(progress: ActivityRefreshTaskProgress) {
-  setSiteDataProgress(progress);
+function setActivityProgress(taskContext: SiteDataTaskContext, progress: ActivityRefreshTaskProgress) {
+  setSiteDataProgress(taskContext, progress);
 }
 
-function setSiteDataProgress(progress: SiteDataTaskProgress) {
-  if (!activeSiteDataTask || activeSiteDataTask.generation !== stateWriteGeneration) return;
-  activeSiteDataTask.progress = progress;
+function setSiteDataProgress(taskContext: SiteDataTaskContext, progress: SiteDataTaskProgress) {
+  if (!taskCanWriteProgress(taskContext)) return;
+  const task = activeSiteDataTask;
+  if (!task) return;
+  task.progress = progress;
   lastSiteDataProgress = progress;
   void saveSiteDataProgressState(progress);
   broadcastSiteDataProgress(progress);
 }
 
+function retireTimedActivityTask(timedRunId: string) {
+  const task = activeSiteDataTask;
+  if (!task || task.trigger !== "timed" || task.timedRunId !== timedRunId || task.progress?.taskType !== "activity") return;
+  const now = nowIso();
+  const progress: ActivityRefreshTaskProgress = {
+    ...task.progress,
+    status: "error",
+    trigger: "timed",
+    timedRunId,
+    retiredReason: "timed_disabled",
+    updatedAt: now,
+    finishedAt: now,
+    error: "自动捞料已关闭，本次打捞已停止。"
+  };
+  activeSiteDataTask = null;
+  writeRetiredSiteDataProgress(progress);
+}
+
+function writeRetiredSiteDataProgress(progress: SiteDataTaskProgress) {
+  if (progress.status === "running" || progress.retiredReason !== "timed_disabled" || progress.trigger !== "timed" || !progress.timedRunId) return;
+  lastSiteDataProgress = progress;
+  void saveSiteDataProgressState(progress);
+  broadcastSiteDataProgress(progress);
+}
+
+function finishInvalidatedSiteDataProgress(taskContext: SiteDataTaskContext) {
+  if (!taskMatchesActiveIdentity(taskContext) || lastSiteDataProgress?.taskId !== taskContext.taskId) return;
+  const task = activeSiteDataTask;
+  if (!task?.progress) return;
+  const now = nowIso();
+  const progress: SiteDataTaskProgress = {
+    ...task.progress,
+    status: "error",
+    updatedAt: now,
+    finishedAt: now,
+    error: "刷新结果已被较新的本地状态变更丢弃。"
+  };
+  lastSiteDataProgress = progress;
+  void saveSiteDataProgressState(progress);
+  broadcastSiteDataProgress(progress);
+}
+
+function taskContextFromRecord(task: ActiveSiteDataTask): SiteDataTaskContext {
+  return {
+    taskId: task.taskId,
+    generation: task.generation,
+    trigger: task.trigger,
+    timedRunId: task.timedRunId
+  };
+}
+
+function taskMatchesActiveIdentity(taskContext: SiteDataTaskContext | undefined): taskContext is SiteDataTaskContext {
+  return (
+    !!taskContext &&
+    !!activeSiteDataTask &&
+    activeSiteDataTask.taskId === taskContext.taskId &&
+    activeSiteDataTask.generation === taskContext.generation
+  );
+}
+
+function taskCanWriteProgress(taskContext: SiteDataTaskContext | undefined): taskContext is SiteDataTaskContext {
+  const task = activeSiteDataTask;
+  return !!taskContext && !!task && task.taskId === taskContext.taskId && task.generation === taskContext.generation && task.generation === stateWriteGeneration;
+}
+
+function siteDataTaskOwnershipFromCommand(command: Extract<BackgroundCommand, { type: "refreshFriendActivity" }>): SiteDataTaskOwnership {
+  if (command.trigger !== "timed") return {};
+  return { trigger: "timed", timedRunId: command.timedRunId };
+}
+
 function currentSiteDataProgress(): SiteDataTaskProgress | null {
-  if (activeSiteDataTask?.generation === stateWriteGeneration) return activeSiteDataTask.progress ?? lastSiteDataProgress;
-  return lastSiteDataProgress;
+  const progress = activeSiteDataTask?.generation === stateWriteGeneration ? (activeSiteDataTask.progress ?? lastSiteDataProgress) : lastSiteDataProgress;
+  if (isStaleRunningSiteDataProgress(progress)) return null;
+  return progress ?? null;
 }
 
 function clearActiveSiteDataTask() {
@@ -1132,7 +1322,8 @@ async function syncFollowedUsersFromExistingTab(state: AppState): Promise<{ stat
 
 async function refreshFriendActivityFromExistingTab(
   state: AppState,
-  scopeInput?: ActivityRefreshScope
+  scopeInput?: ActivityRefreshScope,
+  taskContext?: SiteDataTaskContext
 ): Promise<{ state: AppState; result: RefreshResult } | null> {
   const scope = normalizeActivityRefreshScope(scopeInput);
   const targets = planActivityRefreshTargets(state, scope);
@@ -1157,7 +1348,7 @@ async function refreshFriendActivityFromExistingTab(
         };
       }
       items.push(...response.activity.items);
-      incrementActivityProgress(step, "existing_tab");
+      incrementActivityProgress(step, "existing_tab", taskContext);
     }
     collectedTargets.push({ username: target.username, items: sortActivityItems(items), refreshedKinds: target.refreshedKinds });
     refreshedCount += 1;
@@ -1174,13 +1365,15 @@ async function refreshFriendActivityFromExistingTab(
       { clearExistingNew: false, feedWaterlineAt }
     );
   }
+  const refreshedAt = nowIso();
+  const collected = collectLaoFindsItems(nextState, collectedTargets.flatMap((target) => target.items), refreshedAt);
   return {
-    state: nextState,
+    state: collected.state,
     result: {
       ok: true,
       source: "existing_tab",
       message: `已通过已打开的 linux.do 页面刷新 ${refreshedCount} 位好友动态。`,
-      refreshedAt: nowIso()
+      refreshedAt
     }
   };
 }
@@ -1534,6 +1727,93 @@ function applyMvpSettingsGuard(settings: Partial<AppState["settings"]>): Partial
     allowAutoRefresh: false,
     allowInactiveTabFallback: false
   };
+}
+
+async function updateSettings(settings: Partial<AppState["settings"]>) {
+  let timedActivityRefreshToggle: boolean | undefined;
+  let timedRunIdToRetire: string | undefined;
+  let beforeTimedTargetSignature = "";
+  let afterTimedTargetSignature = "";
+  if (settings.timedActivityRefreshEnabled === false) {
+    timedRunIdToRetire = (await loadTimedActivityRefreshSessionState()).activeRunId;
+  }
+  const nextState = await updateAppState((state) => {
+    timedActivityRefreshToggle = settings.timedActivityRefreshEnabled;
+    beforeTimedTargetSignature = timedActivityTargetSignature(state);
+    const next = {
+      ...state,
+      settings: {
+        ...state.settings,
+        ...applyMvpSettingsGuard(settings)
+      }
+    };
+    afterTimedTargetSignature = timedActivityTargetSignature(next);
+    return next;
+  });
+  if (timedActivityRefreshToggle === true) {
+    const now = new Date();
+    const intervalMs = nextState.settings.timedActivityRefreshIntervalMinutes * 60_000;
+    const sessionPatch = {
+      activeRunId: undefined,
+      enabledAt: now.toISOString(),
+      pausedReason: undefined,
+      pausedMessage: undefined,
+      lastFailureAt: undefined,
+      pendingDue: false,
+      nextDueAt: new Date(now.getTime() + intervalMs).toISOString()
+    };
+    await patchTimedActivityRefreshSessionState(
+      hasTimedActivityTargets(nextState)
+        ? { ...sessionPatch, noTargetAt: undefined, noTargetMessage: undefined }
+        : sessionPatch
+    );
+  } else if (timedActivityRefreshToggle === false) {
+    await patchTimedActivityRefreshSessionState({
+      activeRunId: undefined,
+      controllerSurfaceId: undefined,
+      controllerClaimedAt: undefined,
+      controllerHeartbeatAt: undefined,
+      pendingDue: false
+    });
+    if (timedRunIdToRetire) {
+      retireTimedActivityTask(timedRunIdToRetire);
+    }
+    if (beforeTimedTargetSignature !== afterTimedTargetSignature) {
+      await invalidateTimedActivityNoTargetSessionStateIfTargetable(nextState);
+    }
+  } else if (beforeTimedTargetSignature !== afterTimedTargetSignature) {
+    await invalidateTimedActivityNoTargetSessionStateIfTargetable(nextState);
+  }
+  return nextState;
+}
+
+async function updateTimedActivityTargetInputs(updater: (state: AppState) => AppState | Promise<AppState>): Promise<AppState> {
+  let beforeSignature = "";
+  let afterSignature = "";
+  const nextState = await updateAppState(async (state) => {
+    beforeSignature = timedActivityTargetSignature(state);
+    const next = await updater(state);
+    afterSignature = timedActivityTargetSignature(next);
+    return next;
+  });
+  if (beforeSignature !== afterSignature) {
+    await invalidateTimedActivityNoTargetSessionStateIfTargetable(nextState);
+  }
+  return nextState;
+}
+
+function timedActivityTargetSignature(state: AppState): string {
+  return JSON.stringify(deriveTimedActivityRefreshScopes(state, state.settings.timedActivityRefreshScopeMode));
+}
+
+function hasTimedActivityTargets(state: AppState): boolean {
+  return deriveTimedActivityRefreshScopes(state, state.settings.timedActivityRefreshScopeMode).length > 0;
+}
+
+async function invalidateTimedActivityNoTargetSessionStateIfTargetable(state: AppState) {
+  if (hasTimedActivityTargets(state)) {
+    await invalidateTimedActivityNoTargetSessionState();
+  }
 }
 
 async function refreshState(

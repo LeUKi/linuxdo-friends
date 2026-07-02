@@ -1,5 +1,6 @@
 import { defaultAppState } from "../domain/defaultState";
 import { normalizeFriendUser, normalizeUsername } from "../domain/friends";
+import { normalizeLaoFindsItems, normalizeDredgeRules } from "../domain/laoFinds";
 import type { AppState, RefreshSettings } from "../shared/types";
 
 export const APP_STATE_STORAGE_KEY = "linuxdoFriendsState";
@@ -44,6 +45,9 @@ function mergeState(stored?: Partial<AppState>): AppState {
     activityRefreshLedger: stored?.activityRefreshLedger ?? {},
     activityWatermarks: stored?.activityWatermarks ?? {},
     activityFeedWaterlineAt: stored?.activityFeedWaterlineAt,
+    dredgeRules: normalizeDredgeRules(stored?.dredgeRules),
+    laoFindsStartedAt: normalizeOptionalTimestamp(stored?.laoFindsStartedAt),
+    laoFindsItems: normalizeLaoFindsItems(stored?.laoFindsItems),
     avatarCache: stored?.avatarCache ?? {},
     settings: mergeSettings(stored?.settings),
     currentAccount: stored?.currentAccount,
@@ -67,9 +71,24 @@ function mergeSettings(stored?: Partial<RefreshSettings>): RefreshSettings {
     typeof stored?.refreshIntervalMinutes === "number" && stored.refreshIntervalMinutes >= 30 && stored.refreshIntervalMinutes <= 720
       ? stored.refreshIntervalMinutes
       : defaultAppState.settings.refreshIntervalMinutes;
+  const timedActivityRefreshIntervalMinutes =
+    typeof stored?.timedActivityRefreshIntervalMinutes === "number" &&
+    stored.timedActivityRefreshIntervalMinutes >= 30 &&
+    stored.timedActivityRefreshIntervalMinutes <= 720
+      ? stored.timedActivityRefreshIntervalMinutes
+      : defaultAppState.settings.timedActivityRefreshIntervalMinutes;
   return {
     ...defaultAppState.settings,
     refreshIntervalMinutes,
+    timedActivityRefreshEnabled:
+      typeof stored?.timedActivityRefreshEnabled === "boolean"
+        ? stored.timedActivityRefreshEnabled
+        : defaultAppState.settings.timedActivityRefreshEnabled,
+    timedActivityRefreshScopeMode:
+      stored?.timedActivityRefreshScopeMode === "all" || stored?.timedActivityRefreshScopeMode === "rules"
+        ? stored.timedActivityRefreshScopeMode
+        : defaultAppState.settings.timedActivityRefreshScopeMode,
+    timedActivityRefreshIntervalMinutes,
     openActivityLinksInPage:
       typeof stored?.openActivityLinksInPage === "boolean" ? stored.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     allowAutoRefresh: false,
@@ -77,4 +96,9 @@ function mergeSettings(stored?: Partial<RefreshSettings>): RefreshSettings {
     telegramBotToken: typeof stored?.telegramBotToken === "string" && stored.telegramBotToken ? stored.telegramBotToken : undefined,
     telegramChatId: typeof stored?.telegramChatId === "string" && stored.telegramChatId ? stored.telegramChatId : undefined
   };
+}
+
+function normalizeOptionalTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return Number.isNaN(Date.parse(value)) ? undefined : value;
 }

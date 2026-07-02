@@ -10,6 +10,7 @@ import type {
   AppState,
   FriendActivitySummary,
   RefreshSource,
+  TimedActivityRefreshScopeMode,
   Username
 } from "../shared/types";
 import { sortActivityItems } from "./activity";
@@ -60,6 +61,34 @@ export function planActivityRefreshTargets(state: AppState, scope?: ActivityRefr
       };
     })
     .filter((target) => target.refreshedKinds.length > 0);
+}
+
+export function deriveTimedActivityRefreshScopes(state: AppState, mode: TimedActivityRefreshScopeMode): ActivityRefreshScope[] {
+  if (mode === "all") return [{ kind: "all" }];
+
+  const usernamesByKind = new Map<ActivityRefreshKind, Set<Username>>();
+  for (const rule of state.dredgeRules) {
+    if (!rule.enabled) continue;
+    const candidateUsernames = rule.usernames === "all" ? Object.keys(state.friends) : rule.usernames;
+    for (const rawUsername of candidateUsernames) {
+      const username = normalizeUsername(rawUsername);
+      if (!username || !state.friends[username]) continue;
+      const allowedKinds = effectiveActivityKindsForFriend(state, username, "all");
+      for (const kind of activityKindsForScope("all")) {
+        if (!rule.kinds.includes(kind) || !allowedKinds.includes(kind)) continue;
+        const usernames = usernamesByKind.get(kind) ?? new Set<Username>();
+        usernames.add(username);
+        usernamesByKind.set(kind, usernames);
+      }
+    }
+  }
+
+  return activityKindsForScope("all")
+    .map((kind): ActivityRefreshScope | undefined => {
+      const usernames = [...(usernamesByKind.get(kind) ?? [])].sort();
+      return usernames.length ? { kind, usernames } : undefined;
+    })
+    .filter((scope): scope is ActivityRefreshScope => Boolean(scope));
 }
 
 export function effectiveActivityKindsForFriend(

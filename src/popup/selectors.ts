@@ -1,7 +1,19 @@
 import { sortActivityItems } from "../domain/activity";
 import { effectiveActivityKindsForFriend, latestRefreshForScope, planActivityRefreshTargets, scopeLabel } from "../domain/activityRefresh";
 import { normalizeUsername } from "../domain/friends";
-import type { ActivityItem, ActivityKindFilter, ActivityRefreshScope, AppState, FollowedUser, FriendProfileSummary, FriendUser, Username } from "../shared/types";
+import type {
+  ActivityItem,
+  ActivityKindFilter,
+  ActivityRefreshKind,
+  ActivityRefreshScope,
+  AppState,
+  FollowedUser,
+  FriendProfileSummary,
+  FriendUser,
+  LaoFindsItem,
+  DredgeRule,
+  Username
+} from "../shared/types";
 
 export interface UserIdentityView {
   username: Username;
@@ -51,6 +63,12 @@ export type ActivityRequestCounts = Record<ActivityKindFilter, number>;
 export type FeedRenderEntry =
   | { type: "activity"; item: ActivityItem }
   | { type: "waterline"; id: string; waterlineAt: string };
+
+export interface LaoFindsItemView {
+  item: LaoFindsItem;
+  identity: UserIdentityView;
+  matchedRules: DredgeRule[];
+}
 
 export function deriveFriendList(state: AppState): FriendListItem[] {
   return Object.values(state.friends)
@@ -187,6 +205,33 @@ export function deriveFeedUserOptions(state: AppState): UserIdentityView[] {
   return deriveFriendList(state).map((item) => item.identity);
 }
 
+export function deriveLaoFindsItems(state: AppState, options: { includeArchived?: boolean } = {}): LaoFindsItemView[] {
+  return Object.values(state.laoFindsItems)
+    .filter((item) => options.includeArchived || !item.archivedAt)
+    .map((item) => ({
+      item,
+      identity: identityForActivityItem(state, item.activity),
+      matchedRules: item.matchedRuleIds.map((id) => state.dredgeRules.find((rule) => rule.id === id)).filter((rule): rule is DredgeRule => Boolean(rule))
+    }))
+    .sort((a, b) => {
+      const byCollected = timestampValue(b.item.collectedAt) - timestampValue(a.item.collectedAt);
+      if (byCollected !== 0) return byCollected;
+      const byActivity = timestampValue(b.item.activity.occurredAt) - timestampValue(a.item.activity.occurredAt);
+      if (byActivity !== 0) return byActivity;
+      return a.item.id.localeCompare(b.item.id);
+    });
+}
+
+export function deriveDredgeRuleScopeWarning(state: AppState, rule: DredgeRule): string | undefined {
+  const usernames = rule.usernames === "all" ? Object.keys(state.friends) : rule.usernames;
+  const missingScope = usernames
+    .map(normalizeUsername)
+    .filter((username) => state.friends[username])
+    .filter((username) => rule.kinds.some((kind) => !friendAllowsKind(state, username, kind)));
+  if (missingScope.length === 0) return undefined;
+  return "部分用户的视奸范围未包含该类型，刷新时不会产生对应候选动态。";
+}
+
 export function deriveActivityRefreshScope(filters: FeedFilters): ActivityRefreshScope {
   return {
     kind: filters.kind,
@@ -265,6 +310,12 @@ export function latestStatusForProfile(profile?: FriendProfileSummary): LatestSt
 function latestStatusTimestamp(profile?: FriendProfileSummary): number {
   if (!profile) return 0;
   return Math.max(timestampValue(profile.lastPostedAt), timestampValue(profile.lastSeenAt));
+}
+
+function friendAllowsKind(state: AppState, username: Username, kind: ActivityRefreshKind): boolean {
+  const friend = state.friends[username];
+  if (!friend) return false;
+  return friend.activityKinds.includes(kind);
 }
 
 function identityForRecord(user: Pick<FollowedUser, "username" | "name" | "avatarUrl">): UserIdentityView {

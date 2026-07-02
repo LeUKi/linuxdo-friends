@@ -1,7 +1,9 @@
 import { defaultAppState } from "./defaultState";
 import { normalizeActivityKinds, normalizeFriendUser, normalizeUsername } from "./friends";
+import { normalizeDredgeRules } from "./laoFinds";
+import { sha256Base64url } from "../shared/crypto";
 import { nowIso } from "../shared/time";
-import type { AppState, FriendUser, RefreshSettings } from "../shared/types";
+import type { AppState, FriendUser, DredgeRule, RefreshSettings } from "../shared/types";
 
 export const CONFIG_EXPORT_SCHEMA_VERSION = 1;
 export const CONFIG_EXPORT_SOURCE = "linuxdo-friends";
@@ -12,6 +14,8 @@ export interface ConfigExportFile {
   source: "linuxdo-friends";
   exportedAt: string;
   friends: Record<string, FriendUser>;
+  dredgeRules: DredgeRule[];
+  laoFindsStartedAt?: string;
   settings: RefreshSettings;
 }
 
@@ -25,8 +29,23 @@ export function createConfigExport(state: AppState, exportedAt: string = nowIso(
     source: CONFIG_EXPORT_SOURCE,
     exportedAt,
     friends: normalizeFriendsRecord(state.friends),
+    dredgeRules: normalizeDredgeRules(state.dredgeRules),
+    laoFindsStartedAt: normalizeOptionalTimestamp(state.laoFindsStartedAt),
     settings: normalizeStoredSettings(state.settings)
   };
+}
+
+export async function createConfigFingerprint(state: AppState): Promise<string> {
+  const file = createConfigExport(state, "1970-01-01T00:00:00.000Z");
+  const payload = {
+    schemaVersion: file.schemaVersion,
+    source: file.source,
+    friends: file.friends,
+    dredgeRules: file.dredgeRules,
+    laoFindsStartedAt: file.laoFindsStartedAt,
+    settings: file.settings
+  };
+  return sha256Base64url(stableStringify(payload));
 }
 
 export function parseConfigImportJson(text: string): ConfigExportFile {
@@ -41,10 +60,13 @@ export function parseConfigImportJson(text: string): ConfigExportFile {
 
 export function applyConfigImport(file: ConfigExportFile, importedAt: string = nowIso()): ConfigImportResult {
   const friends = normalizeFriendsRecord(file.friends);
+  const dredgeRules = normalizeDredgeRules(file.dredgeRules);
   return {
     state: {
       ...defaultAppState,
       friends,
+      dredgeRules,
+      laoFindsStartedAt: file.laoFindsStartedAt,
       settings: normalizeImportedSettings(file.settings),
       lastSync: {
         ok: true,
@@ -76,6 +98,8 @@ function normalizeConfigFileV1(value: Record<string, unknown>): ConfigExportFile
     source: CONFIG_EXPORT_SOURCE,
     exportedAt: value.exportedAt,
     friends: normalizeFriendsRecord(value.friends),
+    dredgeRules: normalizeDredgeRules(value.dredgeRules),
+    laoFindsStartedAt: normalizeOptionalTimestamp(value.laoFindsStartedAt),
     settings: normalizeImportedSettings(value.settings)
   };
 }
@@ -119,9 +143,25 @@ function normalizeStoredSettings(value: Partial<RefreshSettings> | Record<string
     value.refreshIntervalMinutes <= 720
       ? value.refreshIntervalMinutes
       : defaultAppState.settings.refreshIntervalMinutes;
+  const timedActivityRefreshIntervalMinutes =
+    typeof value.timedActivityRefreshIntervalMinutes === "number" &&
+    Number.isFinite(value.timedActivityRefreshIntervalMinutes) &&
+    value.timedActivityRefreshIntervalMinutes >= 30 &&
+    value.timedActivityRefreshIntervalMinutes <= 720
+      ? value.timedActivityRefreshIntervalMinutes
+      : defaultAppState.settings.timedActivityRefreshIntervalMinutes;
   return {
     ...defaultAppState.settings,
     refreshIntervalMinutes,
+    timedActivityRefreshEnabled:
+      typeof value.timedActivityRefreshEnabled === "boolean"
+        ? value.timedActivityRefreshEnabled
+        : defaultAppState.settings.timedActivityRefreshEnabled,
+    timedActivityRefreshScopeMode:
+      value.timedActivityRefreshScopeMode === "all" || value.timedActivityRefreshScopeMode === "rules"
+        ? value.timedActivityRefreshScopeMode
+        : defaultAppState.settings.timedActivityRefreshScopeMode,
+    timedActivityRefreshIntervalMinutes,
     openActivityLinksInPage:
       typeof value.openActivityLinksInPage === "boolean" ? value.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     allowAutoRefresh: false,
@@ -149,9 +189,40 @@ function normalizeImportedSettings(value: Partial<RefreshSettings> | Record<stri
   if (value.openActivityLinksInPage !== undefined && typeof value.openActivityLinksInPage !== "boolean") {
     throw new Error("配置文件的动态跳转设置不正确。");
   }
+  if (value.timedActivityRefreshEnabled !== undefined && typeof value.timedActivityRefreshEnabled !== "boolean") {
+    throw new Error("配置文件的定时刷新开关不正确。");
+  }
+  if (
+    value.timedActivityRefreshScopeMode !== undefined &&
+    value.timedActivityRefreshScopeMode !== "rules" &&
+    value.timedActivityRefreshScopeMode !== "all"
+  ) {
+    throw new Error("配置文件的定时刷新范围不正确。");
+  }
+  if (
+    value.timedActivityRefreshIntervalMinutes !== undefined &&
+    (typeof value.timedActivityRefreshIntervalMinutes !== "number" ||
+      !Number.isFinite(value.timedActivityRefreshIntervalMinutes) ||
+      value.timedActivityRefreshIntervalMinutes < 30 ||
+      value.timedActivityRefreshIntervalMinutes > 720)
+  ) {
+    throw new Error("配置文件的定时刷新间隔不正确。");
+  }
   return {
     ...defaultAppState.settings,
     refreshIntervalMinutes: value.refreshIntervalMinutes,
+    timedActivityRefreshEnabled:
+      typeof value.timedActivityRefreshEnabled === "boolean"
+        ? value.timedActivityRefreshEnabled
+        : defaultAppState.settings.timedActivityRefreshEnabled,
+    timedActivityRefreshScopeMode:
+      value.timedActivityRefreshScopeMode === "all" || value.timedActivityRefreshScopeMode === "rules"
+        ? value.timedActivityRefreshScopeMode
+        : defaultAppState.settings.timedActivityRefreshScopeMode,
+    timedActivityRefreshIntervalMinutes:
+      typeof value.timedActivityRefreshIntervalMinutes === "number"
+        ? value.timedActivityRefreshIntervalMinutes
+        : defaultAppState.settings.timedActivityRefreshIntervalMinutes,
     openActivityLinksInPage:
       typeof value.openActivityLinksInPage === "boolean" ? value.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     allowAutoRefresh: false,
@@ -165,6 +236,20 @@ function normalizeTimestamp(value: unknown): string {
   return typeof value === "string" && value.trim() ? value : nowIso();
 }
 
+function normalizeOptionalTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return Number.isNaN(Date.parse(value)) ? undefined : value;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value != null && !Array.isArray(value);
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (!isRecord(value)) return JSON.stringify(value);
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+    .join(",")}}`;
 }

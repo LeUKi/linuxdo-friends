@@ -1,6 +1,7 @@
 import type { ActivityKindFilter, SiteDataTaskProgress } from "../shared/types";
 
 export const SITE_DATA_PROGRESS_STORAGE_KEY = "linuxdoFriendsSiteDataProgress";
+export const SITE_DATA_PROGRESS_RUNNING_TTL_MS = 10 * 60_000;
 
 type SessionStorageLike = {
   get(key: string): Promise<Record<string, unknown>>;
@@ -12,11 +13,14 @@ type StorageChanges = Record<string, chrome.storage.StorageChange>;
 const fallbackStore: { progress: SiteDataTaskProgress | null } = { progress: null };
 
 export async function loadSiteDataProgressState(
-  storage: SessionStorageLike | null = getChromeSessionStorage()
+  storage: SessionStorageLike | null = getChromeSessionStorage(),
+  now = Date.now()
 ): Promise<SiteDataTaskProgress | null> {
   if (!storage) return fallbackStore.progress;
   const result = await storage.get(SITE_DATA_PROGRESS_STORAGE_KEY);
-  return normalizeSiteDataProgress(result[SITE_DATA_PROGRESS_STORAGE_KEY]);
+  const progress = normalizeSiteDataProgress(result[SITE_DATA_PROGRESS_STORAGE_KEY]);
+  if (isStaleRunningSiteDataProgress(progress, now)) return null;
+  return progress;
 }
 
 export async function saveSiteDataProgressState(
@@ -52,6 +56,12 @@ export function normalizeSiteDataProgress(value: unknown): SiteDataTaskProgress 
   ) {
     return null;
   }
+  const trigger = normalizeSiteDataTaskTrigger(value.trigger);
+  const timedRunId = optionalString(value.timedRunId);
+  const retiredReason = normalizeRetiredReason(value.retiredReason);
+  if (!isValidProgressOwnership(trigger, timedRunId)) return null;
+  if (value.retiredReason !== undefined && (retiredReason === undefined || value.status === "running")) return null;
+  const normalizedTrigger = trigger ?? undefined;
   if (value.taskType === "activity") {
     if (!isRecord(value.scope) || !isActivityKindFilter(value.scope.kind)) return null;
     const scope = {
@@ -63,6 +73,9 @@ export function normalizeSiteDataProgress(value: unknown): SiteDataTaskProgress 
       taskType: "activity",
       scope,
       status: value.status,
+      trigger: normalizedTrigger,
+      timedRunId,
+      retiredReason,
       completed: value.completed,
       total: value.total,
       currentLabel: optionalString(value.currentLabel),
@@ -79,6 +92,9 @@ export function normalizeSiteDataProgress(value: unknown): SiteDataTaskProgress 
     taskType: "profiles",
     usernames: value.usernames,
     status: value.status,
+    trigger: normalizedTrigger,
+    timedRunId,
+    retiredReason,
     completed: value.completed,
     total: value.total,
     currentLabel: optionalString(value.currentLabel),
@@ -90,6 +106,13 @@ export function normalizeSiteDataProgress(value: unknown): SiteDataTaskProgress 
   };
 }
 
+export function isStaleRunningSiteDataProgress(progress: SiteDataTaskProgress | null | undefined, now = Date.now()): boolean {
+  if (progress?.status !== "running") return false;
+  const timestamp = Date.parse(progress.updatedAt);
+  if (!Number.isFinite(timestamp)) return true;
+  return now - timestamp > SITE_DATA_PROGRESS_RUNNING_TTL_MS;
+}
+
 function getChromeSessionStorage(): SessionStorageLike | null {
   if (typeof chrome === "undefined") return null;
   return chrome.storage?.session ?? null;
@@ -97,6 +120,22 @@ function getChromeSessionStorage(): SessionStorageLike | null {
 
 function normalizeRefreshSource(value: unknown) {
   return value === "direct_fetch" || value === "existing_tab" || value === "manual" ? value : undefined;
+}
+
+function normalizeSiteDataTaskTrigger(value: unknown) {
+  if (value === undefined) return undefined;
+  return value === "manual" || value === "timed" ? value : null;
+}
+
+function normalizeRetiredReason(value: unknown) {
+  if (value === undefined) return undefined;
+  return value === "timed_disabled" ? value : undefined;
+}
+
+function isValidProgressOwnership(trigger: "manual" | "timed" | null | undefined, timedRunId: string | undefined) {
+  if (trigger === null) return false;
+  if (trigger === "timed") return typeof timedRunId === "string" && timedRunId.trim().length > 0;
+  return timedRunId === undefined;
 }
 
 function optionalString(value: unknown) {

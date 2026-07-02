@@ -44,8 +44,9 @@ export type ActivityRefreshKind = Exclude<ActivityKind, "summary">;
 export type ActivityKindFilter = "all" | ActivityRefreshKind;
 export type ActivityRefreshRequestKind = ActivityRefreshKind | "user_actions";
 export type ActivitySource = "user_actions" | "boosts" | "reactions";
+export type TimedActivityRefreshScopeMode = "rules" | "all";
 
-export type UiSceneTab = "friends" | "feed";
+export type UiSceneTab = "friends" | "feed" | "finds";
 
 export interface FilterPopoverScene {
   open: boolean;
@@ -125,9 +126,36 @@ export interface ActivityWatermarkEntry {
   source: RefreshSource;
 }
 
+export interface DredgeRule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  usernames: "all" | Username[];
+  kinds: ActivityRefreshKind[];
+  keywords: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LaoFindsItem {
+  id: string;
+  activityId: string;
+  activity: ActivityItem;
+  collectedAt: string;
+  matchedRuleIds: string[];
+  readAt?: string;
+  archivedAt?: string;
+}
+
+export type SiteDataTaskTrigger = "manual" | "timed";
+export type SiteDataTaskRetiredReason = "timed_disabled";
+
 interface BaseSiteDataTaskProgress {
   taskId: string;
   status: "running" | "success" | "error";
+  trigger?: SiteDataTaskTrigger;
+  timedRunId?: string;
+  retiredReason?: SiteDataTaskRetiredReason;
   completed: number;
   total: number;
   currentLabel?: string;
@@ -155,6 +183,9 @@ export interface RefreshSettings {
   allowInactiveTabFallback: boolean;
   openActivityLinksInPage: boolean;
   refreshIntervalMinutes: number;
+  timedActivityRefreshEnabled: boolean;
+  timedActivityRefreshScopeMode: TimedActivityRefreshScopeMode;
+  timedActivityRefreshIntervalMinutes: number;
   telegramBotToken?: string;
   telegramChatId?: string;
 }
@@ -173,6 +204,9 @@ export interface AppState {
   activityRefreshLedger: Record<string, ActivityRefreshLedgerEntry>;
   activityWatermarks: Record<string, ActivityWatermarkEntry>;
   activityFeedWaterlineAt?: string;
+  dredgeRules: DredgeRule[];
+  laoFindsStartedAt?: string;
+  laoFindsItems: Record<string, LaoFindsItem>;
   avatarCache: Record<Username, AvatarCacheEntry>;
   settings: RefreshSettings;
   currentAccount?: CurrentAccount;
@@ -184,6 +218,8 @@ export interface ConfigExportFile {
   source: "linuxdo-friends";
   exportedAt: string;
   friends: Record<Username, FriendUser>;
+  dredgeRules: DredgeRule[];
+  laoFindsStartedAt?: string;
   settings: RefreshSettings;
 }
 
@@ -210,6 +246,8 @@ export interface CloudAuthState extends CloudAuthExchangeResult {
   lastStatus?: CloudConfigStatus;
   lastBackupAt?: string;
   lastRestoreAt?: string;
+  lastConfigDigest?: string;
+  lastConfigSyncedAt?: string;
 }
 
 export type CloudBindingPublicState =
@@ -224,7 +262,17 @@ export type CloudBindingPublicState =
       lastStatus?: CloudConfigStatus;
       lastBackupAt?: string;
       lastRestoreAt?: string;
+      lastConfigDigest?: string;
+      lastConfigSyncedAt?: string;
     };
+
+export type CloudArchiveLocalState = "unbound" | "different" | "same";
+
+export interface CloudArchiveLocalStateResult {
+  binding: CloudBindingPublicState;
+  archiveState: CloudArchiveLocalState;
+  syncedAt?: string;
+}
 
 export interface CloudConfigStatusResult {
   binding: CloudBindingPublicState;
@@ -242,12 +290,14 @@ export interface CloudConfigBindResult {
 export interface CloudConfigBackupResult {
   binding: CloudBindingPublicState;
   status: CloudConfigStatus;
+  archiveState: CloudArchiveLocalState;
   message: string;
 }
 
 export interface CloudConfigRestoreResult {
   binding: CloudBindingPublicState;
   status: CloudConfigStatus;
+  archiveState: CloudArchiveLocalState;
   message: string;
   state: AppState;
 }
@@ -259,6 +309,7 @@ export interface CloudConfigClearBindingResult {
 
 export type CloudConfigOperationResult =
   | CloudConfigStatusResult
+  | CloudArchiveLocalStateResult
   | CloudConfigBindResult
   | CloudConfigBackupResult
   | CloudConfigRestoreResult
@@ -351,12 +402,18 @@ export type BackgroundCommand =
   | { type: "updateFriend"; username: Username; patch: Partial<Pick<FriendUser, "note" | "groups" | "pinned" | "activityKinds">> }
   | { type: "syncFollowedUsers" }
   | { type: "refreshFriendProfiles"; usernames?: Username[] }
-  | { type: "refreshFriendActivity"; usernames?: Username[]; scope?: ActivityRefreshScope }
+  | { type: "refreshFriendActivity"; usernames?: Username[]; scope?: ActivityRefreshScope; trigger?: SiteDataTaskTrigger; timedRunId?: string }
+  | { type: "upsertDredgeRule"; rule: Partial<DredgeRule> & { id?: string } }
+  | { type: "removeDredgeRule"; id: string }
+  | { type: "resetLaoFindsStartedAt" }
+  | { type: "markLaoFindsItemRead"; id: string; read: boolean }
+  | { type: "archiveLaoFindsItem"; id: string; archived: boolean }
   | { type: "cacheAvatars"; usernames?: Username[] }
   | { type: "getSiteDataProgress" }
   | { type: "getPageScriptStatus" }
   | { type: "getUpdateCheck" }
   | { type: "checkForUpdates"; force?: boolean }
+  | { type: "getCloudArchiveLocalState" }
   | { type: "getCloudConfigStatus" }
   | { type: "bindCloudSave" }
   | { type: "cloudSaveExchangeCode"; code: string }

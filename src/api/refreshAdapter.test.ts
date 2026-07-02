@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshAdapter } from "./refreshAdapter";
 import { defaultAppState } from "../domain/defaultState";
+import type { AppState } from "../shared/types";
 import { addFriendFromProfile, updateFriend, upsertFollowedUser } from "../domain/friends";
 
 describe("refresh adapter", () => {
@@ -194,7 +195,22 @@ describe("refresh adapter", () => {
   });
 
   it("refreshes selected friends through all four activity endpoints and normalizes selected usernames", async () => {
-    const state = addFriendFromProfile(defaultAppState, { username: "neil", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const state: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "neil", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      laoFindsStartedAt: "2026-06-26T00:00:00.000Z",
+      dredgeRules: [
+        {
+          id: "rule-topic",
+          name: "topic",
+          enabled: true,
+          usernames: ["neil"],
+          kinds: ["topic"],
+          keywords: ["topic"],
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      ]
+    };
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({
@@ -257,6 +273,8 @@ describe("refresh adapter", () => {
       expect.any(Object)
     );
     expect(result.state.activity.neil.items.map((item) => item.kind)).toEqual(["topic", "reply", "boost", "reaction"]);
+    expect(Object.keys(result.state.laoFindsItems)).toEqual(["user_action:neil:4:1:1"]);
+    expect(result.state.laoFindsItems["user_action:neil:4:1:1"].matchedRuleIds).toEqual(["rule-topic"]);
     expect(Object.keys(result.state.activityRefreshLedger).sort()).toEqual(["neil:boost", "neil:reaction", "neil:reply", "neil:topic"]);
     expect(vi.mocked(fetchImpl).mock.calls.some(([url]: [RequestInfo | URL, RequestInit?]) => String(url).includes("/u/neil.json"))).toBe(false);
     expect(Object.keys(result.state.activityWatermarks).sort()).toEqual(["neil:boost", "neil:reaction", "neil:reply", "neil:topic"]);

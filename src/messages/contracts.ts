@@ -10,6 +10,7 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
     case "getSiteDataProgress":
     case "getPageScriptStatus":
     case "getUpdateCheck":
+    case "getCloudArchiveLocalState":
     case "getCloudConfigStatus":
     case "bindCloudSave":
       return true;
@@ -50,6 +51,16 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
       return command.usernames === undefined || isUsernameList(command.usernames);
     case "refreshFriendActivity":
       return isActivityRefreshCommand(command);
+    case "upsertDredgeRule":
+      return isDredgeRulePatch(command.rule);
+    case "removeDredgeRule":
+      return isNonEmptyString(command.id);
+    case "resetLaoFindsStartedAt":
+      return true;
+    case "markLaoFindsItemRead":
+      return isNonEmptyString(command.id) && typeof command.read === "boolean";
+    case "archiveLaoFindsItem":
+      return isNonEmptyString(command.id) && typeof command.archived === "boolean";
     case "updateSettings":
       return isSettingsPatch(command.settings);
     default:
@@ -57,12 +68,33 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
   }
 }
 
+function isDredgeRulePatch(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    isOptionalString(value.id) &&
+    isOptionalString(value.name) &&
+    (value.enabled === undefined || typeof value.enabled === "boolean") &&
+    (value.usernames === undefined || value.usernames === "all" || isUsernameList(value.usernames)) &&
+    (value.kinds === undefined || isActivityRefreshKindList(value.kinds)) &&
+    (value.keywords === undefined || isStringList(value.keywords)) &&
+    isOptionalString(value.createdAt) &&
+    isOptionalString(value.updatedAt)
+  );
+}
+
 function isActivityRefreshCommand(command: Record<string, unknown>): boolean {
   const legacyUsernamesValid = command.usernames === undefined || isUsernameList(command.usernames);
   if (!legacyUsernamesValid) return false;
+  if (!isSiteDataTaskOwnership(command)) return false;
   if (command.scope === undefined) return true;
   if (!isRecord(command.scope)) return false;
   return isActivityKindFilter(command.scope.kind) && (command.scope.usernames === undefined || isUsernameList(command.scope.usernames));
+}
+
+function isSiteDataTaskOwnership(command: Record<string, unknown>): boolean {
+  if (command.trigger === undefined && command.timedRunId === undefined) return true;
+  if (command.trigger === "manual") return command.timedRunId === undefined;
+  return command.trigger === "timed" && isNonEmptyString(command.timedRunId);
 }
 
 function isSeedFollowedCommand(command: Record<string, unknown>): boolean {
@@ -98,6 +130,11 @@ function isSettingsPatch(value: unknown): boolean {
     (value.allowInactiveTabFallback === undefined || typeof value.allowInactiveTabFallback === "boolean") &&
     (value.openActivityLinksInPage === undefined || typeof value.openActivityLinksInPage === "boolean") &&
     (value.refreshIntervalMinutes === undefined || isValidRefreshInterval(value.refreshIntervalMinutes)) &&
+    (value.timedActivityRefreshEnabled === undefined || typeof value.timedActivityRefreshEnabled === "boolean") &&
+    (value.timedActivityRefreshScopeMode === undefined ||
+      value.timedActivityRefreshScopeMode === "rules" ||
+      value.timedActivityRefreshScopeMode === "all") &&
+    (value.timedActivityRefreshIntervalMinutes === undefined || isValidRefreshInterval(value.timedActivityRefreshIntervalMinutes)) &&
     (value.telegramBotToken === undefined || typeof value.telegramBotToken === "string") &&
     (value.telegramChatId === undefined || typeof value.telegramChatId === "string")
   );

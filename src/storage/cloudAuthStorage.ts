@@ -85,7 +85,9 @@ export function toPublicCloudBinding(auth: CloudAuthState | null): CloudBindingP
     boundAt: auth.boundAt,
     lastStatus: auth.lastStatus,
     lastBackupAt: auth.lastBackupAt,
-    lastRestoreAt: auth.lastRestoreAt
+    lastRestoreAt: auth.lastRestoreAt,
+    lastConfigDigest: auth.lastConfigDigest,
+    lastConfigSyncedAt: auth.lastConfigSyncedAt
   };
 }
 
@@ -106,7 +108,9 @@ function normalizeCloudAuthState(value: unknown): CloudAuthState | null {
     boundAt: value.boundAt,
     lastStatus: normalizeCloudStatus(value.lastStatus),
     lastBackupAt: normalizeOptionalString(value.lastBackupAt),
-    lastRestoreAt: normalizeOptionalString(value.lastRestoreAt)
+    lastRestoreAt: normalizeOptionalString(value.lastRestoreAt),
+    lastConfigDigest: normalizeOptionalString(value.lastConfigDigest),
+    lastConfigSyncedAt: normalizeOptionalString(value.lastConfigSyncedAt)
   };
 }
 

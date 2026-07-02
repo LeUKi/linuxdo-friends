@@ -191,7 +191,7 @@ function applyStorageValueToPatch(patch: UiScenePatch, key: string, value: unkno
 }
 
 function normalizeTab(value: unknown): UiSceneTab {
-  return value === "feed" || value === "friends" ? value : defaultUiSceneState.tab;
+  return value === "feed" || value === "friends" || value === "finds" ? value : defaultUiSceneState.tab;
 }
 
 function normalizeActivityKindFilter(value: unknown): ActivityKindFilter {
