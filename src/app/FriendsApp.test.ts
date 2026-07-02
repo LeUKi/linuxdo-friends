@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addFriendFromProfile, removeFriend, updateFriend } from "../domain/friends";
 import { defaultAppState } from "../domain/defaultState";
+import { recordRequestAttempts } from "../domain/requestStats";
 import { createMockStorage } from "../test/mockStorage";
 import { SITE_DATA_PROGRESS_STORAGE_KEY } from "../storage/siteDataProgressStorage";
 import { uiSceneStorageKeys } from "../storage/uiSceneStorage";
@@ -906,10 +907,10 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.textContent).toContain("佬有料");
     expect(container.textContent).toContain("暂时没有佬料");
     expect(container.textContent).toContain("手动刷新佬友圈或开启自动捞料");
-    expect(container.textContent).toContain("手动打捞");
+    expect(container.textContent).toContain("立即打捞");
     expect(container.textContent).toContain("配置打捞规则");
     expect(container.querySelector(".finds-title-with-icon .lucide-telescope")).toBeTruthy();
-    expect(getButton(container, "手动打捞").querySelector(".lucide-telescope")).toBeTruthy();
+    expect(getButton(container, "立即打捞").querySelector(".lucide-telescope")).toBeTruthy();
     expect(container.querySelector(".dredge-rule-panel")).toBeFalsy();
   });
 
@@ -1069,6 +1070,43 @@ describe("FriendsApp UI scene persistence", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "getCloudArchiveLocalState" });
     expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "getCloudConfigStatus" });
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#cloud-backup" });
+  });
+
+  it("shows the request statistics capsule in the side-panel header and opens statistics settings", async () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(new Date(2026, 6, 2, 9, 30).getTime());
+    try {
+      const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+      let state = recordRequestAttempts(defaultAppState, {
+        family: "activity",
+        count: 3,
+        at: new Date(2026, 6, 1, 18, 0)
+      });
+      state = recordRequestAttempts(state, {
+        family: "profile",
+        count: 2,
+        at: new Date(2026, 6, 2, 9, 10)
+      });
+      const chromeMock = setupChrome({ session, state });
+      const { container } = await renderFriendsApp("side-panel");
+
+      const chip = container.querySelector<HTMLButtonElement>(".request-stats-chip");
+      expect(chip).toBeTruthy();
+      expect(container.querySelector(".header-actions .request-stats-chip")).toBe(chip);
+      expect(container.querySelector(".header-actions")?.firstElementChild).toBe(chip);
+      expect(container.querySelector(".header-account-row .request-stats-chip")).toBeFalsy();
+      expect(chip?.querySelector(".lucide-chart-column")).toBeTruthy();
+      expect(chip?.textContent).toContain("今 2");
+      expect(chip?.textContent).toContain("总 5");
+
+      await act(async () => {
+        chip?.click();
+        await Promise.resolve();
+      });
+
+      expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#request-stats" });
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it("uses a bright cloud icon when local cloud archive state is same", async () => {
@@ -1467,7 +1505,7 @@ describe("FriendsApp UI scene persistence", () => {
     });
 
     expect(container.textContent).toContain("开启自动捞料");
-    expect(container.textContent).toContain("手动打捞");
+    expect(container.textContent).toContain("立即打捞");
     expect(container.textContent).toContain("配置打捞规则");
     expect(container.querySelector(".timed-refresh-control .lucide-telescope")).toBeTruthy();
     expect(container.querySelector(".timed-refresh-main .lucide-telescope")).toBeTruthy();
@@ -1700,7 +1738,7 @@ describe("FriendsApp UI scene persistence", () => {
     const { container } = await renderFriendsApp("side-panel");
 
     await act(async () => {
-      getButton(container, "手动打捞").click();
+      getButton(container, "立即打捞").click();
       await Promise.resolve();
       await Promise.resolve();
     });

@@ -39,6 +39,39 @@ describe("refresh adapter", () => {
     expect(fetchImpl).toHaveBeenNthCalledWith(2, "https://linux.do/u/lafish/follow/following.json", expect.any(Object));
   });
 
+  it("reports direct linux.do request attempts before success or failure handling", async () => {
+    const attempts: Array<{ family: string; url: string }> = [];
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ topic_list: { topics: [] } }), {
+        status: 200,
+        headers: { "x-discourse-username": "LaFish" }
+      }))
+      .mockResolvedValueOnce(new Response("blocked", { status: 403 })) as unknown as typeof fetch;
+    const adapter = createRefreshAdapter(fetchImpl, (family, url) => attempts.push({ family, url }));
+
+    const result = await adapter.syncFollowedUsers(defaultAppState);
+
+    expect(result.result).toMatchObject({ ok: false, reason: "blocked" });
+    expect(attempts).toEqual([
+      { family: "following", url: "https://linux.do/latest.json" },
+      { family: "following", url: "https://linux.do/u/lafish/follow/following.json" }
+    ]);
+  });
+
+  it("reports a direct linux.do request attempt when fetch throws", async () => {
+    const attempts: string[] = [];
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("offline");
+    }) as unknown as typeof fetch;
+    const adapter = createRefreshAdapter(fetchImpl, (_family, url) => attempts.push(url));
+
+    const result = await adapter.lookupFriendProfile("Neo");
+
+    expect(result).toMatchObject({ ok: false, result: { reason: "network_error" } });
+    expect(attempts).toEqual(["https://linux.do/u/neo.json"]);
+  });
+
   it("does not request the following list when the username header is missing", async () => {
     const state = upsertFollowedUser(defaultAppState, { username: "neil", source: "manual" });
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ topic_list: { topics: [] } }), { status: 200 })) as unknown as typeof fetch;

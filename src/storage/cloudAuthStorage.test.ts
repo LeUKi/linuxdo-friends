@@ -68,7 +68,10 @@ describe("cloud auth storage", () => {
         lastStatus: { state: "remote_config", checkedAt: "2026-06-29T00:01:00.000Z", exportedAt: "2026-06-29T00:00:00.000Z", friendCount: 3 },
         lastBackupAt: "2026-06-29T00:02:00.000Z",
         lastConfigDigest: "digest-1",
-        lastConfigSyncedAt: "2026-06-29T00:02:00.000Z"
+        lastConfigSyncedAt: "2026-06-29T00:02:00.000Z",
+        lastRequestStatsSyncedAt: "2026-07-02T09:00:00.000Z",
+        lastRequestStatsTotal: 12,
+        lastRequestStatsAutoSyncError: { state: "network_error", checkedAt: "2026-07-02T08:00:00.000Z", message: "timeout token=<redacted>" }
       }),
       storage
     );
@@ -78,6 +81,9 @@ describe("cloud auth storage", () => {
       lastBackupAt: "2026-06-29T00:02:00.000Z",
       lastConfigDigest: "digest-1",
       lastConfigSyncedAt: "2026-06-29T00:02:00.000Z",
+      lastRequestStatsSyncedAt: "2026-07-02T09:00:00.000Z",
+      lastRequestStatsTotal: 12,
+      lastRequestStatsAutoSyncError: { state: "network_error", message: "timeout token=<redacted>" },
       lastStatus: { state: "remote_config", friendCount: 3 }
     });
     expect(toPublicCloudBinding(updated)).toMatchObject({
@@ -85,7 +91,10 @@ describe("cloud auth storage", () => {
       lastStatus: { state: "remote_config", friendCount: 3 },
       lastBackupAt: "2026-06-29T00:02:00.000Z",
       lastConfigDigest: "digest-1",
-      lastConfigSyncedAt: "2026-06-29T00:02:00.000Z"
+      lastConfigSyncedAt: "2026-06-29T00:02:00.000Z",
+      lastRequestStatsSyncedAt: "2026-07-02T09:00:00.000Z",
+      lastRequestStatsTotal: 12,
+      lastRequestStatsAutoSyncError: { state: "network_error", message: "timeout token=<redacted>" }
     });
     expect(JSON.stringify(toPublicCloudBinding(updated))).not.toContain("secret-token");
   });

@@ -59,6 +59,7 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "openLinuxDoHome" })).toBe(true);
     expect(isBackgroundCommand({ type: "openActivityLink", url: "https://linux.do/t/topic/1/2" })).toBe(true);
     expect(isBackgroundCommand({ type: "openActivityLink", url: "/t/topic/1/2" })).toBe(true);
+    expect(isBackgroundCommand({ type: "updateSettings", settings: { requestStatsAutoSyncEnabled: true } })).toBe(true);
     expect(isBackgroundCommand({ type: "exportConfig" })).toBe(true);
     expect(isBackgroundCommand({ type: "importConfig", json: "{}" })).toBe(true);
     expect(isBackgroundCommand({ type: "clearCache" })).toBe(true);
@@ -94,6 +95,7 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "updateSettings", settings: { refreshIntervalMinutes: 1 } })).toBe(false);
     expect(isBackgroundCommand({ type: "updateSettings", settings: { timedActivityRefreshScopeMode: "bad" } })).toBe(false);
     expect(isBackgroundCommand({ type: "updateSettings", settings: { timedActivityRefreshIntervalMinutes: 1 } })).toBe(false);
+    expect(isBackgroundCommand({ type: "updateSettings", settings: { requestStatsAutoSyncEnabled: "yes" } })).toBe(false);
     expect(isBackgroundCommand({ type: "openActivityLink", url: "https://example.com/t/topic/1" })).toBe(false);
     expect(isBackgroundCommand({ type: "importConfig", json: "" })).toBe(false);
   });
@@ -115,6 +117,59 @@ describe("message contracts", () => {
         }
       }
     });
+  });
+
+  it("records failed direct linux.do attempts for non-mutating profile lookup", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("blocked", { status: 403 })));
+    const { send, localStorage } = await setupWorker();
+
+    const response = await send({ type: "lookupFriendProfile", username: "neo" });
+
+    expect(response).toMatchObject({ ok: false, reason: "blocked" });
+    expect(localStorage.dump()).toMatchObject({
+      linuxdoFriendsState: {
+        requestStats: {
+          total: 1,
+          byFamily: { profile: 1 }
+        }
+      }
+    });
+  });
+
+  it("buckets direct linux.do request stats at attempt time instead of completion time", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 1, 23, 59));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        vi.setSystemTime(new Date(2026, 6, 2, 0, 1));
+        return new Response("blocked", { status: 403 });
+      })
+    );
+    try {
+      const { send, localStorage } = await setupWorker();
+
+      const response = await send({ type: "lookupFriendProfile", username: "neo" });
+
+      expect(response).toMatchObject({ ok: false, reason: "blocked" });
+      expect(localStorage.dump()).toMatchObject({
+        linuxdoFriendsState: {
+          requestStats: {
+            total: 1,
+            days: {
+              "2026-07-01": {
+                total: 1,
+                hours: { "23": 1 },
+                byFamily: { profile: 1 }
+              }
+            }
+          }
+        }
+      });
+      expect((localStorage.dump().linuxdoFriendsState as AppState).requestStats.days["2026-07-02"]).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("clears paused timed activity refresh session when timed refresh is re-enabled", async () => {
@@ -994,7 +1049,21 @@ describe("message contracts", () => {
   it("returns local-only cloud archive state without fetching", async () => {
     const fetchImpl = vi.fn();
     vi.stubGlobal("fetch", fetchImpl);
-    const state = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const state = {
+      ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      requestStats: {
+        total: 7,
+        byFamily: { activity: 7 },
+        days: {
+          "2026-07-02": {
+            date: "2026-07-02",
+            total: 7,
+            hours: { "09": 7 },
+            byFamily: { activity: 7 }
+          }
+        }
+      }
+    };
     const { send } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
 
     const response = await send({ type: "getCloudArchiveLocalState" });
@@ -1012,7 +1081,10 @@ describe("message contracts", () => {
 
   it("returns same local cloud archive state when the stored digest matches current migratable config", async () => {
     vi.stubGlobal("fetch", vi.fn());
-    const state = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const state = {
+      ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      requestStats: requestStatsFixture(7)
+    };
     const digest = await createConfigFingerprintForTest(state);
     const { send } = await setupWorker({
       initialState: state,
@@ -1036,6 +1108,28 @@ describe("message contracts", () => {
     });
     expect(fetch).not.toHaveBeenCalled();
     expect(JSON.stringify(response)).not.toContain("secret-token");
+  });
+
+  it("keeps the local archive tag stable for request-stats-only changes", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const base = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const digest = await createConfigFingerprintForTest(base);
+    const state = {
+      ...base,
+      requestStats: requestStatsFixture(99)
+    };
+    const { send } = await setupWorker({
+      initialState: state,
+      initialCloudAuth: { ...cloudAuthFixture(), lastConfigDigest: digest, lastConfigSyncedAt: "2026-06-29T00:02:00.000Z" }
+    });
+
+    const response = await send({ type: "getCloudArchiveLocalState" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      data: { archiveState: "same", syncedAt: "2026-06-29T00:02:00.000Z" }
+    });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("reads cloud config status without mutating stored state", async () => {
@@ -1067,7 +1161,10 @@ describe("message contracts", () => {
   it("backs up migratable config to the cloud config slot", async () => {
     const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchImpl);
-    const state = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const state = {
+      ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      requestStats: requestStatsFixture(7)
+    };
     const { send } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
 
     const response = await send({ type: "backupCloudConfig" });
@@ -1081,7 +1178,7 @@ describe("message contracts", () => {
     expect(request.method).toBe("PUT");
     expect(request.headers).toEqual({ Accept: "application/json", Authorization: "Bearer secret-token", "Content-Type": "application/json" });
     const body = JSON.parse(String(request.body));
-    expect(body).toMatchObject({ schemaVersion: 1, source: "linuxdo-friends", friends: { neo: { username: "neo" } } });
+    expect(body).toMatchObject({ schemaVersion: 1, source: "linuxdo-friends", friends: { neo: { username: "neo" } }, requestStats: { total: 7 } });
     expect(body).not.toHaveProperty("currentAccount");
     expect(JSON.stringify(body)).not.toContain("secret-token");
     expect(JSON.stringify(response)).not.toContain("secret-token");
@@ -1089,7 +1186,10 @@ describe("message contracts", () => {
 
   it("persists the current config digest after a successful cloud backup", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
-    const state = addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const state = {
+      ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      requestStats: requestStatsFixture(11)
+    };
     const expectedDigest = await createConfigFingerprintForTest(state);
     const { send, localStorage } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
 
@@ -1102,14 +1202,18 @@ describe("message contracts", () => {
         binding: {
           bound: true,
           lastConfigDigest: expectedDigest,
-          lastConfigSyncedAt: expect.any(String)
+          lastConfigSyncedAt: expect.any(String),
+          lastRequestStatsSyncedAt: expect.any(String),
+          lastRequestStatsTotal: 11
         }
       }
     });
     expect(localStorage.dump()[CLOUD_AUTH_STORAGE_KEY]).toMatchObject({
       token: "secret-token",
       lastConfigDigest: expectedDigest,
-      lastConfigSyncedAt: expect.any(String)
+      lastConfigSyncedAt: expect.any(String),
+      lastRequestStatsSyncedAt: expect.any(String),
+      lastRequestStatsTotal: 11
     });
     expect(JSON.stringify(response)).not.toContain("secret-token");
     expect(JSON.stringify(response)).not.toContain("Neo");
@@ -1171,7 +1275,12 @@ describe("message contracts", () => {
   });
 
   it("restores cloud config through existing import semantics and preserves cloud binding", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => configSlotResponse({ friends: { neo: minimalFriend("neo") }, settings: { refreshIntervalMinutes: 90 } })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        configSlotResponse({ friends: { neo: minimalFriend("neo") }, settings: { refreshIntervalMinutes: 90 }, requestStats: requestStatsFixture(13) })
+      )
+    );
     const state = {
       ...addFriendFromProfile(defaultAppState, { username: "old", refreshedAt: "2026-06-28T00:00:00.000Z" }),
       currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" as const }
@@ -1189,10 +1298,11 @@ describe("message contracts", () => {
       data: {
         state: {
           friends: { neo: { username: "neo" } },
+          requestStats: { total: 13 },
           settings: { refreshIntervalMinutes: 90 },
           lastSync: { message: "已导入 1 位佬朋友配置。" }
         },
-        binding: { bound: true, linuxDoId: "42", lastRestoreAt: expect.any(String) },
+        binding: { bound: true, linuxDoId: "42", lastRestoreAt: expect.any(String), lastRequestStatsSyncedAt: expect.any(String), lastRequestStatsTotal: 13 },
         archiveState: "same",
         status: { state: "remote_config", friendCount: 1 }
       }
@@ -1261,13 +1371,132 @@ describe("message contracts", () => {
 
   it("clears cloud binding separately from local config", async () => {
     const state = addFriendFromProfile(defaultAppState, { username: "old", refreshedAt: "2026-06-28T00:00:00.000Z" });
-    const { send, localStorage } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
+    const { send, localStorage, alarms } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
+    await flushAsync();
+    alarms.clear.mockClear();
 
     const response = await send({ type: "clearCloudBinding" });
 
     expect(response).toEqual({ ok: true, data: { binding: { bound: false }, message: "已断开云存档绑定。" } });
     expect(localStorage.dump()).not.toHaveProperty(CLOUD_AUTH_STORAGE_KEY);
     expect(localStorage.dump()).toMatchObject({ linuxdoFriendsState: { friends: { old: { username: "old" } } } });
+    expect(alarms.clear).toHaveBeenCalledWith("linuxdoFriends.requestStatsAutoSync");
+  });
+
+  it("creates the request stats daily sync alarm when enabled and cloud-bound", async () => {
+    const boundWorker = await setupWorker({ initialCloudAuth: cloudAuthFixture() });
+    await flushAsync();
+    boundWorker.alarms.create.mockClear();
+    boundWorker.alarms.clear.mockClear();
+
+    await boundWorker.send({ type: "updateSettings", settings: { requestStatsAutoSyncEnabled: true } });
+
+    expect(boundWorker.alarms.create).toHaveBeenCalledWith("linuxdoFriends.requestStatsAutoSync", {
+      delayInMinutes: 1,
+      periodInMinutes: 24 * 60
+    });
+  });
+
+  it("recreates the request stats daily sync alarm on service-worker startup", async () => {
+    const state = {
+      ...defaultAppState,
+      settings: { ...defaultAppState.settings, requestStatsAutoSyncEnabled: true }
+    };
+    const worker = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
+    await flushAsync();
+    worker.alarms.create.mockClear();
+
+    await worker.triggerStartup();
+
+    expect(worker.alarms.create).toHaveBeenCalledWith("linuxdoFriends.requestStatsAutoSync", {
+      delayInMinutes: 1,
+      periodInMinutes: 24 * 60
+    });
+  });
+
+  it("clears the request stats daily sync alarm when enabled while unbound", async () => {
+    const unboundWorker = await setupWorker();
+    await flushAsync();
+    unboundWorker.alarms.create.mockClear();
+    unboundWorker.alarms.clear.mockClear();
+
+    await unboundWorker.send({ type: "updateSettings", settings: { requestStatsAutoSyncEnabled: true } });
+
+    expect(unboundWorker.alarms.create).not.toHaveBeenCalled();
+    expect(unboundWorker.alarms.clear).toHaveBeenCalledWith("linuxdoFriends.requestStatsAutoSync");
+  });
+
+  it("clears the request stats daily sync alarm when disabled", async () => {
+    const state = {
+      ...defaultAppState,
+      settings: { ...defaultAppState.settings, requestStatsAutoSyncEnabled: true }
+    };
+    const boundWorker = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
+    await flushAsync();
+
+    boundWorker.alarms.create.mockClear();
+    boundWorker.alarms.clear.mockClear();
+    await boundWorker.send({ type: "updateSettings", settings: { requestStatsAutoSyncEnabled: false } });
+
+    expect(boundWorker.alarms.clear).toHaveBeenCalledWith("linuxdoFriends.requestStatsAutoSync");
+  });
+
+  it("auto-syncs request stats to the cloud config slot at most once per local day without restoring", async () => {
+    const fetchImpl = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchImpl);
+    const state = {
+      ...defaultAppState,
+      requestStats: requestStatsFixture(17),
+      settings: { ...defaultAppState.settings, requestStatsAutoSyncEnabled: true }
+    };
+    const { triggerAlarm, localStorage } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
+    await flushAsync();
+    fetchImpl.mockClear();
+
+    await triggerAlarm("linuxdoFriends.requestStatsAutoSync");
+    await flushAsync();
+    await triggerAlarm("linuxdoFriends.requestStatsAutoSync");
+    await flushAsync();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, request] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://linuxdo-cloud-save.lafish.workers.dev/api/apps/linuxdo-friends/slots/config");
+    expect(request.method).toBe("PUT");
+    expect(JSON.parse(String(request.body))).toMatchObject({ requestStats: { total: 17 } });
+    expect(localStorage.dump()[CLOUD_AUTH_STORAGE_KEY]).toMatchObject({
+      lastRequestStatsSyncedAt: expect.any(String),
+      lastRequestStatsTotal: 17,
+      lastConfigDigest: expect.any(String)
+    });
+    expect(String(request.body)).not.toContain("secret-token");
+  });
+
+  it("stores redacted request stats auto-sync failure metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("request failed Authorization: Bearer secret-token token=secret-token");
+      })
+    );
+    const state = {
+      ...defaultAppState,
+      requestStats: requestStatsFixture(3),
+      settings: { ...defaultAppState.settings, requestStatsAutoSyncEnabled: true }
+    };
+    const { triggerAlarm, localStorage } = await setupWorker({ initialState: state, initialCloudAuth: cloudAuthFixture() });
+    await flushAsync();
+
+    await triggerAlarm("linuxdoFriends.requestStatsAutoSync");
+    await flushAsync();
+
+    expect(localStorage.dump()[CLOUD_AUTH_STORAGE_KEY]).toMatchObject({
+      lastRequestStatsAutoSyncError: {
+        state: "network_error",
+        message: "request failed Authorization: Bearer <redacted> token=<redacted>"
+      }
+    });
+    const storedAuth = localStorage.dump()[CLOUD_AUTH_STORAGE_KEY] as { lastRequestStatsAutoSyncError?: unknown };
+    expect(JSON.stringify(storedAuth.lastRequestStatsAutoSyncError)).not.toContain("secret-token");
   });
 
   it("adds a friend directly from a valid profile response", async () => {
@@ -1826,6 +2055,7 @@ describe("message contracts", () => {
       ok: true,
       data: {
         activityRefreshLedger: { "misaka7369:boost": { kind: "boost", source: "direct_fetch" } },
+        requestStats: { total: 1, byFamily: { activity: 1 } },
         lastSync: { ok: true, source: "direct_fetch" }
       }
     });
@@ -1840,6 +2070,51 @@ describe("message contracts", () => {
     expect(progressResponse).toMatchObject({
       ok: true,
       data: { taskType: "activity", status: "success", completed: 1, total: 1, scope: { kind: "boost", usernames: ["misaka7369"] } }
+    });
+  });
+
+  it("records existing-tab avatar requests reported by the content script", async () => {
+    const attemptedAt = new Date(2026, 6, 1, 23, 59).toISOString();
+    const state = addFriendFromProfile(defaultAppState, {
+      username: "neo",
+      avatarUrl: "https://linux.do/user_avatar/linux.do/neo/48/1.png",
+      refreshedAt: "2026-06-28T00:00:00.000Z"
+    });
+    const { send } = await setupWorker({
+      initialState: state,
+      tabs: {
+        query: vi.fn(async () => [{ id: 456, url: "https://linux.do/latest" } as chrome.tabs.Tab]),
+        sendMessage: vi.fn(async () => ({
+          ok: true,
+          username: "neo",
+          sourceUrl: "https://linux.do/user_avatar/linux.do/neo/48/1.png",
+          dataUrl: "data:image/png;base64,abc",
+          contentType: "image/png",
+          byteLength: 3,
+          requestCount: 1,
+          requestAttemptedAts: [attemptedAt]
+        }))
+      }
+    });
+
+    const response = await send({ type: "cacheAvatars", usernames: ["neo"] });
+
+    expect(response).toMatchObject({
+      ok: true,
+      data: {
+        requestStats: {
+          total: 1,
+          byFamily: { avatar: 1 },
+          days: {
+            "2026-07-01": {
+              total: 1,
+              hours: { "23": 1 },
+              byFamily: { avatar: 1 }
+            }
+          }
+        },
+        avatarCache: { neo: { byteLength: 3 } }
+      }
     });
   });
 
@@ -1991,6 +2266,49 @@ describe("message contracts", () => {
     });
     expect((localStorage.dump().linuxdoFriendsState as typeof defaultAppState).friends.old).toBeUndefined();
     expect(sessionStorage.dump()).not.toHaveProperty(SITE_DATA_PROGRESS_STORAGE_KEY);
+  });
+
+  it("does not let older profile lookup stats overwrite a later config import", async () => {
+    let resolveFetch: (response: Response) => void = () => undefined;
+    const pendingFetch = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn(() => pendingFetch));
+    const oldState = addFriendFromProfile(defaultAppState, { username: "Old", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const importJson = JSON.stringify({
+      schemaVersion: 1,
+      source: "linuxdo-friends",
+      exportedAt: "2026-06-28T00:00:00.000Z",
+      friends: {
+        neo: {
+          username: "neo",
+          note: "",
+          groups: [],
+          pinned: false,
+          upgradedAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      },
+      settings: { refreshIntervalMinutes: 90 }
+    });
+    const { send, localStorage } = await setupWorker({ initialState: oldState });
+
+    const lookup = send({ type: "lookupFriendProfile", username: "old" });
+    await Promise.resolve();
+    const imported = await send({ type: "importConfig", json: importJson });
+    resolveFetch(profileResponse("Old", "Old"));
+    const lookupResult = await lookup;
+
+    expect(imported).toMatchObject({ ok: true, data: { friends: { neo: { username: "neo" } } } });
+    expect(lookupResult).toMatchObject({ ok: true, data: { username: "old", name: "Old" } });
+    expect(localStorage.dump()).toMatchObject({
+      linuxdoFriendsState: {
+        friends: { neo: { username: "neo" } },
+        settings: { refreshIntervalMinutes: 90 },
+        requestStats: { total: 0 }
+      }
+    });
+    expect((localStorage.dump().linuxdoFriendsState as typeof defaultAppState).friends.old).toBeUndefined();
   });
 
   it("clears live site-data progress and releases the refresh slot after config import", async () => {
@@ -2414,6 +2732,8 @@ async function setupWorker(
   } = {}
 ) {
   let listener: ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean) | null = null;
+  const startupListeners: Array<() => void> = [];
+  const alarmListeners: Array<(alarm: chrome.alarms.Alarm) => void> = [];
   const runtime = {
     sendMessage: vi.fn(),
     openOptionsPage: vi.fn(),
@@ -2421,6 +2741,11 @@ async function setupWorker(
     onMessage: {
       addListener: vi.fn((callback) => {
         listener = callback;
+      })
+    },
+    onStartup: {
+      addListener: vi.fn((callback) => {
+        startupListeners.push(callback);
       })
     }
   };
@@ -2441,6 +2766,15 @@ async function setupWorker(
   const sidePanel = {
     open: vi.fn(),
     setPanelBehavior: vi.fn()
+  };
+  const alarms = {
+    create: vi.fn(async () => undefined),
+    clear: vi.fn(async () => true),
+    onAlarm: {
+      addListener: vi.fn((callback) => {
+        alarmListeners.push(callback);
+      })
+    }
   };
   const sessionStorage = {
     ...createMockStorage(overrides.initialSession ?? {}),
@@ -2466,7 +2800,8 @@ async function setupWorker(
     },
     tabs,
     windows,
-    sidePanel
+    sidePanel,
+    alarms
   });
 
   await import("./serviceWorker");
@@ -2478,6 +2813,19 @@ async function setupWorker(
     sessionStorage,
     tabs,
     windows,
+    alarms,
+    async triggerAlarm(name: string) {
+      for (const alarmListener of alarmListeners) {
+        alarmListener({ name, scheduledTime: Date.now() });
+      }
+      await Promise.resolve();
+      await Promise.resolve();
+    },
+    async triggerStartup() {
+      for (const startupListener of startupListeners) startupListener();
+      await Promise.resolve();
+      await Promise.resolve();
+    },
     send(message: unknown, sender: chrome.runtime.MessageSender = {}) {
       return new Promise((resolve) => {
         listener?.(message, sender, resolve);
@@ -2507,6 +2855,12 @@ function sendCloudExchangeCode(
     { type: "cloudSaveExchangeCode", code },
     { url: "https://linuxdo-cloud-save.lafish.workers.dev/auth/complete/browser_code?code=redacted" }
   );
+}
+
+async function flushAsync() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function createPendingJsonFetch(payload: unknown) {
@@ -2568,6 +2922,21 @@ function minimalFriend(username: string) {
     groups: [],
     upgradedAt: "2026-06-29T00:00:00.000Z",
     updatedAt: "2026-06-29T00:00:00.000Z"
+  };
+}
+
+function requestStatsFixture(total = 7) {
+  return {
+    total,
+    byFamily: { activity: total },
+    days: {
+      "2026-07-02": {
+        date: "2026-07-02",
+        total,
+        hours: { "09": total },
+        byFamily: { activity: total }
+      }
+    }
   };
 }
 

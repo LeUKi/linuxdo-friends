@@ -45,6 +45,7 @@ export type ActivityKindFilter = "all" | ActivityRefreshKind;
 export type ActivityRefreshRequestKind = ActivityRefreshKind | "user_actions";
 export type ActivitySource = "user_actions" | "boosts" | "reactions";
 export type TimedActivityRefreshScopeMode = "rules" | "all";
+export type RequestStatsFamily = "account" | "following" | "profile" | "activity" | "avatar";
 
 export type UiSceneTab = "friends" | "feed" | "finds";
 
@@ -126,6 +127,19 @@ export interface ActivityWatermarkEntry {
   source: RefreshSource;
 }
 
+export interface RequestStatsDayEntry {
+  date: string;
+  total: number;
+  hours: Record<string, number>;
+  byFamily: Partial<Record<RequestStatsFamily, number>>;
+}
+
+export interface RequestStatsState {
+  total: number;
+  byFamily: Partial<Record<RequestStatsFamily, number>>;
+  days: Record<string, RequestStatsDayEntry>;
+}
+
 export interface DredgeRule {
   id: string;
   name: string;
@@ -186,6 +200,7 @@ export interface RefreshSettings {
   timedActivityRefreshEnabled: boolean;
   timedActivityRefreshScopeMode: TimedActivityRefreshScopeMode;
   timedActivityRefreshIntervalMinutes: number;
+  requestStatsAutoSyncEnabled: boolean;
   telegramBotToken?: string;
   telegramChatId?: string;
 }
@@ -204,6 +219,7 @@ export interface AppState {
   activityRefreshLedger: Record<string, ActivityRefreshLedgerEntry>;
   activityWatermarks: Record<string, ActivityWatermarkEntry>;
   activityFeedWaterlineAt?: string;
+  requestStats: RequestStatsState;
   dredgeRules: DredgeRule[];
   laoFindsStartedAt?: string;
   laoFindsItems: Record<string, LaoFindsItem>;
@@ -220,6 +236,7 @@ export interface ConfigExportFile {
   friends: Record<Username, FriendUser>;
   dredgeRules: DredgeRule[];
   laoFindsStartedAt?: string;
+  requestStats: RequestStatsState;
   settings: RefreshSettings;
 }
 
@@ -230,6 +247,7 @@ export interface CloudConfigStatus {
   checkedAt?: string;
   exportedAt?: string;
   friendCount?: number;
+  requestStatsTotal?: number;
   message?: string;
 }
 
@@ -248,6 +266,9 @@ export interface CloudAuthState extends CloudAuthExchangeResult {
   lastRestoreAt?: string;
   lastConfigDigest?: string;
   lastConfigSyncedAt?: string;
+  lastRequestStatsSyncedAt?: string;
+  lastRequestStatsTotal?: number;
+  lastRequestStatsAutoSyncError?: CloudConfigStatus;
 }
 
 export type CloudBindingPublicState =
@@ -264,6 +285,9 @@ export type CloudBindingPublicState =
       lastRestoreAt?: string;
       lastConfigDigest?: string;
       lastConfigSyncedAt?: string;
+      lastRequestStatsSyncedAt?: string;
+      lastRequestStatsTotal?: number;
+      lastRequestStatsAutoSyncError?: CloudConfigStatus;
     };
 
 export type CloudArchiveLocalState = "unbound" | "different" | "same";
@@ -459,26 +483,31 @@ export type ContentScriptCommand =
   | { type: "linuxdoFriends.extractAvatar"; username: Username; avatarUrl: string }
   | { type: "linuxdoFriends.navigateInPage"; url: string };
 
-export type ContentScriptFailureResponse = { ok: false; reason: RefreshFailureReason | "unavailable"; error: string };
+export interface ContentScriptRequestStats {
+  requestCount?: number;
+  requestAttemptedAts?: string[];
+}
+
+export type ContentScriptFailureResponse = { ok: false; reason: RefreshFailureReason | "unavailable"; error: string } & ContentScriptRequestStats;
 
 export type ContentScriptCurrentAccountResponse =
-  | { ok: true; username: Username }
+  | ({ ok: true; username: Username } & ContentScriptRequestStats)
   | ContentScriptFailureResponse;
 
 export type ContentScriptFollowingResponse =
-  | { ok: true; username: Username; users: FollowedUserInput[] }
+  | ({ ok: true; username: Username; users: FollowedUserInput[] } & ContentScriptRequestStats)
   | ContentScriptFailureResponse;
 
 export type ContentScriptActivityResponse =
-  | { ok: true; activity: FriendActivitySummary }
+  | ({ ok: true; activity: FriendActivitySummary } & ContentScriptRequestStats)
   | ContentScriptFailureResponse;
 
 export type ContentScriptProfileResponse =
-  | { ok: true; profile: FriendProfileSummary }
+  | ({ ok: true; profile: FriendProfileSummary } & ContentScriptRequestStats)
   | ContentScriptFailureResponse;
 
 export type ContentScriptAvatarResponse =
-  | { ok: true; username: Username; sourceUrl: string; dataUrl: string; contentType: string; byteLength: number }
+  | ({ ok: true; username: Username; sourceUrl: string; dataUrl: string; contentType: string; byteLength: number } & ContentScriptRequestStats)
   | ContentScriptFailureResponse;
 
 export type ContentScriptNavigationResponse =

@@ -87,7 +87,10 @@ export function toPublicCloudBinding(auth: CloudAuthState | null): CloudBindingP
     lastBackupAt: auth.lastBackupAt,
     lastRestoreAt: auth.lastRestoreAt,
     lastConfigDigest: auth.lastConfigDigest,
-    lastConfigSyncedAt: auth.lastConfigSyncedAt
+    lastConfigSyncedAt: auth.lastConfigSyncedAt,
+    lastRequestStatsSyncedAt: auth.lastRequestStatsSyncedAt,
+    lastRequestStatsTotal: auth.lastRequestStatsTotal,
+    lastRequestStatsAutoSyncError: auth.lastRequestStatsAutoSyncError
   };
 }
 
@@ -110,7 +113,13 @@ function normalizeCloudAuthState(value: unknown): CloudAuthState | null {
     lastBackupAt: normalizeOptionalString(value.lastBackupAt),
     lastRestoreAt: normalizeOptionalString(value.lastRestoreAt),
     lastConfigDigest: normalizeOptionalString(value.lastConfigDigest),
-    lastConfigSyncedAt: normalizeOptionalString(value.lastConfigSyncedAt)
+    lastConfigSyncedAt: normalizeOptionalString(value.lastConfigSyncedAt),
+    lastRequestStatsSyncedAt: normalizeOptionalString(value.lastRequestStatsSyncedAt),
+    lastRequestStatsTotal:
+      typeof value.lastRequestStatsTotal === "number" && Number.isFinite(value.lastRequestStatsTotal) && value.lastRequestStatsTotal >= 0
+        ? Math.floor(value.lastRequestStatsTotal)
+        : undefined,
+    lastRequestStatsAutoSyncError: normalizeCloudStatus(value.lastRequestStatsAutoSyncError)
   };
 }
 
@@ -132,6 +141,10 @@ function normalizeCloudStatus(value: unknown): CloudConfigStatus | undefined {
     checkedAt: normalizeOptionalString(value.checkedAt),
     exportedAt: normalizeOptionalString(value.exportedAt),
     friendCount: typeof value.friendCount === "number" && Number.isFinite(value.friendCount) ? value.friendCount : undefined,
+    requestStatsTotal:
+      typeof value.requestStatsTotal === "number" && Number.isFinite(value.requestStatsTotal) && value.requestStatsTotal >= 0
+        ? Math.floor(value.requestStatsTotal)
+        : undefined,
     message: normalizeOptionalString(value.message)
   };
 }

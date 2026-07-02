@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { addFriendFromKnownUser, addFriendFromProfile, removeFriend, updateFriend } from "../domain/friends";
 import { removeDredgeRule, upsertDredgeRule } from "../domain/laoFinds";
 import { defaultAppState } from "../domain/defaultState";
+import { recordRequestAttempts } from "../domain/requestStats";
 import type { AppState, CloudArchiveLocalStateResult } from "../shared/types";
 import { resetAppStateObserverForTest, resetRuntimeObserversForTest } from "../state/atoms";
 import { APP_STATE_STORAGE_KEY } from "../storage/storage";
@@ -211,6 +212,68 @@ describe("OptionsApp update diagnostics", () => {
     expect(feedRender.container.textContent).not.toContain("打捞规则");
   });
 
+  it("shows local linux.do request statistics with tabbed bar charts", async () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(new Date(2026, 6, 2, 9, 30).getTime());
+    try {
+      let state = recordRequestAttempts(defaultAppState, {
+        family: "account",
+        count: 1,
+        at: new Date(2026, 5, 29, 8, 0)
+      });
+      state = recordRequestAttempts(state, {
+        family: "following",
+        count: 3,
+        at: new Date(2026, 6, 1, 18, 0)
+      });
+      state = recordRequestAttempts(state, {
+        family: "profile",
+        count: 2,
+        at: new Date(2026, 6, 2, 9, 10)
+      });
+      setupChrome({ state });
+      const { container } = await renderOptionsApp("#request-stats");
+
+      expect(window.location.hash).toBe("#request-stats");
+      expect(getButton(container, "请求统计").classList.contains("active")).toBe(true);
+      expect(container.querySelector(".request-stats-panel")?.textContent).toContain("失败和被拦截的请求也会计入");
+      expect(container.querySelector(".request-stats-total-badge")?.textContent).toBe("总请求6");
+      expect(container.querySelector(".request-stats-total-badge")?.getAttribute("aria-label")).toBe("总请求 6");
+      expect(container.querySelectorAll(".request-stat-block")).toHaveLength(0);
+      expect(getButton(container, "今天").getAttribute("aria-selected")).toBe("true");
+      let hourlyBars = Array.from(container.querySelectorAll(".request-stats-chart-hourly .request-stats-bar-item"));
+      expect(hourlyBars).toHaveLength(24);
+      expect(hourlyBars[0].getAttribute("aria-label")).toBe("00:00：0");
+      expect(hourlyBars[9].getAttribute("aria-label")).toBe("09:00：2");
+      expect(hourlyBars[23].getAttribute("aria-label")).toBe("23:00：0");
+      expect(hourlyBars[0].querySelector(".request-stats-bar-label")?.textContent).toBe("00");
+      expect(hourlyBars[1].querySelector(".request-stats-bar-label")?.textContent).toBe("");
+      expect(hourlyBars[3].querySelector(".request-stats-bar-label")?.textContent).toBe("03");
+      expect(hourlyBars[9].querySelector(".request-stats-bar-label")?.textContent).toBe("09");
+      expect(hourlyBars[23].querySelector(".request-stats-bar-label")?.textContent).toBe("23");
+      expect(hourlyBars[9].querySelector(".request-stats-bar-tooltip")?.textContent).toBe("09:00：2");
+      expect(hourlyBars[9].getAttribute("tabindex")).toBe("0");
+
+      await act(async () => {
+        getButton(container, "昨天").click();
+      });
+
+      expect(getButton(container, "昨天").getAttribute("aria-selected")).toBe("true");
+      hourlyBars = Array.from(container.querySelectorAll(".request-stats-chart-hourly .request-stats-bar-item"));
+      expect(hourlyBars).toHaveLength(24);
+      expect(hourlyBars[18].getAttribute("aria-label")).toBe("18:00：3");
+      expect(hourlyBars[23].getAttribute("aria-label")).toBe("23:00：0");
+      expect(hourlyBars[17].querySelector(".request-stats-bar-label")?.textContent).toBe("");
+      expect(hourlyBars[18].querySelector(".request-stats-bar-label")?.textContent).toBe("18");
+      expect(hourlyBars[18].querySelector(".request-stats-bar-tooltip")?.textContent).toBe("18:00：3");
+
+      const dailyBars = Array.from(container.querySelectorAll(".request-stats-chart-daily .request-stats-bar-item"));
+      expect(dailyBars).toHaveLength(7);
+      expect(dailyBars.map((item) => item.getAttribute("aria-label"))).toEqual(["6/26：0", "6/27：0", "6/28：0", "6/29：1", "6/30：0", "7/1：3", "7/2：2"]);
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
   it("checks cloud config status once on open without restoring config", async () => {
     const chromeMock = setupChrome({
       cloudState: {
@@ -276,6 +339,46 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).toContain("已备份 1 位佬朋友到云端。");
     expect(container.querySelector(".cloud-backup-status")?.textContent).toContain("已备份");
     expect(container.textContent).not.toContain("secret-token");
+  });
+
+  it("shows request stats daily sync separately from the main cloud archive state", async () => {
+    const state = { ...defaultAppState, settings: { ...defaultAppState.settings, requestStatsAutoSyncEnabled: false } };
+    const chromeMock = setupChrome({
+      state,
+      cloudState: boundCloudState("云端配置：1 位佬朋友。", {
+        lastRequestStatsSyncedAt: "2026-07-02T09:00:00.000Z",
+        lastRequestStatsTotal: 23
+      }),
+      cloudArchiveState: sameCloudArchiveState({
+        lastRequestStatsSyncedAt: "2026-07-02T09:00:00.000Z",
+        lastRequestStatsTotal: 23
+      })
+    });
+    const { container } = await renderOptionsApp("#data");
+
+    expect(container.textContent).toContain("请求统计每日自动同步");
+    expect(container.textContent).toContain("请求统计同步于");
+    expect(container.textContent).toContain("总计 23 次");
+    expect(container.querySelector(".cloud-backup-status")?.textContent).toContain("已备份");
+
+    const toggle = container.querySelector<HTMLButtonElement>(".cloud-stats-sync-row .switch-button");
+    await act(async () => {
+      toggle?.click();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "updateSettings", settings: { requestStatsAutoSyncEnabled: true } });
+  });
+
+  it("explains request stats daily sync is unavailable while cloud is unbound", async () => {
+    setupChrome({
+      cloudState: { binding: { bound: false }, status: { state: "unchecked" }, message: "尚未绑定 linuxdo-cloud-save。" },
+      cloudArchiveState: { binding: { bound: false }, archiveState: "unbound" }
+    });
+    const { container } = await renderOptionsApp("#data");
+
+    expect(container.textContent).toContain("绑定云存档后可开启");
+    expect(container.textContent).toContain("请求统计每日同步需先绑定云存档。");
+    expect(container.querySelector<HTMLButtonElement>(".cloud-stats-sync-row .switch-button")?.disabled).toBe(true);
   });
 
   it("refreshes cloud binding state when OAuth completion updates cloud auth storage", async () => {
@@ -977,6 +1080,7 @@ function setupChrome({
               updatedAt: "2026-06-28T00:00:00.000Z"
             }
           },
+          requestStats: { total: 0, byFamily: {}, days: {} },
           settings: defaultAppState.settings
         }
       };
@@ -1097,7 +1201,7 @@ function createPendingIdentifyResponse() {
   return { promise, resolve: resolvePromise };
 }
 
-function boundCloudState(message = "云端配置：1 位佬朋友。") {
+function boundCloudState(message = "云端配置：1 位佬朋友。", bindingOverrides: Record<string, unknown> = {}) {
   return {
     binding: {
       bound: true,
@@ -1107,7 +1211,8 @@ function boundCloudState(message = "云端配置：1 位佬朋友。") {
       tokenKind: "jwt",
       boundAt: "2026-06-29T00:00:00.000Z",
       lastBackupAt: "2026-06-29T00:02:00.000Z",
-      lastRestoreAt: "2026-06-29T00:03:00.000Z"
+      lastRestoreAt: "2026-06-29T00:03:00.000Z",
+      ...bindingOverrides
     },
     status: {
       state: "remote_config",
@@ -1119,7 +1224,7 @@ function boundCloudState(message = "云端配置：1 位佬朋友。") {
   };
 }
 
-function sameCloudArchiveState(): CloudArchiveLocalStateResult {
+function sameCloudArchiveState(bindingOverrides: Record<string, unknown> = {}): CloudArchiveLocalStateResult {
   return {
     binding: {
       bound: true,
@@ -1131,7 +1236,8 @@ function sameCloudArchiveState(): CloudArchiveLocalStateResult {
       lastBackupAt: "2026-06-29T00:02:00.000Z",
       lastRestoreAt: "2026-06-29T00:03:00.000Z",
       lastConfigDigest: "digest-1",
-      lastConfigSyncedAt: "2026-06-29T00:02:00.000Z"
+      lastConfigSyncedAt: "2026-06-29T00:02:00.000Z",
+      ...bindingOverrides
     },
     archiveState: "same",
     syncedAt: "2026-06-29T00:02:00.000Z"

@@ -135,6 +135,7 @@ function isSettingsPatch(value: unknown): boolean {
       value.timedActivityRefreshScopeMode === "rules" ||
       value.timedActivityRefreshScopeMode === "all") &&
     (value.timedActivityRefreshIntervalMinutes === undefined || isValidRefreshInterval(value.timedActivityRefreshIntervalMinutes)) &&
+    (value.requestStatsAutoSyncEnabled === undefined || typeof value.requestStatsAutoSyncEnabled === "boolean") &&
     (value.telegramBotToken === undefined || typeof value.telegramBotToken === "string") &&
     (value.telegramChatId === undefined || typeof value.telegramChatId === "string")
   );

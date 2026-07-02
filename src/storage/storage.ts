@@ -1,6 +1,7 @@
 import { defaultAppState } from "../domain/defaultState";
 import { normalizeFriendUser, normalizeUsername } from "../domain/friends";
 import { normalizeLaoFindsItems, normalizeDredgeRules } from "../domain/laoFinds";
+import { normalizeRequestStats } from "../domain/requestStats";
 import type { AppState, RefreshSettings } from "../shared/types";
 
 export const APP_STATE_STORAGE_KEY = "linuxdoFriendsState";
@@ -45,6 +46,7 @@ function mergeState(stored?: Partial<AppState>): AppState {
     activityRefreshLedger: stored?.activityRefreshLedger ?? {},
     activityWatermarks: stored?.activityWatermarks ?? {},
     activityFeedWaterlineAt: stored?.activityFeedWaterlineAt,
+    requestStats: normalizeRequestStats(stored?.requestStats),
     dredgeRules: normalizeDredgeRules(stored?.dredgeRules),
     laoFindsStartedAt: normalizeOptionalTimestamp(stored?.laoFindsStartedAt),
     laoFindsItems: normalizeLaoFindsItems(stored?.laoFindsItems),
@@ -89,6 +91,10 @@ function mergeSettings(stored?: Partial<RefreshSettings>): RefreshSettings {
         ? stored.timedActivityRefreshScopeMode
         : defaultAppState.settings.timedActivityRefreshScopeMode,
     timedActivityRefreshIntervalMinutes,
+    requestStatsAutoSyncEnabled:
+      typeof stored?.requestStatsAutoSyncEnabled === "boolean"
+        ? stored.requestStatsAutoSyncEnabled
+        : defaultAppState.settings.requestStatsAutoSyncEnabled,
     openActivityLinksInPage:
       typeof stored?.openActivityLinksInPage === "boolean" ? stored.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     allowAutoRefresh: false,

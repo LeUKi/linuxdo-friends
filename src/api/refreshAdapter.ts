@@ -27,6 +27,7 @@ import type {
   FriendProfileSummary,
   RefreshFailureResult,
   RefreshResult,
+  RequestStatsFamily,
   RefreshSource,
   Username
 } from "../shared/types";
@@ -38,6 +39,7 @@ type SafeFetchResult = { ok: true; json: unknown } | { ok: false; result: Refres
 type LoginProbeResult = { ok: true; username: Username } | { ok: false; result: RefreshFailureResult };
 export type ActivityProgressCallback = (step: ActivityRequestStep) => void;
 export type ProfileProgressCallback = (username: Username) => void;
+export type LinuxDoRequestAttemptCallback = (family: RequestStatsFamily, url: string) => void;
 type CollectedActivityTarget = {
   username: Username;
   items: ActivityItem[];
@@ -61,10 +63,10 @@ export interface RefreshAdapter {
   ): Promise<{ state: AppState; result: RefreshResult }>;
 }
 
-export function createRefreshAdapter(fetchImpl: typeof fetch = fetch): RefreshAdapter {
+export function createRefreshAdapter(fetchImpl: typeof fetch = fetch, onRequestAttempt?: LinuxDoRequestAttemptCallback): RefreshAdapter {
   return {
     async identifyCurrentAccount(state) {
-      const login = await probeCurrentAccount(fetchImpl);
+      const login = await probeCurrentAccount(fetchImpl, onRequestAttempt, "account");
       if (!login.ok) {
         return { state, result: login.result };
       }
@@ -82,11 +84,11 @@ export function createRefreshAdapter(fetchImpl: typeof fetch = fetch): RefreshAd
       };
     },
     async syncFollowedUsers(state) {
-      const login = await probeCurrentAccount(fetchImpl);
+      const login = await probeCurrentAccount(fetchImpl, onRequestAttempt, "following");
       if (!login.ok) {
         return { state, result: login.result };
       }
-      const response = await safeFetch(fetchImpl, `/u/${encodeURIComponent(login.username)}/follow/following.json`, "direct_fetch");
+      const response = await safeFetch(fetchImpl, `/u/${encodeURIComponent(login.username)}/follow/following.json`, "direct_fetch", "following", onRequestAttempt);
       if (!response.ok) {
         return {
           state: {
@@ -115,10 +117,10 @@ export function createRefreshAdapter(fetchImpl: typeof fetch = fetch): RefreshAd
       };
     },
     lookupFriendProfile(username) {
-      return fetchFriendProfile(fetchImpl, username);
+      return fetchFriendProfile(fetchImpl, username, onRequestAttempt);
     },
     async addFriendByProfile(state, username) {
-      const profileResult = await fetchFriendProfile(fetchImpl, username);
+      const profileResult = await fetchFriendProfile(fetchImpl, username, onRequestAttempt);
       if (!profileResult.ok) return { state, result: profileResult.result };
       return {
         state: addFriendFromProfile(state, profileResult.profile),
@@ -135,7 +137,7 @@ export function createRefreshAdapter(fetchImpl: typeof fetch = fetch): RefreshAd
       let nextState = state;
       let refreshedCount = 0;
       for (const username of targets) {
-        const profileResult = await fetchFriendProfile(fetchImpl, username);
+        const profileResult = await fetchFriendProfile(fetchImpl, username, onRequestAttempt);
         if (!profileResult.ok) return { state: nextState, result: profileResult.result };
         nextState = upsertFriendProfile(nextState, profileResult.profile);
         refreshedCount += 1;
@@ -170,7 +172,7 @@ export function createRefreshAdapter(fetchImpl: typeof fetch = fetch): RefreshAd
       for (const target of targets) {
         const items: ActivityItem[] = [];
         for (const step of target.steps) {
-          const stepResult = await fetchFriendActivityStep(fetchImpl, step);
+          const stepResult = await fetchFriendActivityStep(fetchImpl, step, onRequestAttempt);
           if (!stepResult.ok) return { state, result: stepResult.result };
           items.push(...stepResult.items);
           onProgress?.(step);
@@ -203,12 +205,16 @@ export type FriendProfileFetchResult =
   | { ok: true; profile: FriendProfileSummary }
   | { ok: false; result: RefreshFailureResult };
 
-async function fetchFriendProfile(fetchImpl: typeof fetch, usernameInput: Username): Promise<FriendProfileFetchResult> {
+async function fetchFriendProfile(
+  fetchImpl: typeof fetch,
+  usernameInput: Username,
+  onRequestAttempt?: LinuxDoRequestAttemptCallback
+): Promise<FriendProfileFetchResult> {
   const username = normalizeUsername(usernameInput);
   if (!username) {
     return { ok: false, result: failure("direct_fetch", "invalid_response", "缺少要添加的用户名。") };
   }
-  const profile = await safeFetch(fetchImpl, `/u/${encodeURIComponent(username)}.json`, "direct_fetch");
+  const profile = await safeFetch(fetchImpl, `/u/${encodeURIComponent(username)}.json`, "direct_fetch", "profile", onRequestAttempt);
   if (!profile.ok) {
     if (profile.result.reason === "network_error" && profile.result.message === "请求失败：404") {
       return { ok: false, result: failure("direct_fetch", "invalid_response", "用户不存在或公开资料不可用。") };
@@ -226,8 +232,12 @@ type FriendActivityFetchResult =
   | { ok: true; items: ActivityItem[] }
   | { ok: false; result: RefreshResult };
 
-async function fetchFriendActivityStep(fetchImpl: typeof fetch, step: ActivityRequestStep): Promise<FriendActivityFetchResult> {
-  const response = await safeFetch(fetchImpl, step.path, "direct_fetch");
+async function fetchFriendActivityStep(
+  fetchImpl: typeof fetch,
+  step: ActivityRequestStep,
+  onRequestAttempt?: LinuxDoRequestAttemptCallback
+): Promise<FriendActivityFetchResult> {
+  const response = await safeFetch(fetchImpl, step.path, "direct_fetch", "activity", onRequestAttempt);
   if (!response.ok) return { ok: false, result: response.result };
   const items = activityKindsForRequestKind(step.kind).flatMap((kind) => {
     if (kind === "topic" || kind === "reply") {
@@ -241,9 +251,17 @@ async function fetchFriendActivityStep(fetchImpl: typeof fetch, step: ActivityRe
   return { ok: true, items };
 }
 
-async function safeFetch(fetchImpl: typeof fetch, path: string, source: RefreshSource): Promise<SafeFetchResult> {
+async function safeFetch(
+  fetchImpl: typeof fetch,
+  path: string,
+  source: RefreshSource,
+  family: RequestStatsFamily,
+  onRequestAttempt?: LinuxDoRequestAttemptCallback
+): Promise<SafeFetchResult> {
+  const url = `https://linux.do${path}`;
+  onRequestAttempt?.(family, url);
   try {
-    const response = await fetchImpl(`https://linux.do${path}`, {
+    const response = await fetchImpl(url, {
       credentials: "include",
       headers: { Accept: "application/json" }
     });
@@ -257,9 +275,15 @@ async function safeFetch(fetchImpl: typeof fetch, path: string, source: RefreshS
   }
 }
 
-async function probeCurrentAccount(fetchImpl: typeof fetch): Promise<LoginProbeResult> {
+async function probeCurrentAccount(
+  fetchImpl: typeof fetch,
+  onRequestAttempt: LinuxDoRequestAttemptCallback | undefined,
+  family: RequestStatsFamily
+): Promise<LoginProbeResult> {
+  const url = "https://linux.do/latest.json";
+  onRequestAttempt?.(family, url);
   try {
-    const response = await fetchImpl("https://linux.do/latest.json", {
+    const response = await fetchImpl(url, {
       credentials: "include",
       headers: { Accept: "application/json" }
     });

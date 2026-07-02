@@ -20,6 +20,7 @@ import type {
 } from "../shared/types";
 import { defaultUpdateCheckState } from "../domain/versionCheck";
 import { defaultAppState } from "../domain/defaultState";
+import { normalizeRequestStats } from "../domain/requestStats";
 import { sendCommand } from "../messages/client";
 import {
   defaultPageScriptStatus,
@@ -474,6 +475,7 @@ function mergeObservedAppState(stored: Partial<AppState>): AppState {
     activityRefreshLedger: stored.activityRefreshLedger ?? {},
     activityWatermarks: stored.activityWatermarks ?? {},
     activityFeedWaterlineAt: stored.activityFeedWaterlineAt,
+    requestStats: normalizeRequestStats(stored.requestStats),
     dredgeRules: stored.dredgeRules ?? [],
     laoFindsStartedAt: normalizeOptionalTimestamp(stored.laoFindsStartedAt),
     laoFindsItems: stored.laoFindsItems ?? {},

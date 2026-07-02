@@ -9,6 +9,7 @@ describe("storage migration", () => {
     expect(defaultAppState.activityRefreshLedger).toEqual({});
     expect(defaultAppState.activityWatermarks).toEqual({});
     expect(defaultAppState.activityFeedWaterlineAt).toBeUndefined();
+    expect(defaultAppState.requestStats).toEqual({ total: 0, byFamily: {}, days: {} });
     expect(defaultAppState.dredgeRules).toEqual([]);
     expect(defaultAppState.laoFindsStartedAt).toBeUndefined();
     expect(defaultAppState.laoFindsItems).toEqual({});
@@ -30,6 +31,7 @@ describe("storage migration", () => {
       activityRefreshLedger: {},
       activityWatermarks: {},
       activityFeedWaterlineAt: undefined,
+      requestStats: { total: 0, byFamily: {}, days: {} },
       dredgeRules: [],
       laoFindsStartedAt: undefined,
       laoFindsItems: {},
@@ -208,6 +210,39 @@ describe("storage migration", () => {
     });
   });
 
+  it("normalizes persisted request stats", async () => {
+    const storage = createMockStorage({
+      linuxdoFriendsState: {
+        requestStats: {
+          total: 9,
+          byFamily: { activity: 5, profile: 4, bad: 99 },
+          days: {
+            "2026-07-02": {
+              date: "2026-07-02",
+              total: 5,
+              hours: { "00": 2, "09": 3, "25": 1 },
+              byFamily: { activity: 5 }
+            }
+          }
+        }
+      }
+    });
+
+    await expect(loadState(storage)).resolves.toMatchObject({
+      requestStats: {
+        total: 9,
+        byFamily: { activity: 5, profile: 4 },
+        days: {
+          "2026-07-02": {
+            total: 5,
+            hours: { "00": 2, "09": 3 },
+            byFamily: { activity: 5 }
+          }
+        }
+      }
+    });
+  });
+
   it("preserves telegram bot token and chat id", async () => {
     const storage = createMockStorage({
       linuxdoFriendsState: {
@@ -226,7 +261,8 @@ describe("storage migration", () => {
         settings: {
           timedActivityRefreshEnabled: true,
           timedActivityRefreshScopeMode: "all",
-          timedActivityRefreshIntervalMinutes: 240
+          timedActivityRefreshIntervalMinutes: 240,
+          requestStatsAutoSyncEnabled: true
         }
       }
     });
@@ -235,7 +271,8 @@ describe("storage migration", () => {
       settings: {
         timedActivityRefreshEnabled: true,
         timedActivityRefreshScopeMode: "all",
-        timedActivityRefreshIntervalMinutes: 240
+        timedActivityRefreshIntervalMinutes: 240,
+        requestStatsAutoSyncEnabled: true
       }
     });
   });
@@ -246,7 +283,8 @@ describe("storage migration", () => {
         settings: {
           timedActivityRefreshEnabled: "yes",
           timedActivityRefreshScopeMode: "bad",
-          timedActivityRefreshIntervalMinutes: 1
+          timedActivityRefreshIntervalMinutes: 1,
+          requestStatsAutoSyncEnabled: "yes"
         }
       }
     });
@@ -255,7 +293,8 @@ describe("storage migration", () => {
       settings: {
         timedActivityRefreshEnabled: false,
         timedActivityRefreshScopeMode: "rules",
-        timedActivityRefreshIntervalMinutes: 120
+        timedActivityRefreshIntervalMinutes: 120,
+        requestStatsAutoSyncEnabled: false
       }
     });
   });

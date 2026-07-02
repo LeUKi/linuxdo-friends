@@ -78,7 +78,8 @@ export function summarizeCloudConfigPayload(value: unknown, checkedAt: string = 
     state: "remote_config",
     checkedAt,
     exportedAt: file.exportedAt,
-    friendCount: Object.keys(file.friends).length
+    friendCount: Object.keys(file.friends).length,
+    requestStatsTotal: file.requestStats.total
   };
 }
 

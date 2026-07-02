@@ -1542,13 +1542,13 @@ function clickInSiteLink(href: string) {
 async function extractCurrentAccountFromPage(): Promise<ContentScriptCurrentAccountResponse> {
   const login = await fetchJson("/latest.json");
   if (!login.ok) {
-    return { ok: false, reason: login.reason, error: login.error };
+    return { ok: false, reason: login.reason, error: login.error, requestCount: login.requestCount, requestAttemptedAts: login.requestAttemptedAts };
   }
   const username = login.response.headers.get("x-discourse-username")?.trim().replace(/^@/, "").toLowerCase();
   if (!username) {
-    return { ok: false, reason: "unavailable", error: "当前 linux.do 页面没有识别到登录账号。" };
+    return { ok: false, reason: "unavailable", error: "当前 linux.do 页面没有识别到登录账号。", requestCount: login.requestCount, requestAttemptedAts: login.requestAttemptedAts };
   }
-  return { ok: true, username };
+  return { ok: true, username, requestCount: login.requestCount, requestAttemptedAts: login.requestAttemptedAts };
 }
 
 async function extractFollowingFromPage(): Promise<ContentScriptFollowingResponse> {
@@ -1558,10 +1558,12 @@ async function extractFollowingFromPage(): Promise<ContentScriptFollowingRespons
   }
   const { username } = account;
   const following = await fetchJson(`/u/${encodeURIComponent(username)}/follow/following.json`);
+  const requestCount = (account.requestCount ?? 0) + following.requestCount;
+  const requestAttemptedAts = [...(account.requestAttemptedAts ?? []), ...following.requestAttemptedAts];
   if (!following.ok) {
-    return { ok: false, reason: following.reason, error: following.error };
+    return { ok: false, reason: following.reason, error: following.error, requestCount, requestAttemptedAts };
   }
-  return { ok: true, username, users: extractFollowedUsers(following.json) };
+  return { ok: true, username, users: extractFollowedUsers(following.json), requestCount, requestAttemptedAts };
 }
 
 async function extractProfileFromPage(username: Username): Promise<ContentScriptProfileResponse> {
@@ -1571,12 +1573,12 @@ async function extractProfileFromPage(username: Username): Promise<ContentScript
   }
   const profile = await fetchJson(`/u/${encodeURIComponent(normalizedUsername)}.json`);
   if (!profile.ok) {
-    return { ok: false, reason: profile.reason, error: profile.error };
+    return { ok: false, reason: profile.reason, error: profile.error, requestCount: profile.requestCount, requestAttemptedAts: profile.requestAttemptedAts };
   }
   try {
-    return { ok: true, profile: extractFriendProfile(profile.json) };
+    return { ok: true, profile: extractFriendProfile(profile.json), requestCount: profile.requestCount, requestAttemptedAts: profile.requestAttemptedAts };
   } catch {
-    return { ok: false, reason: "invalid_response", error: "linux.do 返回的用户资料格式不完整。" };
+    return { ok: false, reason: "invalid_response", error: "linux.do 返回的用户资料格式不完整。", requestCount: profile.requestCount, requestAttemptedAts: profile.requestAttemptedAts };
   }
 }
 
@@ -1589,12 +1591,16 @@ async function extractActivityFromPage(
     return { ok: false, reason: "unavailable", error: "缺少要刷新的好友用户名。" };
   }
   const items: ActivityItem[] = [];
+  let requestCount = 0;
+  const requestAttemptedAts: string[] = [];
   for (const step of activityRequestStepsForUser(normalizedUsername, kind)) {
     const response = await fetchJson(step.path);
-    if (!response.ok) return { ok: false, reason: response.reason, error: response.error };
+    requestCount += response.requestCount;
+    requestAttemptedAts.push(...response.requestAttemptedAts);
+    if (!response.ok) return { ok: false, reason: response.reason, error: response.error, requestCount, requestAttemptedAts };
     items.push(...normalizeStepItems(normalizedUsername, step.kind, response.json));
   }
-  return { ok: true, activity: summaryFromItems(normalizedUsername, items) };
+  return { ok: true, activity: summaryFromItems(normalizedUsername, items), requestCount, requestAttemptedAts };
 }
 
 async function extractActivityStepFromPage(
@@ -1606,8 +1612,13 @@ async function extractActivityStepFromPage(
     return { ok: false, reason: "unavailable", error: "缺少要刷新的好友用户名。" };
   }
   const response = await fetchJson(step.path);
-  if (!response.ok) return { ok: false, reason: response.reason, error: response.error };
-  return { ok: true, activity: summaryFromItems(normalizedUsername, normalizeStepItems(normalizedUsername, step.kind, response.json)) };
+  if (!response.ok) return { ok: false, reason: response.reason, error: response.error, requestCount: response.requestCount, requestAttemptedAts: response.requestAttemptedAts };
+  return {
+    ok: true,
+    activity: summaryFromItems(normalizedUsername, normalizeStepItems(normalizedUsername, step.kind, response.json)),
+    requestCount: response.requestCount,
+    requestAttemptedAts: response.requestAttemptedAts
+  };
 }
 
 async function extractAvatarFromPage(
@@ -1618,22 +1629,25 @@ async function extractAvatarFromPage(
   if (!normalizedUsername || !isLinuxDoAvatarUrl(avatarUrl)) {
     return { ok: false, reason: "unavailable", error: "头像地址不在允许范围内。" };
   }
+  let requestedAt: string | null = null;
   try {
     const url = new URL(avatarUrl);
+    const requestCount = 1;
+    requestedAt = new Date().toISOString();
     const response = await fetch(`${url.pathname}${url.search}`, {
       credentials: "same-origin",
       headers: { Accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8" }
     });
     if (!response.ok) {
-      return { ok: false, reason: response.status === 429 ? "rate_limited" : "network_error", error: `头像加载失败：${response.status}` };
+      return { ok: false, reason: response.status === 429 ? "rate_limited" : "network_error", error: `头像加载失败：${response.status}`, requestCount, requestAttemptedAts: [requestedAt] };
     }
     const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "image/png";
     if (!["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"].includes(contentType)) {
-      return { ok: false, reason: "invalid_response", error: "头像响应不是图片。" };
+      return { ok: false, reason: "invalid_response", error: "头像响应不是图片。", requestCount, requestAttemptedAts: [requestedAt] };
     }
     const blob = await response.blob();
     if (blob.size > 96_000) {
-      return { ok: false, reason: "invalid_response", error: "头像图片过大，未缓存。" };
+      return { ok: false, reason: "invalid_response", error: "头像图片过大，未缓存。", requestCount, requestAttemptedAts: [requestedAt] };
     }
     return {
       ok: true,
@@ -1641,42 +1655,46 @@ async function extractAvatarFromPage(
       sourceUrl: avatarUrl,
       dataUrl: await blobToDataUrl(blob),
       contentType,
-      byteLength: blob.size
+      byteLength: blob.size,
+      requestCount,
+      requestAttemptedAts: [requestedAt]
     };
   } catch {
-    return { ok: false, reason: "network_error", error: "页面内头像加载失败。" };
+    return { ok: false, reason: "network_error", error: "页面内头像加载失败。", requestCount: 1, requestAttemptedAts: [requestedAt ?? new Date().toISOString()] };
   }
 }
 
 async function fetchJson(path: string): Promise<
-  | { ok: true; response: Response; json: unknown }
-  | { ok: false; reason: RefreshFailureReason | "unavailable"; error: string }
+  | { ok: true; response: Response; json: unknown; requestCount: number; requestAttemptedAts: string[] }
+  | { ok: false; reason: RefreshFailureReason | "unavailable"; error: string; requestCount: number; requestAttemptedAts: string[] }
 > {
+  const requestedAt = new Date().toISOString();
   try {
+    const requestCount = 1;
     const response = await fetch(path, {
       credentials: "same-origin",
       headers: { Accept: "application/json" }
     });
     const text = await response.text();
     if (looksLikeChallenge(text)) {
-      return { ok: false, reason: "challenge", error: "linux.do 要求浏览器验证，请在页面完成验证后再同步。" };
+      return { ok: false, reason: "challenge", error: "linux.do 要求浏览器验证，请在页面完成验证后再同步。", requestCount, requestAttemptedAts: [requestedAt] };
     }
     if (response.status === 403) {
-      return { ok: false, reason: "blocked", error: "linux.do 拒绝了本次页面内同步。" };
+      return { ok: false, reason: "blocked", error: "linux.do 拒绝了本次页面内同步。", requestCount, requestAttemptedAts: [requestedAt] };
     }
     if (response.status === 429) {
-      return { ok: false, reason: "rate_limited", error: "linux.do 返回限流，已停止同步。" };
+      return { ok: false, reason: "rate_limited", error: "linux.do 返回限流，已停止同步。", requestCount, requestAttemptedAts: [requestedAt] };
     }
     if (!response.ok) {
-      return { ok: false, reason: "network_error", error: `页面内请求失败：${response.status}` };
+      return { ok: false, reason: "network_error", error: `页面内请求失败：${response.status}`, requestCount, requestAttemptedAts: [requestedAt] };
     }
     try {
-      return { ok: true, response, json: JSON.parse(text) };
+      return { ok: true, response, json: JSON.parse(text), requestCount, requestAttemptedAts: [requestedAt] };
     } catch {
-      return { ok: false, reason: "invalid_response", error: "linux.do 返回的内容不是可解析 JSON。" };
+      return { ok: false, reason: "invalid_response", error: "linux.do 返回的内容不是可解析 JSON。", requestCount, requestAttemptedAts: [requestedAt] };
     }
   } catch {
-    return { ok: false, reason: "network_error", error: "页面内请求失败，请确认 linux.do 标签页仍然可用。" };
+    return { ok: false, reason: "network_error", error: "页面内请求失败，请确认 linux.do 标签页仍然可用。", requestCount: 1, requestAttemptedAts: [requestedAt] };
   }
 }
 

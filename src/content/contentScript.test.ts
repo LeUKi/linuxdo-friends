@@ -988,7 +988,8 @@ describe("content script friend markers", () => {
       listener?.({ type: "linuxdoFriends.extractCurrentAccount" }, {}, resolve);
     });
 
-    expect(response).toMatchObject({ ok: true, username: "lafish" });
+    expect(response).toMatchObject({ ok: true, username: "lafish", requestCount: 1 });
+    expect((response as { requestAttemptedAts?: string[] }).requestAttemptedAts).toHaveLength(1);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith("/latest.json", expect.objectContaining({ credentials: "same-origin" }));
   });
@@ -1037,6 +1038,7 @@ describe("content script friend markers", () => {
     expect(response).toMatchObject({
       ok: true,
       username: "lafish",
+      requestCount: 2,
       users: [
         {
           username: "Neil",
@@ -1045,6 +1047,7 @@ describe("content script friend markers", () => {
         }
       ]
     });
+    expect((response as { requestAttemptedAts?: string[] }).requestAttemptedAts).toHaveLength(2);
     expect(fetch).toHaveBeenNthCalledWith(1, "/latest.json", expect.objectContaining({ credentials: "same-origin" }));
     expect(fetch).toHaveBeenNthCalledWith(2, "/u/lafish/follow/following.json", expect.objectContaining({ credentials: "same-origin" }));
   });
@@ -1084,6 +1087,7 @@ describe("content script friend markers", () => {
 
     expect(response).toMatchObject({
       ok: true,
+      requestCount: 1,
       profile: {
         username: "misaka7369",
         name: "御坂",
@@ -1092,6 +1096,7 @@ describe("content script friend markers", () => {
         lastSeenAt: "2026-06-28T00:12:00.000Z"
       }
     });
+    expect((response as { requestAttemptedAts?: string[] }).requestAttemptedAts).toHaveLength(1);
     expect(fetch).toHaveBeenCalledWith("/u/misaka7369.json", expect.objectContaining({ credentials: "same-origin" }));
   });
 
@@ -1182,9 +1187,11 @@ describe("content script friend markers", () => {
       username: "neil",
       sourceUrl: "https://linux.do/user_avatar/linux.do/neil/48/1.png",
       contentType: "image/png",
-      byteLength: 3
+      byteLength: 3,
+      requestCount: 1
     });
     expect((response as { dataUrl?: string }).dataUrl).toMatch(/^data:image\/png;base64,/);
+    expect((response as { requestAttemptedAts?: string[] }).requestAttemptedAts).toHaveLength(1);
     expect(fetch).toHaveBeenCalledWith("/user_avatar/linux.do/neil/48/1.png", expect.objectContaining({ credentials: "same-origin" }));
   });
 
@@ -1311,6 +1318,7 @@ describe("content script friend markers", () => {
 
     expect(response).toMatchObject({
       ok: true,
+      requestCount: 4,
       activity: {
         username: "misaka7369",
         items: [
@@ -1326,6 +1334,7 @@ describe("content script friend markers", () => {
         ]
       }
     });
+    expect((response as { requestAttemptedAts?: string[] }).requestAttemptedAts).toHaveLength(4);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "/user_actions.json?offset=0&username=misaka7369&filter=4",
@@ -1386,6 +1395,7 @@ describe("content script friend markers", () => {
     });
 
     expect(response.ok).toBe(true);
+    expect((response as { requestCount?: number }).requestCount).toBe(1);
     expect(response.activity.items).toHaveLength(1);
     expect(response.activity.items[0].kind).toBe(kind);
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -1430,6 +1440,7 @@ describe("content script friend markers", () => {
     });
 
     expect(response.ok).toBe(true);
+    expect((response as { requestCount?: number }).requestCount).toBe(1);
     expect(response.activity.items[0].kind).toBe("boost");
     expect(fetch).toHaveBeenCalledWith("/discourse-boosts/users/misaka7369/boosts-given.json", expect.objectContaining({ credentials: "same-origin" }));
   });

@@ -1,9 +1,10 @@
 import { defaultAppState } from "./defaultState";
 import { normalizeActivityKinds, normalizeFriendUser, normalizeUsername } from "./friends";
 import { normalizeDredgeRules } from "./laoFinds";
+import { normalizeRequestStats } from "./requestStats";
 import { sha256Base64url } from "../shared/crypto";
 import { nowIso } from "../shared/time";
-import type { AppState, FriendUser, DredgeRule, RefreshSettings } from "../shared/types";
+import type { AppState, FriendUser, DredgeRule, RefreshSettings, RequestStatsState } from "../shared/types";
 
 export const CONFIG_EXPORT_SCHEMA_VERSION = 1;
 export const CONFIG_EXPORT_SOURCE = "linuxdo-friends";
@@ -16,6 +17,7 @@ export interface ConfigExportFile {
   friends: Record<string, FriendUser>;
   dredgeRules: DredgeRule[];
   laoFindsStartedAt?: string;
+  requestStats: RequestStatsState;
   settings: RefreshSettings;
 }
 
@@ -31,6 +33,7 @@ export function createConfigExport(state: AppState, exportedAt: string = nowIso(
     friends: normalizeFriendsRecord(state.friends),
     dredgeRules: normalizeDredgeRules(state.dredgeRules),
     laoFindsStartedAt: normalizeOptionalTimestamp(state.laoFindsStartedAt),
+    requestStats: normalizeRequestStats(state.requestStats),
     settings: normalizeStoredSettings(state.settings)
   };
 }
@@ -67,6 +70,7 @@ export function applyConfigImport(file: ConfigExportFile, importedAt: string = n
       friends,
       dredgeRules,
       laoFindsStartedAt: file.laoFindsStartedAt,
+      requestStats: normalizeRequestStats(file.requestStats),
       settings: normalizeImportedSettings(file.settings),
       lastSync: {
         ok: true,
@@ -100,6 +104,7 @@ function normalizeConfigFileV1(value: Record<string, unknown>): ConfigExportFile
     friends: normalizeFriendsRecord(value.friends),
     dredgeRules: normalizeDredgeRules(value.dredgeRules),
     laoFindsStartedAt: normalizeOptionalTimestamp(value.laoFindsStartedAt),
+    requestStats: normalizeRequestStats(value.requestStats),
     settings: normalizeImportedSettings(value.settings)
   };
 }
@@ -162,6 +167,10 @@ function normalizeStoredSettings(value: Partial<RefreshSettings> | Record<string
         ? value.timedActivityRefreshScopeMode
         : defaultAppState.settings.timedActivityRefreshScopeMode,
     timedActivityRefreshIntervalMinutes,
+    requestStatsAutoSyncEnabled:
+      typeof value.requestStatsAutoSyncEnabled === "boolean"
+        ? value.requestStatsAutoSyncEnabled
+        : defaultAppState.settings.requestStatsAutoSyncEnabled,
     openActivityLinksInPage:
       typeof value.openActivityLinksInPage === "boolean" ? value.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     allowAutoRefresh: false,
@@ -208,6 +217,9 @@ function normalizeImportedSettings(value: Partial<RefreshSettings> | Record<stri
   ) {
     throw new Error("配置文件的定时刷新间隔不正确。");
   }
+  if (value.requestStatsAutoSyncEnabled !== undefined && typeof value.requestStatsAutoSyncEnabled !== "boolean") {
+    throw new Error("配置文件的请求统计自动同步设置不正确。");
+  }
   return {
     ...defaultAppState.settings,
     refreshIntervalMinutes: value.refreshIntervalMinutes,
@@ -223,6 +235,10 @@ function normalizeImportedSettings(value: Partial<RefreshSettings> | Record<stri
       typeof value.timedActivityRefreshIntervalMinutes === "number"
         ? value.timedActivityRefreshIntervalMinutes
         : defaultAppState.settings.timedActivityRefreshIntervalMinutes,
+    requestStatsAutoSyncEnabled:
+      typeof value.requestStatsAutoSyncEnabled === "boolean"
+        ? value.requestStatsAutoSyncEnabled
+        : defaultAppState.settings.requestStatsAutoSyncEnabled,
     openActivityLinksInPage:
       typeof value.openActivityLinksInPage === "boolean" ? value.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     allowAutoRefresh: false,

@@ -48,17 +48,24 @@ import type {
 import { deriveFollowedCandidates, deriveFriendList } from "../popup/selectors";
 import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
 import { formatRelativeTime } from "../shared/time";
+import {
+  deriveRequestStatsView,
+  type RequestStatsDayView,
+  type RequestStatsHourView,
+  type RequestStatsView
+} from "../domain/requestStats";
 import "../styles/app.css";
 
 const LDC_SPONSOR_20_URL = "https://credit.linux.do/paying/online?token=3b78efe60d34a77c55d52e84d60e33270b5cc69f7aa8979bbab4d1b41b6f95b7";
 const LDC_SPONSOR_200_URL = "https://credit.linux.do/paying/online?token=276b84998e7864428f277f6d7260f7e65e8c531cda5413cb061ff4a91cc3caa4";
 
-type OptionsSectionId = "basic" | "scope" | "lao-finds" | "notifications" | "data" | "sponsor";
+type OptionsSectionId = "basic" | "scope" | "lao-finds" | "request-stats" | "notifications" | "data" | "sponsor";
 
 const OPTIONS_SECTIONS: Array<{ id: OptionsSectionId; hash: string; label: string }> = [
   { id: "basic", hash: "#basic", label: "基础" },
   { id: "scope", hash: "#scope", label: "视奸范围" },
   { id: "lao-finds", hash: "#lao-finds", label: "佬有料" },
+  { id: "request-stats", hash: "#request-stats", label: "请求统计" },
   { id: "notifications", hash: "#notifications", label: "通知渠道" },
   { id: "data", hash: "#data", label: "数据管理" },
   { id: "sponsor", hash: "#sponsor", label: "赞助" }
@@ -146,6 +153,7 @@ export function OptionsApp() {
   const activeSection = sectionFromHash(activeHash);
   const friends = deriveFriendList(state);
   const followedCandidates = deriveFollowedCandidates(state);
+  const requestStatsView = deriveRequestStatsView(state.requestStats, new Date(relativeNow));
   const cloudBinding = cloudArchiveState?.binding.bound ? cloudArchiveState.binding : cloudState?.binding.bound ? cloudState.binding : null;
   const cloudBound = cloudBinding != null;
   const dredgeRulesLocked = state.settings.timedActivityRefreshEnabled || (siteDataProgress?.taskType === "activity" && siteDataProgress.status === "running");
@@ -663,7 +671,7 @@ export function OptionsApp() {
                 <div className="panel-title-row">
                   <div>
                     <h2>配置迁移</h2>
-                    <p className="panel-subtitle">只导入导出佬朋友和刷新设置，不包含账号、动态、头像缓存、页面现场或 Cookie。</p>
+                    <p className="panel-subtitle">导入导出佬朋友、刷新设置和请求统计，不包含账号、动态、头像缓存、页面现场或 Cookie。</p>
                   </div>
                   <div className="maintenance-actions">
                     <button className="small-action" type="button" onClick={() => void handleExportConfig()}>
@@ -734,6 +742,25 @@ export function OptionsApp() {
                 </div>
                 <p className="settings-meta cloud-backup-remote">{cloudStatusText(cloudState?.status)}</p>
                 {cloudBinding ? <p className="settings-meta cloud-backup-meta">{cloudBindingMetaText(cloudBinding)}</p> : null}
+                <div className="timed-setting-row cloud-stats-sync-row">
+                  <div>
+                    <strong>请求统计每日自动同步</strong>
+                    <span>
+                      {cloudBound
+                        ? "开启后每天最多自动上传一次请求统计；不会自动从云端恢复，多设备以后上传的统计覆盖云端。"
+                        : "绑定云存档后可开启；本地统计不会因为未绑定而丢失。"}
+                    </span>
+                  </div>
+                  <button
+                    className={`switch-button${state.settings.requestStatsAutoSyncEnabled && cloudBound ? " active" : ""}`}
+                    type="button"
+                    disabled={cloudBusy != null || (!cloudBound && !state.settings.requestStatsAutoSyncEnabled)}
+                    onClick={() => void updateSettings({ requestStatsAutoSyncEnabled: !state.settings.requestStatsAutoSyncEnabled })}
+                  >
+                    {!cloudBound && !state.settings.requestStatsAutoSyncEnabled ? "未绑定" : state.settings.requestStatsAutoSyncEnabled ? "关闭" : "开启"}
+                  </button>
+                </div>
+                <p className="settings-meta cloud-backup-meta">{requestStatsSyncText(cloudBinding)}</p>
                 {cloudMessage ? <p className="settings-meta">{cloudMessage}</p> : null}
               </div>
 
@@ -758,6 +785,8 @@ export function OptionsApp() {
             </section>
           ) : null}
 
+          {activeSection === "request-stats" ? <RequestStatsSettingsPanel view={requestStatsView} /> : null}
+
           {activeSection === "sponsor" ? (
             <section className="panel sponsor-panel">
               <div className="panel-title-row">
@@ -780,6 +809,113 @@ export function OptionsApp() {
       </div>
     </main>
   );
+}
+
+function RequestStatsSettingsPanel({ view }: { view: RequestStatsView }) {
+  const [hourlyTab, setHourlyTab] = useState<"today" | "yesterday">("today");
+  const hourlyItems = hourlyTab === "today" ? view.todayHours : view.yesterdayHours;
+  const hourlyLabel = hourlyTab === "today" ? "今天" : "昨天";
+
+  return (
+    <section className="panel request-stats-panel">
+      <div className="panel-title-row">
+        <div>
+          <h2>请求统计</h2>
+          <p className="panel-subtitle">统计插件已发出的 linux.do 请求，失败和被拦截的请求也会计入。</p>
+        </div>
+        <div className="request-stats-total-badge" aria-label={`总请求 ${view.total}`}>
+          <span>总请求</span>
+          <strong>{view.total}</strong>
+        </div>
+      </div>
+      <div className="settings-section-divider" />
+      <div className="request-stats-section">
+        <div className="request-stats-section-title-row">
+          <h3>按小时</h3>
+          <div className="segmented-control request-stats-tabs" role="tablist" aria-label="请求统计小时视图">
+            <button
+              className={`segmented-option${hourlyTab === "today" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={hourlyTab === "today"}
+              aria-controls="request-stats-hourly-chart"
+              onClick={() => setHourlyTab("today")}
+            >
+              今天
+            </button>
+            <button
+              className={`segmented-option${hourlyTab === "yesterday" ? " active" : ""}`}
+              type="button"
+              role="tab"
+              aria-selected={hourlyTab === "yesterday"}
+              aria-controls="request-stats-hourly-chart"
+              onClick={() => setHourlyTab("yesterday")}
+            >
+              昨天
+            </button>
+          </div>
+        </div>
+        <RequestStatsBarChart id="request-stats-hourly-chart" ariaLabel={`${hourlyLabel}每小时请求次数柱状图`} density="hourly" items={hourlyItems} />
+      </div>
+      <div className="settings-section-divider" />
+      <div className="request-stats-section">
+        <h3>近 7 天</h3>
+        <RequestStatsBarChart ariaLabel="近 7 天每天请求次数柱状图" density="daily" items={view.last7Days} />
+      </div>
+    </section>
+  );
+}
+
+function RequestStatsBarChart({
+  ariaLabel,
+  density,
+  id,
+  items
+}: {
+  ariaLabel: string;
+  density: "hourly" | "daily";
+  id?: string;
+  items: Array<RequestStatsHourView | RequestStatsDayView>;
+}) {
+  const maxTotal = Math.max(1, ...items.map((item) => item.total));
+  return (
+    <div className="request-stats-chart-scroll">
+      <div className={`request-stats-chart request-stats-chart-${density}`} id={id} role="list" aria-label={ariaLabel}>
+        {items.map((item) => {
+          const height = item.total === 0 ? 0 : Math.max(8, Math.round((item.total / maxTotal) * 100));
+          const key = "hour" in item ? item.hour : item.date;
+          const itemLabel = `${item.label}：${item.total}`;
+          const axisLabel = chartAxisLabel(item, density);
+          return (
+            <div
+              className={`request-stats-bar-item${item.total === 0 ? " is-zero" : ""}`}
+              key={key}
+              role="listitem"
+              aria-label={itemLabel}
+              tabIndex={0}
+            >
+              <span className="request-stats-bar-tooltip" aria-hidden="true">
+                {itemLabel}
+              </span>
+              <span className="request-stats-bar-value">{item.total}</span>
+              <span className="request-stats-bar-track" aria-hidden="true">
+                <span className="request-stats-bar-fill" style={{ height: `${height}%` }} />
+              </span>
+              <span className="request-stats-bar-label" aria-hidden={axisLabel ? undefined : "true"}>
+                {axisLabel}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function chartAxisLabel(item: RequestStatsHourView | RequestStatsDayView, density: "hourly" | "daily"): string {
+  if (density === "daily" || !("hour" in item)) return item.label;
+  const hour = Number(item.hour);
+  return hour % 3 === 0 || item.hour === "23" || item.total > 0 ? item.hour : "";
 }
 
 function downloadJson(data: unknown, filename: string) {
@@ -828,7 +964,7 @@ function cloudArchiveStatusCopy(state: CloudArchiveLocalStateResult | null): { t
   }
   return {
     title: "未绑定",
-    description: "绑定后可以把佬朋友和设置备份到云端。",
+    description: "绑定后可以把佬朋友、设置和请求统计备份到云端。",
     hint: "尚未绑定 linuxdo-cloud-save。"
   };
 }
@@ -847,6 +983,24 @@ function cloudBindingMetaText(binding: Extract<CloudConfigViewState["binding"], 
   if (binding.lastBackupAt) parts.push(`上次备份 ${new Date(binding.lastBackupAt).toLocaleString()}`);
   if (binding.lastRestoreAt) parts.push(`上次恢复 ${new Date(binding.lastRestoreAt).toLocaleString()}`);
   return parts.join(" · ");
+}
+
+function requestStatsSyncText(binding: Extract<CloudConfigViewState["binding"], { bound: true }> | null): string {
+  if (!binding) return "请求统计每日同步需先绑定云存档。";
+  if (binding.lastRequestStatsAutoSyncError && isRequestStatsAutoSyncErrorNewer(binding)) {
+    return `请求统计上次自动同步失败：${binding.lastRequestStatsAutoSyncError.message ?? "请稍后重试。"}`;
+  }
+  if (binding.lastRequestStatsSyncedAt) {
+    return `请求统计同步于 ${new Date(binding.lastRequestStatsSyncedAt).toLocaleString()} · 总计 ${binding.lastRequestStatsTotal ?? 0} 次`;
+  }
+  return "请求统计尚未自动同步。";
+}
+
+function isRequestStatsAutoSyncErrorNewer(binding: Extract<CloudConfigViewState["binding"], { bound: true }>): boolean {
+  const errorAt = binding.lastRequestStatsAutoSyncError?.checkedAt;
+  if (!errorAt) return false;
+  if (!binding.lastRequestStatsSyncedAt) return true;
+  return Date.parse(errorAt) > Date.parse(binding.lastRequestStatsSyncedAt);
 }
 
 function formatLaoFindsStartedAt(value: string | undefined, now: number): string {

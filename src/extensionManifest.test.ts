@@ -34,9 +34,8 @@ describe("extension manifest safety", () => {
     ]);
   });
 
-  it("does not request continuous polling, cookie, proxy, or external messaging surfaces", () => {
-    expect(manifest.permissions).toEqual(["storage", "tabs", "sidePanel"]);
-    expect(manifest.permissions).not.toContain("alarms");
+  it("only adds alarms for best-effort scheduled stats sync, without cookie, proxy, or external messaging surfaces", () => {
+    expect(manifest.permissions).toEqual(["storage", "tabs", "sidePanel", "alarms"]);
     expect(manifest.permissions).not.toContain("cookies");
     expect(manifest.permissions).not.toContain("identity");
     expect(manifest.permissions).not.toContain("proxy");

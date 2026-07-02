@@ -80,7 +80,8 @@ describe("cloud config helpers", () => {
       state: "remote_config",
       checkedAt: "2026-06-29T00:01:00.000Z",
       exportedAt: "2026-06-29T00:00:00.000Z",
-      friendCount: 1
+      friendCount: 1,
+      requestStatsTotal: 0
     });
   });
 
@@ -101,7 +102,8 @@ describe("cloud config helpers", () => {
       state: "remote_config",
       checkedAt: "2026-06-29T00:03:00.000Z",
       exportedAt: "2026-06-29T00:00:00.000Z",
-      friendCount: 1
+      friendCount: 1,
+      requestStatsTotal: 0
     });
   });
 

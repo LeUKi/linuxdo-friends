@@ -34,6 +34,7 @@ import {
   resetLaoFindsStartedAt,
   upsertDredgeRule
 } from "../domain/laoFinds";
+import { recordRequestAttempts } from "../domain/requestStats";
 import {
   defaultUpdateCheckState,
   GITHUB_LATEST_RELEASE_API,
@@ -75,6 +76,7 @@ import type {
   PageScriptStatusSnapshot,
   ProfileRefreshTaskProgress,
   RefreshResult,
+  RequestStatsFamily,
   SiteDataTaskTrigger,
   SiteDataTaskProgress,
   UpdateCheckState,
@@ -103,7 +105,6 @@ import { loadState, saveState } from "../storage/storage";
 import { UPDATE_CHECK_STORAGE_KEY, loadUpdateCheckState, saveUpdateCheckState } from "../storage/updateCheckStorage";
 import { allUiSceneStorageKeys } from "../storage/uiSceneStorage";
 
-const refreshAdapter = createRefreshAdapter();
 interface ActiveSiteDataTask {
   taskId: string;
   generation: number;
@@ -115,6 +116,7 @@ interface ActiveSiteDataTask {
 
 type SiteDataTaskContext = Pick<ActiveSiteDataTask, "taskId" | "generation" | "trigger" | "timedRunId">;
 type SiteDataTaskOwnership = Pick<ActiveSiteDataTask, "trigger" | "timedRunId">;
+type RequestStatsCounter = ReturnType<typeof createRequestStatsCounter>;
 
 let activeSiteDataTask: ActiveSiteDataTask | null = null;
 let activeUpdateCheck: Promise<UpdateCheckState> | null = null;
@@ -125,10 +127,16 @@ const heartbeatFreshMs = 45_000;
 const heartbeatStaleMs = 120_000;
 const CLOUD_AUTH_VERIFIER_STORAGE_KEY = "linuxdoFriendsCloudAuthVerifier";
 const CLOUD_AUTH_WINDOW_STORAGE_KEY = "linuxdoFriendsCloudAuthWindowId";
+const REQUEST_STATS_AUTO_SYNC_ALARM_NAME = "linuxdoFriends.requestStatsAutoSync";
+const REQUEST_STATS_AUTO_SYNC_PERIOD_MINUTES = 24 * 60;
 
 configureSessionStorageAccess();
 configureLocalStorageAccess();
 configureSidePanelAction();
+registerRequestStatsAutoSyncAlarmListeners();
+void reconcileRequestStatsAutoSyncAlarm().catch(() => {
+  // Alarm reconciliation is best-effort and must not block the service worker.
+});
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
   if (isContentScriptHeartbeatMessage(message)) {
@@ -255,6 +263,7 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
     case "clearCloudBinding":
       await clearCloudAuth();
       await clearCloudAuthHandshake();
+      await reconcileRequestStatsAutoSyncAlarm();
       return ok({ binding: { bound: false }, message: "已断开云存档绑定。" } satisfies CloudConfigClearBindingResult);
     case "repairLinuxDoPageScript":
       return ok(await repairLinuxDoPageScript(command.tabId));
@@ -297,6 +306,7 @@ async function importConfig(json: string): Promise<AppState> {
   await removeLocalStorageKeys([UPDATE_CHECK_STORAGE_KEY]);
   await removeSessionStorageKeys([SITE_DATA_PROGRESS_STORAGE_KEY, PAGE_SCRIPT_STATUS_STORAGE_KEY, ...allUiSceneStorageKeys]);
   await invalidateTimedActivityNoTargetSessionStateIfTargetable(next);
+  await reconcileRequestStatsAutoSyncAlarm();
   pageScriptHeartbeats.clear();
   lastSiteDataProgress = null;
   return next;
@@ -305,7 +315,7 @@ async function importConfig(json: string): Promise<AppState> {
 async function identifyCurrentAccount(): Promise<AppState> {
   const generation = stateWriteGeneration;
   const current = await loadState();
-  const result = (await identifyCurrentAccountFromExistingTab(current)) ?? (await refreshAdapter.identifyCurrentAccount(current));
+  const result = (await identifyCurrentAccountFromExistingTab(current)) ?? (await identifyCurrentAccountDirect(current));
   const next = {
     ...result.state,
     lastSync: result.result
@@ -322,7 +332,7 @@ async function identifyCurrentAccountFromExistingTab(state: AppState): Promise<{
   if (!response) return null;
   if (!response.ok) {
     return {
-      state,
+      state: applyContentRequestStats(state, "account", response),
       result: {
         ok: false,
         source: "existing_tab",
@@ -333,10 +343,14 @@ async function identifyCurrentAccountFromExistingTab(state: AppState): Promise<{
     };
   }
   return {
-    state: {
-      ...state,
-      currentAccount: { username: response.username, verifiedAt: nowIso(), source: "latest_header" }
-    },
+    state: applyContentRequestStats(
+      {
+        ...state,
+        currentAccount: { username: response.username, verifiedAt: nowIso(), source: "latest_header" }
+      },
+      "account",
+      response
+    ),
     result: {
       ok: true,
       source: "existing_tab",
@@ -344,6 +358,13 @@ async function identifyCurrentAccountFromExistingTab(state: AppState): Promise<{
       refreshedAt: nowIso()
     }
   };
+}
+
+async function identifyCurrentAccountDirect(state: AppState): Promise<{ state: AppState; result: RefreshResult }> {
+  const counter = createRequestStatsCounter();
+  const adapter = createRefreshAdapter(fetch, counter.record);
+  const result = await adapter.identifyCurrentAccount(state);
+  return { ...result, state: counter.apply(result.state) };
 }
 
 async function clearCache(): Promise<AppState> {
@@ -386,6 +407,7 @@ async function resetExtension(): Promise<AppState> {
   await clearCloudAuth();
   await removeSessionStorageKeys([SITE_DATA_PROGRESS_STORAGE_KEY, PAGE_SCRIPT_STATUS_STORAGE_KEY, ...allUiSceneStorageKeys]);
   await invalidateTimedActivityNoTargetSessionStateIfTargetable(next);
+  await reconcileRequestStatsAutoSyncAlarm();
   pageScriptHeartbeats.clear();
   lastSiteDataProgress = null;
   return next;
@@ -449,6 +471,7 @@ async function exchangeCloudSaveCode(code: string): Promise<CloudConfigBindResul
     });
     await closeCloudAuthWindow();
     await clearCloudAuthHandshake();
+    await reconcileRequestStatsAutoSyncAlarm();
     return {
       binding: toPublicCloudBinding(auth),
       status: auth.lastStatus,
@@ -529,7 +552,10 @@ async function backupCloudConfig(): Promise<CloudConfigBackupResult> {
     lastStatus: status,
     lastBackupAt: backedUpAt,
     lastConfigDigest: configDigest,
-    lastConfigSyncedAt: backedUpAt
+    lastConfigSyncedAt: backedUpAt,
+    lastRequestStatsSyncedAt: backedUpAt,
+    lastRequestStatsTotal: state.requestStats.total,
+    lastRequestStatsAutoSyncError: undefined
   }));
   return {
     binding: toPublicCloudBinding(updated ?? auth),
@@ -558,8 +584,12 @@ async function restoreCloudConfig(): Promise<CloudConfigRestoreResult> {
     lastStatus: status,
     lastRestoreAt: restoredAt,
     lastConfigDigest: configDigest,
-    lastConfigSyncedAt: restoredAt
+    lastConfigSyncedAt: restoredAt,
+    lastRequestStatsSyncedAt: restoredAt,
+    lastRequestStatsTotal: nextState.requestStats.total,
+    lastRequestStatsAutoSyncError: undefined
   }));
+  await reconcileRequestStatsAutoSyncAlarm();
   return {
     binding: toPublicCloudBinding(updated ?? auth),
     status,
@@ -567,6 +597,92 @@ async function restoreCloudConfig(): Promise<CloudConfigRestoreResult> {
     state: nextState,
     message: nextState.lastSync?.message ?? "已从云端恢复配置。"
   };
+}
+
+function registerRequestStatsAutoSyncAlarmListeners(): void {
+  try {
+    chrome.alarms?.onAlarm?.addListener?.((alarm) => {
+      void handleRequestStatsAutoSyncAlarm(alarm).catch(() => {
+        // Background alarms are best-effort; failures are recorded in cloud auth when possible.
+      });
+    });
+    chrome.runtime?.onStartup?.addListener?.(() => {
+      void reconcileRequestStatsAutoSyncAlarm().catch(() => {
+        // Startup reconciliation should never block normal extension startup.
+      });
+    });
+  } catch {
+    // Test and older browser surfaces may omit alarms/startup APIs.
+  }
+}
+
+async function reconcileRequestStatsAutoSyncAlarm(): Promise<void> {
+  if (!chrome.alarms) return;
+  const [state, auth] = await Promise.all([loadState(), loadCloudAuth()]);
+  if (state.settings.requestStatsAutoSyncEnabled && auth) {
+    await chrome.alarms.create(REQUEST_STATS_AUTO_SYNC_ALARM_NAME, {
+      delayInMinutes: 1,
+      periodInMinutes: REQUEST_STATS_AUTO_SYNC_PERIOD_MINUTES
+    });
+    return;
+  }
+  await chrome.alarms.clear(REQUEST_STATS_AUTO_SYNC_ALARM_NAME);
+}
+
+async function handleRequestStatsAutoSyncAlarm(alarm: chrome.alarms.Alarm): Promise<void> {
+  if (alarm.name !== REQUEST_STATS_AUTO_SYNC_ALARM_NAME) return;
+  const state = await loadState();
+  if (!state.settings.requestStatsAutoSyncEnabled) {
+    await reconcileRequestStatsAutoSyncAlarm();
+    return;
+  }
+  const auth = await loadCloudAuth();
+  if (!auth) {
+    await reconcileRequestStatsAutoSyncAlarm();
+    return;
+  }
+  if (!shouldRunRequestStatsAutoSyncToday(auth, new Date())) return;
+  await uploadRequestStatsCloudSnapshot(state, auth);
+}
+
+function shouldRunRequestStatsAutoSyncToday(auth: CloudAuthState, now: Date): boolean {
+  const today = localDateKey(now);
+  const latestAttemptAt = latestRequestStatsAutoSyncAttemptAt(auth);
+  return !latestAttemptAt || localDateKey(new Date(latestAttemptAt)) !== today;
+}
+
+function latestRequestStatsAutoSyncAttemptAt(auth: CloudAuthState): string | undefined {
+  const candidates = [auth.lastRequestStatsSyncedAt, auth.lastRequestStatsAutoSyncError?.checkedAt].filter(
+    (value): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value))
+  );
+  return candidates.sort((left, right) => Date.parse(right) - Date.parse(left))[0];
+}
+
+async function uploadRequestStatsCloudSnapshot(state: AppState, auth: CloudAuthState): Promise<void> {
+  const payload = createConfigExport(state);
+  const configDigest = await createConfigFingerprint(state);
+  try {
+    const response = await fetchCloudConfig("PUT", auth, payload);
+    if (!response.ok) {
+      const status = cloudStatusFromResponse(response);
+      await updateCloudAuth((current) => ({ ...current, lastRequestStatsAutoSyncError: status }));
+      return;
+    }
+    const syncedAt = nowIso();
+    const status = summarizeCloudConfigPayload(payload, syncedAt);
+    await updateCloudAuth((current) => ({
+      ...current,
+      lastStatus: status,
+      lastConfigDigest: configDigest,
+      lastConfigSyncedAt: syncedAt,
+      lastRequestStatsSyncedAt: syncedAt,
+      lastRequestStatsTotal: state.requestStats.total,
+      lastRequestStatsAutoSyncError: undefined
+    }));
+  } catch (error) {
+    const status = cloudConfigStatusFromError("network_error", error instanceof Error ? error.message : "请求统计自动同步失败。");
+    await updateCloudAuth((current) => ({ ...current, lastRequestStatsAutoSyncError: status }));
+  }
 }
 
 async function requireCloudAuth(): Promise<CloudAuthState> {
@@ -845,7 +961,10 @@ async function addFriendByProfileWithFallback(
   state: AppState,
   username: Username
 ): Promise<{ state: AppState; result: RefreshResult }> {
-  const direct = await refreshAdapter.addFriendByProfile(state, username);
+  const counter = createRequestStatsCounter();
+  const directAdapter = createRefreshAdapter(fetch, counter.record);
+  const directRaw = await directAdapter.addFriendByProfile(state, username);
+  const direct = { ...directRaw, state: counter.apply(directRaw.state) };
   if (direct.result?.ok) return direct;
   if (!shouldTryExistingTab(direct.result)) return direct;
 
@@ -864,11 +983,16 @@ async function addFriendByProfileWithFallback(
 }
 
 async function lookupFriendProfileWithFallback(username: Username): Promise<BackgroundResponse> {
-  const direct = await refreshAdapter.lookupFriendProfile(username);
+  const generation = stateWriteGeneration;
+  const counter = createRequestStatsCounter();
+  const directAdapter = createRefreshAdapter(fetch, counter.record);
+  const direct = await directAdapter.lookupFriendProfile(username);
+  await persistRequestStats(counter, generation);
   if (direct.ok) return ok(direct.profile);
   if (!shouldTryExistingTab(direct.result)) return { ok: false, error: direct.result.message, reason: direct.result.reason };
 
   const response = await sendToAvailableLinuxDoTab((tabId) => sendExtractProfileMessage(tabId, username));
+  await persistContentRequestStats("profile", response, generation);
   if (!response) {
     return {
       ok: false,
@@ -945,7 +1069,10 @@ async function refreshFriendProfilesWithFallback(
 ): Promise<{ state: AppState; result: RefreshResult }> {
   const taskContext = activeSiteDataTask ? taskContextFromRecord(activeSiteDataTask) : undefined;
   startProfileProgress(state, usernames, "direct_fetch", taskContext);
-  const direct = await refreshAdapter.refreshFriendProfiles(state, usernames, (username) => incrementProfileProgress(username, "direct_fetch", taskContext));
+  const counter = createRequestStatsCounter();
+  const directAdapter = createRefreshAdapter(fetch, counter.record);
+  const directRaw = await directAdapter.refreshFriendProfiles(state, usernames, (username) => incrementProfileProgress(username, "direct_fetch", taskContext));
+  const direct = { ...directRaw, state: counter.apply(directRaw.state) };
   if (direct.result?.ok) {
     finishSiteDataProgress(taskContext, "success");
     return direct;
@@ -977,7 +1104,10 @@ async function refreshFriendProfilesWithFallback(
 }
 
 async function syncFollowedUsersWithFallback(state: AppState): Promise<{ state: AppState; result: RefreshResult }> {
-  const direct = await refreshAdapter.syncFollowedUsers(state);
+  const counter = createRequestStatsCounter();
+  const directAdapter = createRefreshAdapter(fetch, counter.record);
+  const directRaw = await directAdapter.syncFollowedUsers(state);
+  const direct = { ...directRaw, state: counter.apply(directRaw.state) };
   if (direct.result?.ok) return direct;
   if (!shouldTryExistingTab(direct.result)) return direct;
 
@@ -1003,7 +1133,7 @@ async function addFriendByProfileFromExistingTab(
   if (!response) return null;
   if (!response.ok) {
     return {
-      state,
+      state: applyContentRequestStats(state, "profile", response),
       result: {
         ok: false,
         source: "existing_tab",
@@ -1014,7 +1144,7 @@ async function addFriendByProfileFromExistingTab(
     };
   }
   return {
-    state: addFriendFromProfile(state, response.profile),
+    state: applyContentRequestStats(addFriendFromProfile(state, response.profile), "profile", response),
     result: {
       ok: true,
       source: "existing_tab",
@@ -1037,7 +1167,7 @@ async function refreshFriendProfilesFromExistingTab(
     if (!response) return null;
     if (!response.ok) {
       return {
-        state: nextState,
+        state: applyContentRequestStats(nextState, "profile", response),
         result: {
           ok: false,
           source: "existing_tab",
@@ -1047,7 +1177,7 @@ async function refreshFriendProfilesFromExistingTab(
         }
       };
     }
-    nextState = upsertFriendProfile(nextState, response.profile);
+    nextState = applyContentRequestStats(upsertFriendProfile(nextState, response.profile), "profile", response);
     refreshedCount += 1;
     incrementProfileProgress(username, "existing_tab", taskContext);
   }
@@ -1069,7 +1199,10 @@ async function refreshFriendActivityWithFallback(
 ): Promise<{ state: AppState; result: RefreshResult }> {
   const scope = normalizeActivityRefreshScope(scopeInput);
   startActivityProgress(state, scope, "direct_fetch", taskContext);
-  const direct = await refreshAdapter.refreshFriendActivity(state, scope, (step) => incrementActivityProgress(step, "direct_fetch", taskContext));
+  const counter = createRequestStatsCounter();
+  const directAdapter = createRefreshAdapter(fetch, counter.record);
+  const directRaw = await directAdapter.refreshFriendActivity(state, scope, (step) => incrementActivityProgress(step, "direct_fetch", taskContext));
+  const direct = { ...directRaw, state: counter.apply(directRaw.state) };
   if (direct.result?.ok) {
     finishActivityProgress(taskContext, "success");
     return direct;
@@ -1291,7 +1424,7 @@ async function syncFollowedUsersFromExistingTab(state: AppState): Promise<{ stat
   if (!response) return null;
   if (!response.ok) {
     return {
-      state,
+      state: applyContentRequestStats(state, "following", response),
       result: {
         ok: false,
         source: "existing_tab",
@@ -1302,10 +1435,14 @@ async function syncFollowedUsersFromExistingTab(state: AppState): Promise<{ stat
     };
   }
 
-  let nextState: AppState = {
-    ...state,
-    currentAccount: { username: response.username, verifiedAt: nowIso(), source: "latest_header" }
-  };
+  let nextState: AppState = applyContentRequestStats(
+    {
+      ...state,
+      currentAccount: { username: response.username, verifiedAt: nowIso(), source: "latest_header" }
+    },
+    "following",
+    response
+  );
   for (const user of response.users) {
     nextState = upsertFollowedUser(nextState, { ...user, source: "sync" });
   }
@@ -1329,6 +1466,7 @@ async function refreshFriendActivityFromExistingTab(
   const targets = planActivityRefreshTargets(state, scope);
   const collectedTargets: Array<{ username: Username; items: ActivityItem[]; refreshedKinds: ActivityRefreshKind[] }> = [];
   const feedWaterlineAt = latestActivityRefreshAt(state);
+  let statsState = state;
   let refreshedCount = 0;
   for (const target of targets) {
     const items: ActivityItem[] = [];
@@ -1337,7 +1475,7 @@ async function refreshFriendActivityFromExistingTab(
       if (!response) return null;
       if (!response.ok) {
         return {
-          state,
+          state: applyContentRequestStats(statsState, "activity", response),
           result: {
             ok: false,
             source: "existing_tab",
@@ -1347,13 +1485,14 @@ async function refreshFriendActivityFromExistingTab(
           }
         };
       }
+      statsState = applyContentRequestStats(statsState, "activity", response);
       items.push(...response.activity.items);
       incrementActivityProgress(step, "existing_tab", taskContext);
     }
     collectedTargets.push({ username: target.username, items: sortActivityItems(items), refreshedKinds: target.refreshedKinds });
     refreshedCount += 1;
   }
-  let nextState = collectedTargets.length ? clearActivityNewFlags(state) : state;
+  let nextState = collectedTargets.length ? clearActivityNewFlags(statsState) : statsState;
   for (const target of collectedTargets) {
     nextState = applyScopedActivityRefresh(
       nextState,
@@ -1409,7 +1548,9 @@ async function cacheAvatarsFromExistingTab(usernames?: Username[]): Promise<AppS
   let nextState = state;
   for (const target of targets) {
     const response = await sendToAvailableLinuxDoTab((tabId) => sendExtractAvatarMessage(tabId, target.username, target.avatarUrl));
-    if (!response || !response.ok) continue;
+    if (!response) continue;
+    nextState = applyContentRequestStats(nextState, "avatar", response);
+    if (!response.ok) continue;
     nextState = {
       ...nextState,
       avatarCache: {
@@ -1784,7 +1925,89 @@ async function updateSettings(settings: Partial<AppState["settings"]>) {
   } else if (beforeTimedTargetSignature !== afterTimedTargetSignature) {
     await invalidateTimedActivityNoTargetSessionStateIfTargetable(nextState);
   }
+  await reconcileRequestStatsAutoSyncAlarm();
   return nextState;
+}
+
+function createRequestStatsCounter() {
+  const attempts: Array<{ family: RequestStatsFamily; at: Date }> = [];
+  const record = (family: RequestStatsFamily, url: string) => {
+    if (!isLinuxDoRequestUrl(url)) return;
+    attempts.push({ family, at: new Date() });
+  };
+  return {
+    record,
+    hasAttempts() {
+      return attempts.length > 0;
+    },
+    apply(state: AppState): AppState {
+      let next = state;
+      for (const attempt of attempts) {
+        next = recordRequestAttempts(next, { family: attempt.family, count: 1, at: attempt.at });
+      }
+      return next;
+    }
+  };
+}
+
+function applyContentRequestStats<T extends { requestCount?: number; requestAttemptedAts?: string[] }>(
+  state: AppState,
+  family: RequestStatsFamily,
+  response: T
+): AppState {
+  const requestCount = response.requestCount ?? 0;
+  const attemptedAts = Array.isArray(response.requestAttemptedAts) ? response.requestAttemptedAts : [];
+  if (attemptedAts.length === 0) return recordRequestAttempts(state, { family, count: requestCount });
+
+  let next = state;
+  for (const timestamp of attemptedAts) {
+    next = recordRequestAttempts(next, { family, count: 1, at: parseRequestStatsAttemptAt(timestamp) });
+  }
+  const missingTimestamps = Math.max(0, requestCount - attemptedAts.length);
+  return missingTimestamps > 0 ? recordRequestAttempts(next, { family, count: missingTimestamps }) : next;
+}
+
+async function persistRequestStats(counter: RequestStatsCounter, generation: number) {
+  if (!counter.hasAttempts()) return;
+  await persistRequestStatsUpdate(generation, (state) => counter.apply(state));
+}
+
+async function persistContentRequestStats(
+  family: RequestStatsFamily,
+  response: { requestCount?: number; requestAttemptedAts?: string[] } | null,
+  generation: number
+) {
+  if (!response?.requestCount) return;
+  await persistRequestStatsUpdate(generation, (state) => applyContentRequestStats(state, family, response));
+}
+
+async function persistRequestStatsUpdate(generation: number, updater: (state: AppState) => AppState) {
+  const current = await loadState();
+  const next = updater(current);
+  if (generation !== stateWriteGeneration) return;
+  await saveState(next);
+}
+
+function parseRequestStatsAttemptAt(value: string): Date | undefined {
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? undefined : new Date(timestamp);
+}
+
+function localDateKey(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function isLinuxDoRequestUrl(value: string): boolean {
+  try {
+    const url = new URL(value, "https://linux.do");
+    return url.protocol === "https:" && url.hostname === "linux.do";
+  } catch {
+    return false;
+  }
 }
 
 async function updateTimedActivityTargetInputs(updater: (state: AppState) => AppState | Promise<AppState>): Promise<AppState> {

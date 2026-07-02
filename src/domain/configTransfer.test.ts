@@ -44,6 +44,18 @@ describe("config transfer", () => {
             matchedRuleIds: ["rule-ai"]
           }
         },
+        requestStats: {
+          total: 6,
+          byFamily: { activity: 4, profile: 2 },
+          days: {
+            "2026-07-02": {
+              date: "2026-07-02",
+              total: 6,
+              hours: { "09": 4, "10": 2 },
+              byFamily: { activity: 4, profile: 2 }
+            }
+          }
+        },
         activity: { neo: { username: "neo", refreshedAt: "2026-06-28T00:00:00.000Z", items: [] } },
         currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" }
       },
@@ -78,6 +90,18 @@ describe("config transfer", () => {
         }
       ],
       laoFindsStartedAt: "2026-06-28T00:00:00.000Z",
+      requestStats: {
+        total: 6,
+        byFamily: { activity: 4, profile: 2 },
+        days: {
+          "2026-07-02": {
+            date: "2026-07-02",
+            total: 6,
+            hours: { "09": 4, "10": 2 },
+            byFamily: { activity: 4, profile: 2 }
+          }
+        }
+      },
       settings: defaultAppState.settings
     });
     expect(file).not.toHaveProperty("currentAccount");
@@ -126,7 +150,20 @@ describe("config transfer", () => {
           openActivityLinksInPage: true,
           timedActivityRefreshEnabled: true,
           timedActivityRefreshScopeMode: "all",
-          timedActivityRefreshIntervalMinutes: 240
+          timedActivityRefreshIntervalMinutes: 240,
+          requestStatsAutoSyncEnabled: true
+        },
+        requestStats: {
+          total: 9,
+          byFamily: { activity: 5, profile: 4, bad: 99 },
+          days: {
+            "2026-07-02": {
+              date: "2026-07-02",
+              total: 5,
+              hours: { "00": 2, "09": 3, "25": 1 },
+              byFamily: { activity: 5 }
+            }
+          }
         }
       })
     );
@@ -141,7 +178,20 @@ describe("config transfer", () => {
       refreshIntervalMinutes: 60,
       timedActivityRefreshEnabled: true,
       timedActivityRefreshScopeMode: "all",
-      timedActivityRefreshIntervalMinutes: 240
+      timedActivityRefreshIntervalMinutes: 240,
+      requestStatsAutoSyncEnabled: true
+    });
+    expect(file.requestStats).toEqual({
+      total: 9,
+      byFamily: { activity: 5, profile: 4 },
+      days: {
+        "2026-07-02": {
+          date: "2026-07-02",
+          total: 5,
+          hours: { "00": 2, "09": 3 },
+          byFamily: { activity: 5 }
+        }
+      }
     });
   });
 
@@ -177,6 +227,8 @@ describe("config transfer", () => {
     expect(file.settings.timedActivityRefreshEnabled).toBe(false);
     expect(file.settings.timedActivityRefreshScopeMode).toBe("rules");
     expect(file.settings.timedActivityRefreshIntervalMinutes).toBe(120);
+    expect(file.settings.requestStatsAutoSyncEnabled).toBe(false);
+    expect(file.requestStats).toEqual({ total: 0, byFamily: {}, days: {} });
   });
 
   it("rejects invalid import files", () => {
@@ -221,6 +273,17 @@ describe("config transfer", () => {
           schemaVersion: 1,
           source: "linuxdo-friends",
           exportedAt: "2026-06-28T00:00:00.000Z",
+          friends: {},
+          settings: { refreshIntervalMinutes: 60, requestStatsAutoSyncEnabled: "yes" }
+        })
+      )
+    ).toThrow("配置文件的请求统计自动同步设置不正确。");
+    expect(() =>
+      parseConfigImportJson(
+        JSON.stringify({
+          schemaVersion: 1,
+          source: "linuxdo-friends",
+          exportedAt: "2026-06-28T00:00:00.000Z",
           friends: { neo: { username: "neo", groups: [1] } },
           settings: {}
         })
@@ -258,6 +321,18 @@ describe("config transfer", () => {
           }
         ],
         laoFindsStartedAt: "2026-06-28T00:00:00.000Z",
+        requestStats: {
+          total: 4,
+          byFamily: { activity: 4 },
+          days: {
+            "2026-07-02": {
+              date: "2026-07-02",
+              total: 4,
+              hours: { "12": 4 },
+              byFamily: { activity: 4 }
+            }
+          }
+        },
         settings: { refreshIntervalMinutes: 90, openActivityLinksInPage: true }
       })
     );
@@ -266,6 +341,7 @@ describe("config transfer", () => {
     expect(state.friends).toEqual(file.friends);
     expect(state.dredgeRules).toEqual(file.dredgeRules);
     expect(state.laoFindsStartedAt).toBe("2026-06-28T00:00:00.000Z");
+    expect(state.requestStats).toEqual(file.requestStats);
     expect(state.laoFindsItems).toEqual({});
     expect(state.settings.refreshIntervalMinutes).toBe(90);
     expect(state.settings.openActivityLinksInPage).toBe(true);
@@ -349,6 +425,21 @@ describe("config transfer", () => {
       ...base,
       laoFindsStartedAt: "2026-06-28T00:01:00.000Z"
     };
+    const changedStats = {
+      ...base,
+      requestStats: {
+        total: 99,
+        byFamily: { activity: 99 as const },
+        days: {
+          "2026-07-02": {
+            date: "2026-07-02",
+            total: 99,
+            hours: { "09": 99 },
+            byFamily: { activity: 99 as const }
+          }
+        }
+      }
+    };
 
     const fingerprint = await createConfigFingerprint(base);
 
@@ -358,6 +449,7 @@ describe("config transfer", () => {
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedRule));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedSettings));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedStartedAt));
+    expect(fingerprint).toBe(await createConfigFingerprint(changedStats));
     expect(fingerprint).toBe(await createConfigFingerprint({ ...base }));
     expect(fingerprint).not.toContain("neo");
     expect(fingerprint).not.toContain("NAS");

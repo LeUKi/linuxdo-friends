@@ -1,6 +1,7 @@
 import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import {
+  ChartColumn,
   Check,
   ChevronDown,
   Cloud,
@@ -102,6 +103,7 @@ import type {
   Username
 } from "../shared/types";
 import { deriveTimedActivityRefreshScopes } from "../domain/activityRefresh";
+import { deriveRequestStatsView } from "../domain/requestStats";
 import {
   type UserIdentityView,
   deriveActivityRequestCounts,
@@ -375,6 +377,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   const activityRefreshScope = useMemo(() => deriveActivityRefreshScope({ kind: kindFilter, username: userFilter }), [kindFilter, userFilter]);
   const activityRequestCounts = useMemo(() => deriveActivityRequestCounts(state, userFilter), [state, userFilter]);
   const activityFreshness = useMemo(() => deriveActivityFreshness(state, activityRefreshScope), [activityRefreshScope, state]);
+  const requestStatsView = useMemo(() => deriveRequestStatsView(state.requestStats, new Date(relativeNow)), [relativeNow, state.requestStats]);
   const profileFreshness = useMemo(() => deriveProfileFreshness(friends), [friends]);
   const visibleSiteDataProgress = useMemo(
     () => (isStaleRunningSiteDataProgress(siteDataProgress, progressNow) ? null : siteDataProgress),
@@ -499,6 +502,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
             </div>
             <div className="header-status">
               <div className="header-actions">
+                <RequestStatsSummaryChip today={requestStatsView.today.total} total={requestStatsView.total} onOpen={() => void openOptionsPage("#request-stats")} />
                 {surface === "in-page" ? (
                   <SidePanelLauncherButton status={pageScriptStatus} onOpen={() => void openSidePanel()} />
                 ) : (
@@ -898,7 +902,7 @@ function LaoFindsTab({
               <span className="badge">共 {items.length} 条</span>
               <button className="small-action primary-action" type="button" onClick={onManualRefresh} disabled={refreshDisabled}>
                 <Telescope size={14} aria-hidden="true" />
-                <span>手动打捞</span>
+                <span>立即打捞</span>
               </button>
               <button className="small-action" type="button" onClick={onOpenRules}>
                 配置打捞规则
@@ -1036,7 +1040,7 @@ function TimedActivityRefreshControl({
               onManualRefresh();
             }}
           >
-            <span>手动打捞</span>
+            <span>立即打捞</span>
             <Telescope size={15} aria-hidden="true" />
           </button>
           <div className="refresh-menu-group">
@@ -2075,6 +2079,22 @@ function AccountDetectTag({
     >
       {detecting ? <LoaderCircle className="spin-icon" size={13} aria-hidden="true" /> : username ? null : <RefreshCw size={13} aria-hidden="true" />}
       <span>{detecting ? "识别中" : username ? `@${username}` : "识别账号"}</span>
+    </button>
+  );
+}
+
+function RequestStatsSummaryChip({ today, total, onOpen }: { today: number; total: number; onOpen: () => void }) {
+  return (
+    <button
+      className="request-stats-chip"
+      type="button"
+      onClick={onOpen}
+      title={`今日请求 ${today}，总请求 ${total}。打开请求统计。`}
+      aria-label={`今日请求 ${today}，总请求 ${total}。打开请求统计。`}
+    >
+      <ChartColumn size={13} aria-hidden="true" />
+      <span>今 {today}</span>
+      <span>总 {total}</span>
     </button>
   );
 }
