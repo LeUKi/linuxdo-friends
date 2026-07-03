@@ -39,7 +39,8 @@
     "storage",
     "tabs",
     "sidePanel",
-    "alarms"
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "https://api.telegram.org/*",

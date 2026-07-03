@@ -3,6 +3,7 @@ import { defaultAppState } from "./defaultState";
 import {
   archiveLaoFindsItem,
   collectLaoFindsItems,
+  deleteLaoFindsItem,
   markLaoFindsItemRead,
   normalizeDredgeRules,
   removeDredgeRule,
@@ -114,6 +115,19 @@ describe("lao finds collection", () => {
     expect(second.state.laoFindsItems.a1.activity.excerpt).toBe("new");
     expect(second.state.laoFindsItems.a1.readAt).toBeTruthy();
     expect(second.state.laoFindsItems.a1.archivedAt).toBeTruthy();
+  });
+
+  it("deletes a lao finds item locally without creating tombstones", () => {
+    const state = withRules([rule({ id: "rule-ai", patterns: ["AI"] })], "2026-06-29T00:00:00.000Z");
+    const collected = collectLaoFindsItems(state, [activity({ id: "a1", title: "AI" }), activity({ id: "a2", title: "AI 2" })]).state;
+
+    const deleted = deleteLaoFindsItem(collected, "a1");
+    const unchanged = deleteLaoFindsItem(deleted, "missing");
+
+    expect(Object.keys(deleted.laoFindsItems)).toEqual(["a2"]);
+    expect(deleted.laoFindsItems.a1).toBeUndefined();
+    expect(unchanged).toBe(deleted);
+    expect(deleted.laoFindsStartedAt).toBe(collected.laoFindsStartedAt);
   });
 
   it("merges allow rule matches and removes deleted rule ids from existing items", () => {

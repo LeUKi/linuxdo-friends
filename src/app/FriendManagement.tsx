@@ -10,16 +10,9 @@ import {
   orderFollowedCandidates,
   syntheticFriendCandidate
 } from "../popup/selectors";
+import { eventHappenedInside } from "./activityLinks";
 import { kindIcon, kindText } from "./activityKinds";
 import { UserIdentityRow } from "./UserIdentityRow";
-
-export function eventHappenedInside(event: Event, element: HTMLElement) {
-  const path = event.composedPath();
-  if (path.length > 0) {
-    return path.includes(element);
-  }
-  return element.contains(event.target as Node | null);
-}
 
 export function ActivityScopeSelect({
   disabled,

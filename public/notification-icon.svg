@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="佬有料通知">
+  <rect width="128" height="128" rx="28" fill="#2563eb"/>
+  <circle cx="58" cy="58" r="30" fill="none" stroke="#ffffff" stroke-width="12"/>
+  <path d="M80 80l26 26" stroke="#ffffff" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="58" cy="58" r="10" fill="#ffffff" opacity="0.95"/>
+</svg>

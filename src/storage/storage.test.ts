@@ -263,8 +263,10 @@ describe("storage migration", () => {
         settings: {
           timedActivityRefreshEnabled: true,
           timedActivityRefreshScopeMode: "all",
-          timedActivityRefreshIntervalMinutes: 240,
-          requestStatsAutoSyncEnabled: true
+          timedActivityRefreshIntervalMinutes: 5,
+          requestStatsAutoSyncEnabled: true,
+          laoFindsBrowserNotificationsEnabled: false,
+          laoFindsManualNotificationsEnabled: true
         }
       }
     });
@@ -273,8 +275,10 @@ describe("storage migration", () => {
       settings: {
         timedActivityRefreshEnabled: true,
         timedActivityRefreshScopeMode: "all",
-        timedActivityRefreshIntervalMinutes: 240,
-        requestStatsAutoSyncEnabled: true
+        timedActivityRefreshIntervalMinutes: 5,
+        requestStatsAutoSyncEnabled: true,
+        laoFindsBrowserNotificationsEnabled: false,
+        laoFindsManualNotificationsEnabled: true
       }
     });
   });
@@ -286,7 +290,9 @@ describe("storage migration", () => {
           timedActivityRefreshEnabled: "yes",
           timedActivityRefreshScopeMode: "bad",
           timedActivityRefreshIntervalMinutes: 1,
-          requestStatsAutoSyncEnabled: "yes"
+          requestStatsAutoSyncEnabled: "yes",
+          laoFindsBrowserNotificationsEnabled: "yes",
+          laoFindsManualNotificationsEnabled: "yes"
         }
       }
     });
@@ -295,8 +301,10 @@ describe("storage migration", () => {
       settings: {
         timedActivityRefreshEnabled: false,
         timedActivityRefreshScopeMode: "rules",
-        timedActivityRefreshIntervalMinutes: 120,
-        requestStatsAutoSyncEnabled: false
+        timedActivityRefreshIntervalMinutes: 20,
+        requestStatsAutoSyncEnabled: false,
+        laoFindsBrowserNotificationsEnabled: true,
+        laoFindsManualNotificationsEnabled: false
       }
     });
   });

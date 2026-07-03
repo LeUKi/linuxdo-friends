@@ -39,6 +39,7 @@ const userMenuDrawerClass = "linuxdo-friends-user-menu-drawer";
 const userMenuHiddenAttr = "data-linuxdo-friends-menu-hidden";
 const userMenuPreviousDisplayAttr = "data-linuxdo-friends-previous-display";
 const heartbeatIntervalMs = 15_000;
+const heartbeatChangeDebounceMs = 350;
 const themeAttributeFilter = ["class", "style", "data-theme", "data-color-scheme", "data-color-mode", "data-scheme"];
 const schemeLinkSelector = "link.light-scheme, link.dark-scheme";
 type PageTheme = "light" | "dark";
@@ -58,9 +59,11 @@ let launcherPlacementTimer: number | null = null;
 let friendMarkerTimer: number | null = null;
 let friendActionsTimer: number | null = null;
 let themeSyncTimer: number | null = null;
+let heartbeatChangeTimer: number | null = null;
 let suppressFriendMarkerMutations = false;
 let suppressFriendActionMutations = false;
 let heartbeatTimer: number | null = null;
+let heartbeatTitleObserver: MutationObserver | null = null;
 let lastHeartbeatStatus: "pending" | "connected" | "disconnected" = "pending";
 let latestState: AppState | null = null;
 let lastPageTheme: PageTheme | null = null;
@@ -410,6 +413,7 @@ function startRouteTracking() {
   routePopstateListener = () => {
     scheduleFriendMarkers();
     scheduleFriendActions();
+    scheduleHeartbeatRefresh();
   };
   window.addEventListener("popstate", routePopstateListener);
   wrapHistoryMethod("pushState");
@@ -424,6 +428,7 @@ function wrapHistoryMethod(method: "pushState" | "replaceState") {
     const result = original.apply(this, args);
     scheduleFriendMarkers();
     scheduleFriendActions();
+    scheduleHeartbeatRefresh();
     return result;
   } as History[typeof method];
 }
@@ -1354,8 +1359,34 @@ function updateLauncherStatusDot(status: "pending" | "connected" | "disconnected
 
 function startHeartbeat() {
   sendHeartbeat();
+  startHeartbeatTitleObserver();
   if (heartbeatTimer != null) return;
   heartbeatTimer = window.setInterval(sendHeartbeat, heartbeatIntervalMs);
+}
+
+function startHeartbeatTitleObserver() {
+  if (heartbeatTitleObserver != null || !document.head) return;
+  heartbeatTitleObserver = new MutationObserver((mutations) => {
+    if (mutationsContainTitleChange(mutations)) {
+      scheduleHeartbeatRefresh();
+    }
+  });
+  heartbeatTitleObserver.observe(document.head, {
+    childList: true,
+    characterData: true,
+    subtree: true
+  });
+}
+
+function scheduleHeartbeatRefresh() {
+  if (typeof window === "undefined") return;
+  if (heartbeatChangeTimer != null) {
+    window.clearTimeout(heartbeatChangeTimer);
+  }
+  heartbeatChangeTimer = window.setTimeout(() => {
+    heartbeatChangeTimer = null;
+    sendHeartbeat();
+  }, heartbeatChangeDebounceMs);
 }
 
 function sendHeartbeat() {
@@ -1379,6 +1410,26 @@ function sendHeartbeat() {
 function pageHeartbeatStatus() {
   const bodyText = document.body?.textContent?.slice(0, 4000) ?? "";
   return looksLikeChallenge(bodyText) ? "challenge" : "ready";
+}
+
+function mutationsContainTitleChange(mutations: MutationRecord[]): boolean {
+  for (const mutation of mutations) {
+    if (nodeTouchesTitle(mutation.target)) return true;
+    for (const node of mutation.addedNodes) {
+      if (nodeTouchesTitle(node)) return true;
+    }
+    for (const node of mutation.removedNodes) {
+      if (nodeTouchesTitle(node)) return true;
+    }
+  }
+  return false;
+}
+
+function nodeTouchesTitle(node: Node): boolean {
+  if (node.nodeName === "TITLE") return true;
+  if (node.parentNode?.nodeName === "TITLE") return true;
+  if (typeof Element === "undefined" || !(node instanceof Element)) return false;
+  return Boolean(node.querySelector("title"));
 }
 
 function discourseFriendIconSvg() {
@@ -1827,17 +1878,21 @@ export function resetContentScriptForTest() {
   userMenuObserver = null;
   pageThemeObserver?.disconnect();
   pageThemeObserver = null;
+  heartbeatTitleObserver?.disconnect();
+  heartbeatTitleObserver = null;
   if (userMenuEnhanceTimer != null) window.clearTimeout(userMenuEnhanceTimer);
   if (launcherPlacementTimer != null) window.clearTimeout(launcherPlacementTimer);
   if (friendMarkerTimer != null) window.clearTimeout(friendMarkerTimer);
   if (friendActionsTimer != null) window.clearTimeout(friendActionsTimer);
   if (themeSyncTimer != null) window.clearTimeout(themeSyncTimer);
+  if (heartbeatChangeTimer != null) window.clearTimeout(heartbeatChangeTimer);
   if (heartbeatTimer != null) window.clearInterval(heartbeatTimer);
   userMenuEnhanceTimer = null;
   launcherPlacementTimer = null;
   friendMarkerTimer = null;
   friendActionsTimer = null;
   themeSyncTimer = null;
+  heartbeatChangeTimer = null;
   heartbeatTimer = null;
   suppressFriendMarkerMutations = false;
   suppressFriendActionMutations = false;

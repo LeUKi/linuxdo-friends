@@ -1,6 +1,6 @@
 import { createRefreshAdapter } from "../api/refreshAdapter";
 import { sortActivityItems } from "../domain/activity";
-import { maybeSendTelegramNotifications, sendTelegramMessage } from "../domain/telegramNotify";
+import { sendLaoFindsTelegramNotifications, sendTelegramMessage, type LaoFindsNotificationSource } from "../domain/telegramNotify";
 import {
   applyScopedActivityRefresh,
   clearActivityNewFlags,
@@ -29,6 +29,7 @@ import { addFriendFromKnownUser, addFriendFromProfile, removeFriend, updateFrien
 import {
   archiveLaoFindsItem,
   collectLaoFindsItems,
+  deleteLaoFindsItem,
   markLaoFindsItemRead,
   removeDredgeRule,
   resetLaoFindsStartedAt,
@@ -45,6 +46,7 @@ import {
 } from "../domain/versionCheck";
 import { isBackgroundCommand } from "../messages/contracts";
 import { base64urlFromBytes, sha256Base64url } from "../shared/crypto";
+import { PAGE_SCRIPT_HEARTBEAT_FRESH_MS, PAGE_SCRIPT_HEARTBEAT_STALE_MS, isFreshReadyPageScriptHeartbeat } from "../shared/pageScriptStatus";
 import { nowIso } from "../shared/time";
 import type {
   ActivityItem,
@@ -71,6 +73,7 @@ import type {
   ContentScriptNavigationResponse,
   ContentScriptHeartbeatMessage,
   ContentScriptProfileResponse,
+  LaoFindsItem,
   PageRepairResult,
   PageScriptHeartbeat,
   PageScriptStatusSnapshot,
@@ -123,17 +126,19 @@ let activeUpdateCheck: Promise<UpdateCheckState> | null = null;
 let lastSiteDataProgress: SiteDataTaskProgress | null = null;
 let stateWriteGeneration = 0;
 const pageScriptHeartbeats = new Map<number, PageScriptHeartbeat>();
-const heartbeatFreshMs = 45_000;
-const heartbeatStaleMs = 120_000;
+let activePageScriptTabId: number | undefined;
 const CLOUD_AUTH_VERIFIER_STORAGE_KEY = "linuxdoFriendsCloudAuthVerifier";
 const CLOUD_AUTH_WINDOW_STORAGE_KEY = "linuxdoFriendsCloudAuthWindowId";
 const REQUEST_STATS_AUTO_SYNC_ALARM_NAME = "linuxdoFriends.requestStatsAutoSync";
 const REQUEST_STATS_AUTO_SYNC_PERIOD_MINUTES = 24 * 60;
+const LAO_FINDS_NOTIFICATION_ID_PREFIX = "linuxdoFriends.laoFinds.";
 
 configureSessionStorageAccess();
 configureLocalStorageAccess();
 configureSidePanelAction();
+registerActiveTabListeners();
 registerRequestStatsAutoSyncAlarmListeners();
+registerLaoFindsNotificationClickListener();
 void reconcileRequestStatsAutoSyncAlarm().catch(() => {
   // Alarm reconciliation is best-effort and must not block the service worker.
 });
@@ -147,6 +152,41 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   void handleMessage(message, sender).then(sendResponse);
   return true;
 });
+
+
+function registerLaoFindsNotificationClickListener(): void {
+  try {
+    chrome.notifications?.onClicked?.addListener?.((notificationId) => {
+      if (!notificationId.startsWith(LAO_FINDS_NOTIFICATION_ID_PREFIX)) return;
+      void openOptionsPage("#lao-finds").catch(() => undefined);
+    });
+  } catch {
+    // Browser local notifications are best-effort and may be unavailable in tests or older surfaces.
+  }
+}
+
+async function sendLaoFindsBrowserNotification({
+  count,
+  source
+}: {
+  count: number;
+  source: LaoFindsNotificationSource;
+}): Promise<void> {
+  if (count <= 0 || !chrome.notifications?.create) return;
+  const sourceLabel = source === "timed" ? "自动捞料" : "手动打捞";
+  const notificationId = `${LAO_FINDS_NOTIFICATION_ID_PREFIX}${Date.now()}`;
+  try {
+    await chrome.notifications.create(notificationId, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("notification-icon.svg"),
+      title: "佬有料有新收录",
+      message: `${sourceLabel}新增 ${count} 条，点击查看佬有料。`,
+      priority: 1
+    });
+  } catch {
+    // Local browser notifications are an optional Chrome surface; Telegram delivery should still proceed.
+  }
+}
 
 function configureSidePanelAction() {
   try {
@@ -222,9 +262,6 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
         refreshState((state) => refreshFriendActivityWithFallback(state, command.scope ?? { kind: "all", usernames: command.usernames }, taskContext)),
         ownership
       );
-      if (activityResponse.ok) {
-        void maybeSendTelegramNotifications(activityResponse.data as AppState);
-      }
       return activityResponse;
     }
     case "upsertDredgeRule":
@@ -233,15 +270,28 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
       return ok(await updateTimedActivityTargetInputs((state) => removeDredgeRule(state, command.id)));
     case "resetLaoFindsStartedAt":
       return ok(await updateAppState((state) => resetLaoFindsStartedAt(state)));
+    case "completeRuleDerivedLaoFindsDredge": {
+      let notificationItems: LaoFindsItem[] = [];
+      const nextState = await updateAppState((state) => {
+        const completed = completeRuleDerivedLaoFindsDredge(state, command.startedAt, command.scopes);
+        notificationItems = completed.notificationItems;
+        return completed.state;
+      });
+      await sendLaoFindsNotifications(nextState, notificationItems, command.trigger);
+      return ok(nextState);
+    }
     case "markLaoFindsItemRead":
       return ok(await updateAppState((state) => markLaoFindsItemRead(state, command.id, command.read)));
     case "archiveLaoFindsItem":
       return ok(await updateAppState((state) => archiveLaoFindsItem(state, command.id, command.archived)));
+    case "deleteLaoFindsItem":
+      return ok(await updateAppState((state) => deleteLaoFindsItem(state, command.id)));
     case "cacheAvatars":
       return ok(await cacheAvatarsFromExistingTab(command.usernames));
     case "getSiteDataProgress":
       return ok(currentSiteDataProgress());
     case "getPageScriptStatus":
+      await refreshActivePageScriptTabFromChrome();
       return ok(pageScriptStatusSnapshot());
     case "getUpdateCheck":
       return ok(await loadUpdateCheckState(installedVersion()));
@@ -267,6 +317,8 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
       return ok({ binding: { bound: false }, message: "已断开云存档绑定。" } satisfies CloudConfigClearBindingResult);
     case "repairLinuxDoPageScript":
       return ok(await repairLinuxDoPageScript(command.tabId));
+    case "activateLinuxDoPageTab":
+      return ok(await activateLinuxDoPageTab(command.tabId));
     case "openSidePanel":
       return ok(await openSidePanel(sender));
     case "openOptionsPage":
@@ -309,8 +361,75 @@ async function importConfig(json: string): Promise<AppState> {
   await invalidateTimedActivityNoTargetSessionStateIfTargetable(next);
   await reconcileRequestStatsAutoSyncAlarm();
   pageScriptHeartbeats.clear();
+  activePageScriptTabId = undefined;
   lastSiteDataProgress = null;
   return next;
+}
+
+function completeRuleDerivedLaoFindsDredge(
+  state: AppState,
+  startedAt: string,
+  completedScopes: ActivityRefreshScope[]
+): { state: AppState; notificationItems: LaoFindsItem[] } {
+  const expectedScopes = deriveTimedActivityRefreshScopes(state, "rules");
+  if (expectedScopes.length === 0) {
+    return { state, notificationItems: [] };
+  }
+  if (!activityRefreshScopesCover(expectedScopes, completedScopes)) {
+    return {
+      state: {
+        ...state,
+        lastSync: {
+          ok: true,
+          source: "manual",
+          message: "打捞已完成，但打捞规则范围已变化，未更新打捞起点。",
+          refreshedAt: nowIso()
+        }
+      },
+      notificationItems: []
+    };
+  }
+  return {
+    state: resetLaoFindsStartedAt(state, startedAt),
+    notificationItems: currentRunLaoFindsItems(state, startedAt)
+  };
+}
+
+function activityRefreshScopesCover(expectedScopes: ActivityRefreshScope[], completedScopes: ActivityRefreshScope[]): boolean {
+  return expectedScopes.every((expected) => completedScopes.some((completed) => activityRefreshScopeCovers(completed, expected)));
+}
+
+function activityRefreshScopeCovers(completed: ActivityRefreshScope, expected: ActivityRefreshScope): boolean {
+  if (completed.kind !== "all" && completed.kind !== expected.kind) return false;
+  if (!completed.usernames?.length) return true;
+  if (!expected.usernames?.length) return false;
+  const completedUsernames = new Set(completed.usernames);
+  return expected.usernames.every((username) => completedUsernames.has(username));
+}
+
+function currentRunLaoFindsItems(state: AppState, startedAt: string): LaoFindsItem[] {
+  const startedAtMs = Date.parse(startedAt);
+  if (Number.isNaN(startedAtMs)) return [];
+  return Object.values(state.laoFindsItems)
+    .filter((item) => {
+      const collectedAtMs = Date.parse(item.collectedAt);
+      return !Number.isNaN(collectedAtMs) && collectedAtMs >= startedAtMs;
+    })
+    .sort((left, right) => Date.parse(left.collectedAt) - Date.parse(right.collectedAt));
+}
+
+async function sendLaoFindsNotifications(state: AppState, items: LaoFindsItem[], source: LaoFindsNotificationSource): Promise<void> {
+  if (items.length === 0) return;
+  if (source === "manual" && !state.settings.laoFindsManualNotificationsEnabled) return;
+  if (state.settings.laoFindsBrowserNotificationsEnabled) {
+    await sendLaoFindsBrowserNotification({ count: items.length, source });
+  }
+  await sendLaoFindsTelegramNotifications({
+    botToken: state.settings.telegramBotToken,
+    chatId: state.settings.telegramChatId,
+    items,
+    source
+  });
 }
 
 async function identifyCurrentAccount(): Promise<AppState> {
@@ -410,6 +529,7 @@ async function resetExtension(): Promise<AppState> {
   await invalidateTimedActivityNoTargetSessionStateIfTargetable(next);
   await reconcileRequestStatsAutoSyncAlarm();
   pageScriptHeartbeats.clear();
+  activePageScriptTabId = undefined;
   lastSiteDataProgress = null;
   return next;
 }
@@ -1623,6 +1743,9 @@ function handlePageHeartbeat(message: ContentScriptHeartbeatMessage, sender: chr
     updatedAt: nowIso()
   };
   pageScriptHeartbeats.set(tabId, heartbeat);
+  if (sender.tab?.active === true && heartbeat.status === "ready") {
+    activePageScriptTabId = tabId;
+  }
   prunePageHeartbeats();
   broadcastPageScriptStatus();
   return pageScriptStatusSnapshot();
@@ -1632,16 +1755,17 @@ function pageScriptStatusSnapshot(): PageScriptStatusSnapshot {
   prunePageHeartbeats();
   const now = nowIso();
   const entries = [...pageScriptHeartbeats.values()].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
-  const fresh = entries.filter((entry) => Date.now() - Date.parse(entry.updatedAt) <= heartbeatFreshMs);
+  const fresh = entries.filter((entry) => Date.now() - Date.parse(entry.updatedAt) <= PAGE_SCRIPT_HEARTBEAT_FRESH_MS);
   const ready = fresh.filter((entry) => entry.status === "ready");
   const challenge = fresh.filter((entry) => entry.status === "challenge");
   const staleCount = entries.length - fresh.length;
+  const activeReadyTabId = activePageScriptTabId != null && ready.some((entry) => entry.tabId === activePageScriptTabId) ? activePageScriptTabId : undefined;
   return {
     status: ready.length > 0 ? "connected" : challenge.length > 0 ? "challenge" : entries.length > 0 ? "stale" : "missing",
     connectedCount: ready.length,
     staleCount,
     heartbeats: entries,
-    selectedTabId: ready[0]?.tabId,
+    selectedTabId: activeReadyTabId,
     updatedAt: now
   };
 }
@@ -1650,16 +1774,47 @@ function freshReadyHeartbeats(): PageScriptHeartbeat[] {
   prunePageHeartbeats();
   const nowMs = Date.now();
   return [...pageScriptHeartbeats.values()]
-    .filter((entry) => entry.status === "ready" && nowMs - Date.parse(entry.updatedAt) <= heartbeatFreshMs)
+    .filter((entry) => isFreshReadyPageScriptHeartbeat(entry, nowMs))
     .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
 }
 
 function prunePageHeartbeats() {
   const nowMs = Date.now();
   for (const [tabId, heartbeat] of pageScriptHeartbeats) {
-    if (nowMs - Date.parse(heartbeat.updatedAt) > heartbeatStaleMs) {
+    if (nowMs - Date.parse(heartbeat.updatedAt) > PAGE_SCRIPT_HEARTBEAT_STALE_MS) {
       pageScriptHeartbeats.delete(tabId);
+      if (activePageScriptTabId === tabId) {
+        activePageScriptTabId = undefined;
+      }
     }
+  }
+}
+
+function registerActiveTabListeners() {
+  try {
+    chrome.tabs?.onActivated?.addListener?.((activeInfo) => {
+      activePageScriptTabId = activeInfo.tabId;
+      broadcastPageScriptStatus();
+    });
+    chrome.tabs?.onRemoved?.addListener?.((tabId) => {
+      pageScriptHeartbeats.delete(tabId);
+      if (activePageScriptTabId === tabId) {
+        activePageScriptTabId = undefined;
+      }
+      broadcastPageScriptStatus();
+    });
+  } catch {
+    // Tests and partial browser surfaces may not expose tab lifecycle events.
+  }
+}
+
+async function refreshActivePageScriptTabFromChrome() {
+  try {
+    const [activeTab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (typeof activeTab?.id !== "number") return;
+    activePageScriptTabId = isLinuxDoTab(activeTab) ? activeTab.id : undefined;
+  } catch {
+    // A stale cached activation is better than failing the status request in partial browser surfaces.
   }
 }
 
@@ -1679,6 +1834,7 @@ async function repairLinuxDoPageScript(tabId?: number): Promise<PageRepairResult
     return openLinuxDoHome();
   }
   await activateTab(targetTab);
+  activePageScriptTabId = targetTab.id;
   try {
     await chrome.tabs.reload(targetTab.id);
   } catch {
@@ -1687,10 +1843,29 @@ async function repairLinuxDoPageScript(tabId?: number): Promise<PageRepairResult
   return { message: "已切换并刷新 linux.do 页面。", tabId: targetTab.id, openedNewTab: false };
 }
 
+async function activateLinuxDoPageTab(tabId: number): Promise<PageRepairResult> {
+  let tab: chrome.tabs.Tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    pageScriptHeartbeats.delete(tabId);
+    throw new Error("这个 linux.do 页面已不可用，请重新打开。");
+  }
+  if (tab.id == null || !isLinuxDoTab(tab)) {
+    pageScriptHeartbeats.delete(tabId);
+    throw new Error("只能切换到当前可用的 linux.do 页面。");
+  }
+  await activateTab(tab);
+  activePageScriptTabId = tab.id;
+  broadcastPageScriptStatus();
+  return { message: "已切换到 linux.do 页面。", tabId: tab.id, openedNewTab: false };
+}
+
 async function openLinuxDoHome(): Promise<PageRepairResult> {
   const existing = await findRepairTargetTab();
   if (existing?.id != null) {
     await activateTab(existing);
+    activePageScriptTabId = existing.id;
     return { message: "已切换到 linux.do 页面，请完成浏览器验证后重试。", tabId: existing.id, openedNewTab: false };
   }
   const tab = await chrome.tabs.create({ url: "https://linux.do/", active: true });

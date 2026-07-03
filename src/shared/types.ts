@@ -205,6 +205,8 @@ export interface RefreshSettings {
   timedActivityRefreshScopeMode: TimedActivityRefreshScopeMode;
   timedActivityRefreshIntervalMinutes: number;
   requestStatsAutoSyncEnabled: boolean;
+  laoFindsBrowserNotificationsEnabled: boolean;
+  laoFindsManualNotificationsEnabled: boolean;
   telegramBotToken?: string;
   telegramChatId?: string;
 }
@@ -214,6 +216,8 @@ export interface ConfigExportSettings {
   refreshIntervalMinutes: number;
   timedActivityRefreshScopeMode: TimedActivityRefreshScopeMode;
   timedActivityRefreshIntervalMinutes: number;
+  laoFindsBrowserNotificationsEnabled: boolean;
+  laoFindsManualNotificationsEnabled: boolean;
   telegramBotToken?: string;
   telegramChatId?: string;
 }
@@ -442,8 +446,10 @@ export type BackgroundCommand =
   | { type: "upsertDredgeRule"; rule: Partial<DredgeRule> & { id?: string } }
   | { type: "removeDredgeRule"; id: string }
   | { type: "resetLaoFindsStartedAt" }
+  | { type: "completeRuleDerivedLaoFindsDredge"; startedAt: string; scopes: ActivityRefreshScope[]; trigger: SiteDataTaskTrigger }
   | { type: "markLaoFindsItemRead"; id: string; read: boolean }
   | { type: "archiveLaoFindsItem"; id: string; archived: boolean }
+  | { type: "deleteLaoFindsItem"; id: string }
   | { type: "cacheAvatars"; usernames?: Username[] }
   | { type: "getSiteDataProgress" }
   | { type: "getPageScriptStatus" }
@@ -457,6 +463,7 @@ export type BackgroundCommand =
   | { type: "restoreCloudConfig" }
   | { type: "clearCloudBinding" }
   | { type: "repairLinuxDoPageScript"; tabId?: number }
+  | { type: "activateLinuxDoPageTab"; tabId: number }
   | { type: "openSidePanel" }
   | { type: "openOptionsPage"; hash?: string }
   | { type: "openLinuxDoHome" }

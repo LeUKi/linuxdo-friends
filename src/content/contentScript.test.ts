@@ -764,6 +764,53 @@ describe("content script friend markers", () => {
     expect(dot?.style.display).toBe("none");
   });
 
+  it("refreshes the page heartbeat promptly when the page title changes", async () => {
+    vi.useFakeTimers();
+    document.title = "旧主题 - Linux.do";
+    document.body.innerHTML = '<div class="d-header-icons"><button class="current-user">me</button></div>';
+    const sendMessage = vi.fn(async (message: unknown) =>
+      isHeartbeatMessage(message)
+        ? { status: "connected", connectedCount: 1, staleCount: 0, heartbeats: [], updatedAt: new Date().toISOString() }
+        : { ok: true, data: defaultAppState }
+    );
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage,
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn()
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+    sendMessage.mockClear();
+
+    document.title = "过渡标题 - Linux.do";
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+    document.title = "新主题 - Linux.do";
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(349);
+    expect(heartbeatMessages(sendMessage)).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(heartbeatMessages(sendMessage)).toEqual([
+      expect.objectContaining({
+        type: "linuxdoFriends.pageHeartbeat",
+        title: "新主题 - Linux.do"
+      })
+    ]);
+    vi.useRealTimers();
+  });
+
   it("shows a red x on the launcher only when page heartbeat delivery fails", async () => {
     document.body.innerHTML = '<div class="d-header-icons"><button class="current-user">me</button></div>';
     const sendMessage = vi.fn(async (message: unknown) => {
@@ -1694,6 +1741,10 @@ async function flushContentScriptAsyncWork() {
 
 function isHeartbeatMessage(value: unknown): boolean {
   return typeof value === "object" && value != null && (value as { type?: unknown }).type === "linuxdoFriends.pageHeartbeat";
+}
+
+function heartbeatMessages(sendMessage: ReturnType<typeof vi.fn>): unknown[] {
+  return sendMessage.mock.calls.map(([message]) => message).filter(isHeartbeatMessage);
 }
 
 function isGetPageScriptStatusMessage(value: unknown): boolean {

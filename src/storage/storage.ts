@@ -2,6 +2,7 @@ import { defaultAppState } from "../domain/defaultState";
 import { normalizeFriendUser, normalizeUsername } from "../domain/friends";
 import { normalizeLaoFindsItems, normalizeDredgeRules } from "../domain/laoFinds";
 import { normalizeRequestStats } from "../domain/requestStats";
+import { isValidRefreshIntervalMinutes, isValidTimedActivityRefreshIntervalMinutes } from "../shared/settingsLimits";
 import type { AppState, RefreshSettings } from "../shared/types";
 
 export const APP_STATE_STORAGE_KEY = "linuxdoFriendsState";
@@ -69,16 +70,12 @@ function mergeFriends(stored?: Partial<AppState["friends"]>): AppState["friends"
 }
 
 function mergeSettings(stored?: Partial<RefreshSettings>): RefreshSettings {
-  const refreshIntervalMinutes =
-    typeof stored?.refreshIntervalMinutes === "number" && stored.refreshIntervalMinutes >= 30 && stored.refreshIntervalMinutes <= 720
-      ? stored.refreshIntervalMinutes
-      : defaultAppState.settings.refreshIntervalMinutes;
-  const timedActivityRefreshIntervalMinutes =
-    typeof stored?.timedActivityRefreshIntervalMinutes === "number" &&
-    stored.timedActivityRefreshIntervalMinutes >= 30 &&
-    stored.timedActivityRefreshIntervalMinutes <= 720
-      ? stored.timedActivityRefreshIntervalMinutes
-      : defaultAppState.settings.timedActivityRefreshIntervalMinutes;
+  const refreshIntervalMinutes = isValidRefreshIntervalMinutes(stored?.refreshIntervalMinutes)
+    ? stored.refreshIntervalMinutes
+    : defaultAppState.settings.refreshIntervalMinutes;
+  const timedActivityRefreshIntervalMinutes = isValidTimedActivityRefreshIntervalMinutes(stored?.timedActivityRefreshIntervalMinutes)
+    ? stored.timedActivityRefreshIntervalMinutes
+    : defaultAppState.settings.timedActivityRefreshIntervalMinutes;
   return {
     ...defaultAppState.settings,
     refreshIntervalMinutes,
@@ -95,6 +92,14 @@ function mergeSettings(stored?: Partial<RefreshSettings>): RefreshSettings {
       typeof stored?.requestStatsAutoSyncEnabled === "boolean"
         ? stored.requestStatsAutoSyncEnabled
         : defaultAppState.settings.requestStatsAutoSyncEnabled,
+    laoFindsBrowserNotificationsEnabled:
+      typeof stored?.laoFindsBrowserNotificationsEnabled === "boolean"
+        ? stored.laoFindsBrowserNotificationsEnabled
+        : defaultAppState.settings.laoFindsBrowserNotificationsEnabled,
+    laoFindsManualNotificationsEnabled:
+      typeof stored?.laoFindsManualNotificationsEnabled === "boolean"
+        ? stored.laoFindsManualNotificationsEnabled
+        : defaultAppState.settings.laoFindsManualNotificationsEnabled,
     openActivityLinksInPage:
       typeof stored?.openActivityLinksInPage === "boolean" ? stored.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     allowAutoRefresh: false,

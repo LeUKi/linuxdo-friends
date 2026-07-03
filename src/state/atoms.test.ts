@@ -6,6 +6,7 @@ import { PAGE_SCRIPT_STATUS_STORAGE_KEY } from "../storage/pageScriptStatusStora
 import { SITE_DATA_PROGRESS_STORAGE_KEY } from "../storage/siteDataProgressStorage";
 import { APP_STATE_STORAGE_KEY } from "../storage/storage";
 import {
+  activateLinuxDoPageTabAtom,
   appStateAtom,
   observeAppStateAtom,
   observePageScriptStatusAtom,
@@ -13,7 +14,8 @@ import {
   pageScriptStatusAtom,
   resetAppStateObserverForTest,
   resetRuntimeObserversForTest,
-  siteDataProgressAtom
+  siteDataProgressAtom,
+  statusMessageAtom
 } from "./atoms";
 
 describe("app state atom storage observation", () => {
@@ -302,5 +304,94 @@ describe("app state atom storage observation", () => {
     });
 
     expect(store.get(pageScriptStatusAtom).status).toBe("challenge");
+  });
+
+  it("activates a linux.do page tab and refreshes page-script status", async () => {
+    const refreshedStatus = {
+      status: "connected" as const,
+      connectedCount: 1,
+      staleCount: 0,
+      selectedTabId: 123,
+      heartbeats: [
+        {
+          tabId: 123,
+          url: "https://linux.do/t/topic/1",
+          status: "ready" as const,
+          hasLauncher: true,
+          updatedAt: "2026-06-28T12:00:00.000Z"
+        }
+      ],
+      updatedAt: "2026-06-28T12:00:01.000Z"
+    };
+    const sendMessage = vi.fn(async (command) => {
+      if (command.type === "activateLinuxDoPageTab") {
+        return { ok: true, data: { message: "已切换到 linux.do 页面。", tabId: command.tabId, openedNewTab: false } };
+      }
+      if (command.type === "getPageScriptStatus") {
+        return { ok: true, data: refreshedStatus };
+      }
+      return { ok: false, error: "unexpected command" };
+    });
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage
+      }
+    });
+    const store = createStore();
+
+    await store.set(activateLinuxDoPageTabAtom, 123);
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: "activateLinuxDoPageTab", tabId: 123 });
+    expect(sendMessage).toHaveBeenCalledWith({ type: "getPageScriptStatus" });
+    expect(store.get(statusMessageAtom)).toBe("已切换到 linux.do 页面。");
+    expect(store.get(pageScriptStatusAtom).selectedTabId).toBe(123);
+  });
+
+  it("refreshes page-script status after activate-only failures", async () => {
+    const missingStatus = {
+      status: "missing" as const,
+      connectedCount: 0,
+      staleCount: 0,
+      heartbeats: [],
+      updatedAt: "2026-06-28T12:00:01.000Z"
+    };
+    const sendMessage = vi.fn(async (command) => {
+      if (command.type === "activateLinuxDoPageTab") {
+        return { ok: false, error: "这个 linux.do 页面已不可用，请重新打开。" };
+      }
+      if (command.type === "getPageScriptStatus") {
+        return { ok: true, data: missingStatus };
+      }
+      return { ok: false, error: "unexpected command" };
+    });
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage
+      }
+    });
+    const store = createStore();
+    store.set(pageScriptStatusAtom, {
+      status: "connected",
+      connectedCount: 1,
+      staleCount: 0,
+      selectedTabId: 123,
+      heartbeats: [
+        {
+          tabId: 123,
+          url: "https://linux.do/t/topic/1",
+          status: "ready",
+          hasLauncher: true,
+          updatedAt: "2026-06-28T12:00:00.000Z"
+        }
+      ],
+      updatedAt: "2026-06-28T12:00:00.000Z"
+    });
+
+    await store.set(activateLinuxDoPageTabAtom, 123);
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: "activateLinuxDoPageTab", tabId: 123 });
+    expect(sendMessage).toHaveBeenCalledWith({ type: "getPageScriptStatus" });
+    expect(store.get(statusMessageAtom)).toBe("这个 linux.do 页面已不可用，请重新打开。");
+    expect(store.get(pageScriptStatusAtom).status).toBe("missing");
   });
 });

@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addFriendFromProfile, removeFriend, updateFriend } from "../domain/friends";
+import { deleteLaoFindsItem, resetLaoFindsStartedAt } from "../domain/laoFinds";
 import { defaultAppState } from "../domain/defaultState";
 import { recordRequestAttempts } from "../domain/requestStats";
 import { createMockStorage } from "../test/mockStorage";
@@ -15,8 +16,8 @@ import { resetRuntimeObserversForTest } from "../state/atoms";
 import { resetAutoRefreshSessionObserverForTest } from "../state/autoRefreshAtoms";
 import { resetTimedActivityRefreshSessionObserverForTest } from "../state/timedActivityRefreshAtoms";
 import { resetUiSceneObserverForTest } from "../state/uiSceneAtoms";
-import type { ActivityRefreshScope, AppState, BackgroundResponse, CloudArchiveLocalStateResult, DredgeRule, SiteDataTaskProgress } from "../shared/types";
-import { eventHappenedInside, isLinuxDoActivityHref, shouldHandleActivityLinkClick } from "./FriendsApp";
+import type { ActivityRefreshScope, AppState, BackgroundResponse, CloudArchiveLocalStateResult, DredgeRule, PageScriptStatusSnapshot, SiteDataTaskProgress } from "../shared/types";
+import { absoluteLinuxDoUrl, eventHappenedInside, isLinuxDoActivityHref, shouldHandleActivityLinkClick } from "./activityLinks";
 import { FriendsApp } from "./FriendsApp";
 
 describe("eventHappenedInside", () => {
@@ -98,6 +99,13 @@ describe("activity link click handling", () => {
     expect(isLinuxDoActivityHref("https://linux.do/t/topic/1")).toBe(true);
     expect(isLinuxDoActivityHref("/t/topic/1")).toBe(true);
     expect(isLinuxDoActivityHref("https://example.com/t/topic/1")).toBe(false);
+  });
+
+  it("builds absolute linux.do URLs with a safe fallback", () => {
+    expect(absoluteLinuxDoUrl("/t/topic/1")).toBe("https://linux.do/t/topic/1");
+    expect(absoluteLinuxDoUrl("https://linux.do/t/topic/1")).toBe("https://linux.do/t/topic/1");
+    expect(absoluteLinuxDoUrl()).toBe("https://linux.do/");
+    expect(absoluteLinuxDoUrl("https://[")).toBe("https://linux.do/");
   });
 });
 
@@ -935,9 +943,104 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.textContent).toContain("手动刷新佬友圈或开启自动捞料");
     expect(container.textContent).toContain("立即打捞");
     expect(container.textContent).toContain("配置打捞规则");
-    expect(container.querySelector(".finds-title-with-icon .lucide-telescope")).toBeTruthy();
+    expect(container.querySelector(".finds-section h2")).toBeFalsy();
+    const findsActionRow = container.querySelector(".finds-action-row");
+    expect(findsActionRow?.textContent).not.toContain("佬有料");
+    expect(container.querySelector(".finds-count")?.textContent).toBe("共 0 条");
+    const actionChildren = Array.from(findsActionRow?.children ?? []);
+    expect(actionChildren[0]?.classList.contains("finds-dredge-button")).toBe(true);
+    expect(actionChildren[1]?.classList.contains("finds-count")).toBe(true);
+    expect(actionChildren[2]?.classList.contains("finds-rules-button")).toBe(true);
     expect(getButton(container, "立即打捞").querySelector(".lucide-telescope")).toBeTruthy();
     expect(container.querySelector(".dredge-rule-panel")).toBeFalsy();
+  });
+
+  it("shows Lao Finds manual dredge progress in the large action button", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:01.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    setupChrome({
+      session,
+      progress: {
+        taskId: "activity-live",
+        taskType: "activity",
+        scope: { kind: "all" },
+        status: "running",
+        completed: 1,
+        total: 4,
+        currentLabel: "话题 @neo",
+        startedAt: "2026-06-28T00:00:00.000Z",
+        updatedAt: "2026-06-28T00:00:00.000Z",
+        source: "existing_tab"
+      },
+      state: timedActivityState({ timedActivityRefreshEnabled: true })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    const dredgeButton = container.querySelector<HTMLButtonElement>(".finds-dredge-button");
+    expect(dredgeButton?.disabled).toBe(true);
+    expect(dredgeButton?.querySelector(".refresh-button-inner.is-running")).toBeTruthy();
+    expect(dredgeButton?.querySelector(".spin-icon")).toBeTruthy();
+    expect(dredgeButton?.querySelector(".lucide-telescope")).toBeFalsy();
+    expect(dredgeButton?.querySelector(".refresh-button-label")?.textContent).toBe("话题 @neo · 1/4");
+    expect(dredgeButton?.querySelector<HTMLSpanElement>(".refresh-progress-track span")?.style.width).toBe("25%");
+    vi.useRealTimers();
+  });
+
+  it("disables manual and automatic dredging controls when no final rule scope is available", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: {
+        ...timedActivityState({ timedActivityRefreshEnabled: false, timedActivityRefreshScopeMode: "rules" }),
+        dredgeRules: [currentRule({ id: "rule-boost", usernames: ["neo"], kinds: ["boost"] })]
+      }
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.textContent).toContain("当前没有可打捞范围，请先调整规则。");
+    expect(container.querySelector(".header-operation-row .timed-refresh-hint")).toBeFalsy();
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("无规则");
+    const findsDredgeButton = container.querySelector<HTMLButtonElement>(".finds-action-row .finds-dredge-button");
+    expect(findsDredgeButton?.textContent).toContain("立即打捞");
+    expect(findsDredgeButton?.disabled).toBe(true);
+    expect(findsDredgeButton?.title).toBe("当前没有可打捞范围，请先调整规则。");
+
+    await act(async () => {
+      findsDredgeButton?.click();
+      await Promise.resolve();
+    });
+    expect(activityRefreshMessages(chromeMock)).toEqual([]);
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".timed-refresh-main")?.click();
+      await Promise.resolve();
+    });
+
+    const menuOptions = Array.from(container.querySelectorAll<HTMLButtonElement>(".timed-refresh-menu .refresh-menu-option"));
+    const enableOption = menuOptions.find((button) => button.textContent?.includes("启用自动捞料"));
+    const runNowOption = menuOptions.find((button) => button.textContent?.includes("立即打捞"));
+    expect(enableOption?.disabled).toBe(true);
+    expect(enableOption?.title).toBe("当前没有可打捞范围，请先调整规则。");
+    expect(runNowOption?.disabled).toBe(true);
+
+    await act(async () => {
+      enableOption?.click();
+      runNowOption?.click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { timedActivityRefreshEnabled: true }
+    });
+    expect(activityRefreshMessages(chromeMock)).toEqual([]);
   });
 
   it("opens lao finds rules in the options page from the lightweight management modal", async () => {
@@ -964,7 +1067,9 @@ describe("FriendsApp UI scene persistence", () => {
     });
   });
 
-  it("renders collected lao finds items and sends read/archive commands", async () => {
+  it("renders collected lao finds items with separated times and sends delete command", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:34:00.000Z"));
     const state: AppState = {
       ...activityFeedState(),
       dredgeRules: [
@@ -995,17 +1100,36 @@ describe("FriendsApp UI scene persistence", () => {
     const { container } = await renderFriendsApp("side-panel");
 
     expect(container.textContent).toContain("AI 新话题");
-    expect(container.textContent).toContain("命中 AI");
+    expect(container.textContent).toContain("命中 AI · 29 分钟前打捞");
+    const times = Array.from(container.querySelectorAll<HTMLTimeElement>(".finds-card time"));
+    expect(times.map((time) => time.dateTime)).toContain("2026-06-28T00:04:00.000Z");
+    expect(times.map((time) => time.dateTime)).not.toContain("2026-06-28T00:05:00.000Z");
+    expect(container.textContent).not.toContain("标为已读");
+    expect(container.textContent).not.toContain("标为未读");
+    expect(container.textContent).not.toContain("归档");
 
     await act(async () => {
-      getButton(container, "标为已读").click();
+      getButton(container, "删除").click();
     });
+    const deleteCallResult = chromeMock.sendMessage.mock.results.at(-1)?.value;
+    const deleteResponse = await deleteCallResult;
+    expect(deleteResponse).toMatchObject({ ok: true, data: { laoFindsItems: {} } });
     await act(async () => {
-      getButton(container, "归档").click();
+      chromeMock.emitStorageChange(
+        {
+          linuxdoFriendsState: {
+            oldValue: state,
+            newValue: deleteResponse.data
+          }
+        },
+        "local"
+      );
+      await Promise.resolve();
     });
 
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "markLaoFindsItemRead", id: "topic:neo:1", read: true });
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "archiveLaoFindsItem", id: "topic:neo:1", archived: true });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "deleteLaoFindsItem", id: "topic:neo:1" });
+    expect(container.textContent).not.toContain("AI 新话题");
+    vi.useRealTimers();
   });
 
   it("keeps lao finds rule CRUD out of the main plugin surface", async () => {
@@ -1103,8 +1227,11 @@ describe("FriendsApp UI scene persistence", () => {
       expect(container.querySelector(".header-actions")?.firstElementChild).toBe(chip);
       expect(container.querySelector(".header-account-row .request-stats-chip")).toBeFalsy();
       expect(chip?.querySelector(".lucide-chart-column")).toBeTruthy();
-      expect(chip?.textContent).toContain("今 2");
-      expect(chip?.textContent).toContain("总 5");
+      expect(chip?.textContent).toContain("2/ 5");
+      expect(chip?.textContent).not.toContain("今");
+      expect(chip?.textContent).not.toContain("总");
+      expect(chip?.querySelector(".request-stats-today")?.textContent).toBe("2");
+      expect(chip?.querySelector(".request-stats-total")?.textContent).toBe("/ 5");
 
       await act(async () => {
         chip?.click();
@@ -1112,6 +1239,34 @@ describe("FriendsApp UI scene persistence", () => {
       });
 
       expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#request-stats" });
+    } finally {
+      dateNow.mockRestore();
+    }
+  });
+
+  it("compacts large request statistics numbers in the side-panel header capsule", async () => {
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(new Date(2026, 6, 2, 9, 30).getTime());
+    try {
+      const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+      let state = recordRequestAttempts(defaultAppState, {
+        family: "activity",
+        count: 1_234_567,
+        at: new Date(2026, 6, 1, 18, 0)
+      });
+      state = recordRequestAttempts(state, {
+        family: "profile",
+        count: 12_345,
+        at: new Date(2026, 6, 2, 9, 10)
+      });
+      setupChrome({ session, state });
+      const { container } = await renderFriendsApp("side-panel");
+
+      const chip = container.querySelector<HTMLButtonElement>(".request-stats-chip");
+      expect(chip?.textContent).toContain("12.35K/ 1.25M");
+      expect(chip?.querySelector(".request-stats-today")?.textContent).toBe("12.35K");
+      expect(chip?.querySelector(".request-stats-total")?.textContent).toBe("/ 1.25M");
+      expect(chip?.title).toBe("今日请求 12345，总请求 1246912。打开请求统计。");
+      expect(chip?.getAttribute("aria-label")).toBe("今日请求 12345，总请求 1246912。打开请求统计。");
     } finally {
       dateNow.mockRestore();
     }
@@ -1345,6 +1500,192 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.querySelector(".settings-chip")).toBeTruthy();
   });
 
+  it("opens a connected page dropdown with only fresh ready entries and activates without repair", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const now = Date.now();
+    const chromeMock = setupChrome({
+      session,
+      pageStatus: {
+        status: "connected",
+        connectedCount: 2,
+        staleCount: 1,
+        selectedTabId: 456,
+        heartbeats: [
+          {
+            tabId: 123,
+            url: "https://linux.do/t/ready-one/1",
+            title: "Ready One",
+            status: "ready",
+            hasLauncher: true,
+            updatedAt: new Date(now).toISOString()
+          },
+          {
+            tabId: 456,
+            url: "https://linux.do/t/ready-two/2",
+            title: "Ready Two",
+            status: "ready",
+            hasLauncher: true,
+            updatedAt: new Date(now - 1_000).toISOString()
+          },
+          {
+            tabId: 789,
+            url: "https://linux.do/t/stale-ready/3",
+            title: "Stale Ready",
+            status: "ready",
+            hasLauncher: true,
+            updatedAt: new Date(now - 60_000).toISOString()
+          },
+          {
+            tabId: 888,
+            url: "https://linux.do/",
+            title: "Challenge",
+            status: "challenge",
+            hasLauncher: false,
+            updatedAt: new Date(now).toISOString()
+          }
+        ],
+        updatedAt: new Date(now).toISOString()
+      }
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    const badge = container.querySelector<HTMLButtonElement>(".page-script-badge");
+    expect(badge?.tagName).toBe("BUTTON");
+    expect(badge?.getAttribute("aria-haspopup")).toBe("menu");
+    await act(async () => {
+      badge?.click();
+    });
+
+    const popover = container.querySelector(".page-script-popover");
+    expect(popover?.textContent).toContain("Ready One");
+    expect(popover?.textContent).toContain("Ready Two");
+    expect(popover?.textContent).not.toContain("Stale Ready");
+    expect(popover?.textContent).not.toContain("Challenge");
+    const options = Array.from(container.querySelectorAll<HTMLButtonElement>(".page-script-tab-option"));
+    expect(options).toHaveLength(2);
+    expect(options[1]?.classList.contains("is-selected")).toBe(true);
+    expect(options[1]?.querySelector(".page-script-tab-check")).toBeTruthy();
+
+    await act(async () => {
+      options[0]?.click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "activateLinuxDoPageTab", tabId: 123 });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "repairLinuxDoPageScript" }));
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "openLinuxDoHome" });
+
+    await act(async () => {
+      badge?.click();
+      await Promise.resolve();
+    });
+    const reopenedOptions = Array.from(container.querySelectorAll<HTMLButtonElement>(".page-script-tab-option"));
+    expect(reopenedOptions[0]?.classList.contains("is-selected")).toBe(true);
+    expect(reopenedOptions[0]?.querySelector(".page-script-tab-check")).toBeTruthy();
+  });
+
+  it("recomputes connected dropdown freshness when the chip is opened", async () => {
+    vi.useFakeTimers();
+    const base = new Date("2026-06-28T00:00:00.000Z");
+    vi.setSystemTime(base);
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    setupChrome({
+      session,
+      pageStatus: {
+        status: "connected",
+        connectedCount: 1,
+        staleCount: 0,
+        selectedTabId: 123,
+        heartbeats: [
+          {
+            tabId: 123,
+            url: "https://linux.do/t/ready-one/1",
+            title: "Ready One",
+            status: "ready",
+            hasLauncher: true,
+            updatedAt: base.toISOString()
+          }
+        ],
+        updatedAt: base.toISOString()
+      }
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    vi.setSystemTime(new Date(base.getTime() + 60_000));
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".page-script-badge")?.click();
+    });
+
+    const popover = container.querySelector(".page-script-popover");
+    expect(popover?.textContent).not.toContain("Ready One");
+    expect(popover?.textContent).toContain("暂无可切换页面");
+  });
+
+  it.each([
+    [
+      "missing",
+      {
+        status: "missing" as const,
+        connectedCount: 0,
+        staleCount: 0,
+        heartbeats: [],
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      },
+      { type: "openLinuxDoHome" }
+    ],
+    [
+      "challenge",
+      {
+        status: "challenge" as const,
+        connectedCount: 0,
+        staleCount: 0,
+        heartbeats: [
+          {
+            tabId: 321,
+            url: "https://linux.do/",
+            title: "Challenge",
+            status: "challenge" as const,
+            hasLauncher: false,
+            updatedAt: new Date().toISOString()
+          }
+        ],
+        updatedAt: new Date().toISOString()
+      },
+      { type: "openLinuxDoHome" }
+    ],
+    [
+      "stale",
+      {
+        status: "stale" as const,
+        connectedCount: 0,
+        staleCount: 1,
+        heartbeats: [
+          {
+            tabId: 321,
+            url: "https://linux.do/latest",
+            title: "Latest",
+            status: "ready" as const,
+            hasLauncher: true,
+            updatedAt: "2026-06-28T00:00:00.000Z"
+          }
+        ],
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      },
+      { type: "repairLinuxDoPageScript", tabId: 321 }
+    ]
+  ] satisfies Array<[string, PageScriptStatusSnapshot, Record<string, unknown>]>)("maps %s page-status chip clicks to the expected command", async (_name, pageStatus, expectedCommand) => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({ session, pageStatus });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".page-script-badge")?.click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith(expectedCommand);
+  });
+
   it("shows installed version and triggers an update check when the plugin opens", async () => {
     const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
     const chromeMock = setupChrome({ session });
@@ -1512,11 +1853,16 @@ describe("FriendsApp UI scene persistence", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("开启自动捞料");
+    expect(container.textContent).toContain("启用自动捞料");
+    expect(container.textContent).toContain("需保持插件界面前台显示");
     expect(container.textContent).toContain("立即打捞");
     expect(container.textContent).toContain("配置打捞规则");
     expect(container.querySelector(".timed-refresh-control .lucide-telescope")).toBeTruthy();
     expect(container.querySelector(".timed-refresh-main .lucide-telescope")).toBeTruthy();
+    expect(container.querySelector(".timed-refresh-menu .refresh-menu-option-with-note .refresh-menu-label-note")?.textContent).toBe("需保持插件界面前台显示");
+    const settingsOption = Array.from(container.querySelectorAll<HTMLButtonElement>(".timed-refresh-menu .refresh-menu-option")).find((button) => button.textContent?.includes("配置打捞规则"));
+    expect(settingsOption?.classList.contains("refresh-menu-option-no-icon")).toBe(true);
+    expect(settingsOption?.querySelector("svg")).toBeFalsy();
     expect(container.querySelector(".timed-refresh-menu .refresh-menu-check")).toBeTruthy();
     expect(container.querySelector(".timed-refresh-menu .refresh-menu-option.is-selected")).toBeFalsy();
     expect(container.querySelector(".timed-refresh-menu .refresh-menu-check .lucide-check")).toBeFalsy();
@@ -1526,7 +1872,7 @@ describe("FriendsApp UI scene persistence", () => {
     });
 
     await act(async () => {
-      getButton(container, "开启自动捞料").click();
+      getButton(container, "启用自动捞料").click();
       await Promise.resolve();
     });
 
@@ -1551,7 +1897,8 @@ describe("FriendsApp UI scene persistence", () => {
     });
 
     const selected = container.querySelector<HTMLButtonElement>(".timed-refresh-menu .refresh-menu-option.is-selected");
-    expect(selected?.textContent).toContain("关闭自动捞料");
+    expect(selected?.textContent).toContain("启用自动捞料");
+    expect(selected?.textContent).toContain("需保持插件界面前台显示");
     expect(selected?.getAttribute("aria-pressed")).toBe("true");
     expect(selected?.querySelector(".refresh-menu-check .lucide-check")).toBeTruthy();
   });
@@ -1584,7 +1931,7 @@ describe("FriendsApp UI scene persistence", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      getButton(container, "开启自动捞料").click();
+      getButton(container, "启用自动捞料").click();
       await Promise.resolve();
     });
 
@@ -1659,12 +2006,12 @@ describe("FriendsApp UI scene persistence", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      getButton(container, "开启自动捞料").click();
+      getButton(container, "启用自动捞料").click();
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("下次打捞 02:00:00");
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("下次打捞 00:20:00");
     const timedSession = await loadTimedActivityRefreshSessionState(session);
     expect(timedSession.noTargetMessage).toBeUndefined();
     expect(timedSession.noTargetAt).toBeUndefined();
@@ -1691,7 +2038,8 @@ describe("FriendsApp UI scene persistence", () => {
     const { container } = await renderFriendsApp("side-panel");
 
     const capsule = container.querySelector(".timed-refresh-control");
-    expect(capsule?.querySelector(".timed-refresh-copy")?.textContent).toBe("话题 @neo · 1/4");
+    expect(capsule?.querySelector(".timed-refresh-copy")?.textContent).toBe("打捞中 25%");
+    expect(capsule?.textContent).not.toContain("话题 @neo · 1/4");
     expect(capsule?.querySelector(".spin-icon")).toBeTruthy();
     vi.useRealTimers();
   });
@@ -1755,11 +2103,220 @@ describe("FriendsApp UI scene persistence", () => {
       { type: "refreshFriendActivity", scope: { kind: "topic", usernames: ["neo"] } },
       { type: "refreshFriendActivity", scope: { kind: "reaction", usernames: ["neo"] } }
     ]);
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [
+        { kind: "topic", usernames: ["neo"] },
+        { kind: "reaction", usernames: ["neo"] }
+      ],
+      trigger: "manual"
+    });
     expect(activityRefreshMessages(chromeMock)).not.toEqual([{ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neo"] } }]);
     expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({
       lastScopeMode: "rules",
       lastFinishedAt: "2026-06-28T00:00:00.000Z"
     });
+    vi.useRealTimers();
+  });
+
+  it("completes rule-derived notifications after an all-scope manual dredge covers rules", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "all",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      getButton(container, "立即打捞").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all" } }]);
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "all" }],
+      trigger: "manual"
+    });
+    vi.useRealTimers();
+  });
+
+  it("does not advance the dredge start point when rule-derived manual dredging fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    const chromeMock = setupChrome({
+      session,
+      refreshActivityResponses: [() => ({ ok: false, error: "刷新失败。", reason: "unavailable" })],
+      state: timedActivityState({
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      getButton(container, "立即打捞").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "topic", usernames: ["neo"] } }]);
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "completeRuleDerivedLaoFindsDredge" }));
+    vi.useRealTimers();
+  });
+
+  it("aggregates multi-scope manual dredging into one continuous progress display", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const state = timedActivityState({
+      timedActivityRefreshEnabled: false,
+      timedActivityRefreshScopeMode: "rules",
+      timedActivityRefreshIntervalMinutes: 120
+    });
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    let resolveFirstRefresh: ((response: BackgroundResponse<AppState>) => void) | undefined;
+    let resolveSecondRefresh: ((response: BackgroundResponse<AppState>) => void) | undefined;
+    const firstRefresh = new Promise<BackgroundResponse<AppState>>((resolve) => {
+      resolveFirstRefresh = resolve;
+    });
+    const secondRefresh = new Promise<BackgroundResponse<AppState>>((resolve) => {
+      resolveSecondRefresh = resolve;
+    });
+    const chromeMock = setupChrome({
+      session,
+      refreshActivityResponses: [() => firstRefresh, () => secondRefresh],
+      state
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      getButton(container, "立即打捞").click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    let commands = activityRefreshCommands(chromeMock);
+    expect(commands).toHaveLength(1);
+    const timedRunId = commands[0].timedRunId;
+    expect(timedRunId).toBeTruthy();
+    const dredgeButton = () => container.querySelector<HTMLButtonElement>(".finds-dredge-button");
+    expect(dredgeButton()?.querySelector(".refresh-button-label")?.textContent).toBe("@neo 话题 · 0/2");
+
+    await act(async () => {
+      chromeMock.emitStorageChange({
+        [SITE_DATA_PROGRESS_STORAGE_KEY]: {
+          oldValue: null,
+          newValue: {
+            taskId: "scope-topic",
+            taskType: "activity",
+            scope: { kind: "topic", usernames: ["neo"] },
+            status: "running",
+            trigger: "timed",
+            timedRunId,
+            completed: 1,
+            total: 1,
+            currentLabel: "话题 @neo",
+            startedAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:01.000Z",
+            source: "existing_tab"
+          } satisfies SiteDataTaskProgress
+        }
+      });
+      await Promise.resolve();
+    });
+
+    expect(dredgeButton()?.querySelector(".refresh-button-label")?.textContent).toBe("话题 @neo · 1/2");
+    expect(dredgeButton()?.querySelector<HTMLSpanElement>(".refresh-progress-track span")?.style.width).toBe("50%");
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("打捞中 50%");
+
+    await act(async () => {
+      resolveFirstRefresh?.({ ok: true, data: state });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    commands = activityRefreshCommands(chromeMock);
+    expect(commands).toHaveLength(2);
+    expect(commands[1].timedRunId).toBe(timedRunId);
+    expect(dredgeButton()?.querySelector(".refresh-button-label")?.textContent).toBe("@neo 回应 · 1/2");
+    expect(dredgeButton()?.querySelector<HTMLSpanElement>(".refresh-progress-track span")?.style.width).toBe("50%");
+
+    await act(async () => {
+      chromeMock.emitStorageChange({
+        [SITE_DATA_PROGRESS_STORAGE_KEY]: {
+          oldValue: null,
+          newValue: {
+            taskId: "scope-reaction",
+            taskType: "activity",
+            scope: { kind: "reaction", usernames: ["neo"] },
+            status: "running",
+            trigger: "timed",
+            timedRunId,
+            completed: 1,
+            total: 1,
+            currentLabel: "回应 @neo",
+            startedAt: "2026-06-28T00:00:02.000Z",
+            updatedAt: "2026-06-28T00:00:03.000Z",
+            source: "existing_tab"
+          } satisfies SiteDataTaskProgress
+        }
+      });
+      await Promise.resolve();
+    });
+
+    expect(dredgeButton()?.querySelector(".refresh-button-label")?.textContent).toBe("回应 @neo · 2/2");
+    expect(dredgeButton()?.querySelector<HTMLSpanElement>(".refresh-progress-track span")?.style.width).toBe("100%");
+    expect(container.querySelector(".timed-refresh-copy")?.textContent).toBe("打捞中 100%");
+
+    await act(async () => {
+      resolveSecondRefresh?.({ ok: true, data: state });
+      chromeMock.emitStorageChange({
+        [SITE_DATA_PROGRESS_STORAGE_KEY]: {
+          oldValue: null,
+          newValue: {
+            taskId: "scope-reaction",
+            taskType: "activity",
+            scope: { kind: "reaction", usernames: ["neo"] },
+            status: "success",
+            trigger: "timed",
+            timedRunId,
+            completed: 1,
+            total: 1,
+            currentLabel: "回应 @neo",
+            startedAt: "2026-06-28T00:00:02.000Z",
+            updatedAt: "2026-06-28T00:00:04.000Z",
+            finishedAt: "2026-06-28T00:00:04.000Z",
+            source: "existing_tab"
+          } satisfies SiteDataTaskProgress
+        }
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dredgeButton()?.textContent).toContain("立即打捞");
     vi.useRealTimers();
   });
 
@@ -2169,7 +2726,7 @@ describe("FriendsApp UI scene persistence", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      getButton(container, "关闭自动捞料").click();
+      getButton(container, "启用自动捞料").click();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -2225,7 +2782,7 @@ describe("FriendsApp UI scene persistence", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      getButton(container, "关闭自动捞料").click();
+      getButton(container, "启用自动捞料").click();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -2273,7 +2830,7 @@ describe("FriendsApp UI scene persistence", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      getButton(container, "关闭自动捞料").click();
+      getButton(container, "启用自动捞料").click();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -2462,13 +3019,7 @@ function setupChrome({
   },
   beforeTimedControllerClaim
 }: {
-  pageStatus?: {
-    status: "connected" | "challenge" | "stale" | "missing";
-    connectedCount: number;
-    staleCount: number;
-    heartbeats: [];
-    updatedAt: string;
-  };
+  pageStatus?: PageScriptStatusSnapshot;
   progress?: SiteDataTaskProgress | null;
   refreshActivityResponses?: Array<
     (state: AppState, scope?: ActivityRefreshScope) => BackgroundResponse<AppState> | Promise<BackgroundResponse<AppState>>
@@ -2492,6 +3043,7 @@ function setupChrome({
   const storageListeners: Array<(changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void> = [];
   const activityResponseQueue = [...refreshActivityResponses];
   let currentCloudState = cloudState;
+  let currentState = state;
   if (beforeTimedControllerClaim) {
     const setSession = session.set.bind(session);
     session.set = async (value: Record<string, unknown>) => {
@@ -2502,7 +3054,7 @@ function setupChrome({
     };
   }
   const sendMessage = vi.fn(async (message) => {
-    if (message.type === "getState") return { ok: true, data: state };
+    if (message.type === "getState") return { ok: true, data: currentState };
     if (message.type === "getPageScriptStatus") {
       return { ok: true, data: pageStatus };
     }
@@ -2516,19 +3068,33 @@ function setupChrome({
       return {
         ok: true,
         data: {
-          ...state,
+          ...currentState,
           currentAccount: { username: "lafish", verifiedAt: "2026-06-28T00:00:00.000Z", source: "latest_header" }
         }
       };
     }
     if (message.type === "openSidePanel") return { ok: true, data: { message: "已打开插件侧栏。" } };
     if (message.type === "openOptionsPage") return { ok: true, data: { message: "已打开配置页。" } };
+    if (message.type === "openLinuxDoHome") return { ok: true, data: { message: "已打开 linux.do 首页。", tabId: 901, openedNewTab: false } };
+    if (message.type === "repairLinuxDoPageScript") return { ok: true, data: { message: "已切换并刷新 linux.do 页面。", tabId: message.tabId, openedNewTab: false } };
+    if (message.type === "activateLinuxDoPageTab") {
+      pageStatus = { ...pageStatus, selectedTabId: message.tabId };
+      return { ok: true, data: { message: "已切换到 linux.do 页面。", tabId: message.tabId, openedNewTab: false } };
+    }
     if (message.type === "removeFriend") return { ok: true, data: removeFriend(state, message.username) };
     if (message.type === "updateFriend") return { ok: true, data: updateFriend(state, message.username, message.patch) };
     if (message.type === "upsertDredgeRule") return { ok: true, data: state };
     if (message.type === "removeDredgeRule") return { ok: true, data: state };
     if (message.type === "markLaoFindsItemRead") return { ok: true, data: state };
     if (message.type === "archiveLaoFindsItem") return { ok: true, data: state };
+    if (message.type === "deleteLaoFindsItem") {
+      currentState = deleteLaoFindsItem(currentState, message.id);
+      return { ok: true, data: currentState };
+    }
+    if (message.type === "completeRuleDerivedLaoFindsDredge") {
+      currentState = resetLaoFindsStartedAt(currentState, message.startedAt);
+      return { ok: true, data: currentState };
+    }
     if (message.type === "updateSettings") {
       const nextState = { ...state, settings: { ...state.settings, ...message.settings } };
       if (typeof message.settings?.timedActivityRefreshEnabled === "boolean") {
@@ -2572,14 +3138,15 @@ function setupChrome({
         }
       }
       state = nextState;
+      currentState = nextState;
       return { ok: true, data: nextState };
     }
-    if (message.type === "refreshFriendProfiles") return { ok: true, data: state };
+    if (message.type === "refreshFriendProfiles") return { ok: true, data: currentState };
     if (message.type === "refreshFriendActivity") {
       const responder = activityResponseQueue.shift();
-      return responder ? responder(state, message.scope) : { ok: true, data: state };
+      return responder ? responder(currentState, message.scope) : { ok: true, data: currentState };
     }
-    return { ok: true, data: state };
+    return { ok: true, data: currentState };
   });
   vi.stubGlobal("chrome", {
     storage: {

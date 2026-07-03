@@ -1,0 +1,29 @@
+@media (max-width: 760px) {
+  .options-shell {
+    padding: 16px;
+  }
+
+  .options-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .options-nav {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .options-nav button {
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .finds-action-row {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultAppState } from "./defaultState";
-import { deriveTimedActivityRefreshScopes, normalizeActivityRefreshScope } from "./activityRefresh";
+import { DREDGE_REFRESH_UNAVAILABLE_MESSAGE, deriveDredgeRefreshAvailability, deriveTimedActivityRefreshScopes, normalizeActivityRefreshScope } from "./activityRefresh";
 import { normalizeDredgeRules } from "./laoFinds";
 import type { AppState, FriendUser, DredgeRule } from "../shared/types";
 
@@ -100,5 +100,63 @@ describe("timed activity refresh scopes", () => {
 
   it("preserves existing single-kind manual scope normalization", () => {
     expect(normalizeActivityRefreshScope({ kind: "boost", usernames: ["neo"] })).toEqual({ kind: "boost", usernames: ["neo"] });
+  });
+});
+
+describe("dredge refresh availability", () => {
+  it("treats empty final derived scopes as unavailable instead of checking rule count", () => {
+    const cases: AppState[] = [
+      defaultAppState,
+      state({
+        friends: {
+          neo: friend("neo", ["topic"])
+        },
+        dredgeRules: [rule({ enabled: false, usernames: ["neo"], kinds: ["topic"] })]
+      }),
+      state({
+        friends: {
+          neo: friend("neo", ["topic"])
+        },
+        dredgeRules: [rule({ mode: "block", usernames: ["neo"], kinds: ["topic"] })]
+      }),
+      state({
+        friends: {
+          neo: friend("neo", ["topic"])
+        },
+        dredgeRules: [rule({ mode: "allow", usernames: ["missing"], kinds: ["topic"] })]
+      }),
+      state({
+        friends: {
+          neo: friend("neo", ["topic"])
+        },
+        dredgeRules: [rule({ mode: "allow", usernames: ["neo"], kinds: ["boost"] })]
+      })
+    ];
+
+    for (const candidate of cases) {
+      expect(deriveDredgeRefreshAvailability(candidate)).toEqual({
+        available: false,
+        scopes: [],
+        unavailableReason: "no_targets",
+        message: DREDGE_REFRESH_UNAVAILABLE_MESSAGE
+      });
+    }
+  });
+
+  it("is available when at least one final dredge refresh scope can be derived", () => {
+    const availability = deriveDredgeRefreshAvailability(
+      state({
+        friends: {
+          neo: friend("neo", ["topic"]),
+          quiet: friend("quiet", [])
+        },
+        dredgeRules: [rule({ mode: "allow", usernames: "all", kinds: ["topic", "reply"] })]
+      })
+    );
+
+    expect(availability).toEqual({
+      available: true,
+      scopes: [{ kind: "topic", usernames: ["neo"] }]
+    });
   });
 });

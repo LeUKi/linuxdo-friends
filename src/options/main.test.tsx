@@ -570,6 +570,35 @@ describe("OptionsApp update diagnostics", () => {
     });
   });
 
+  it("toggles Lao Finds notification settings from the notification channel page", async () => {
+    const chromeMock = setupChrome();
+    const { container } = await renderOptionsApp("#notifications");
+    const card = headingByText(container, "佬有料通知").closest(".settings-card");
+    expect(card?.textContent).toContain("浏览器本地通知");
+    expect(card?.textContent).toContain("手动打捞通知");
+    const buttons = Array.from(card?.querySelectorAll("button") ?? []);
+    const browserButton = buttons.find((button) => button.textContent === "已启用");
+    const manualButton = buttons.find((button) => button.textContent === "未启用");
+
+    await act(async () => {
+      browserButton?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      manualButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { laoFindsBrowserNotificationsEnabled: false }
+    });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { laoFindsManualNotificationsEnabled: true }
+    });
+  });
+
   it("separates data tasks into independent settings cards without dividers", async () => {
     const { container } = await renderOptionsApp("#data");
     const migrationHeading = headingByText(container, "配置迁移");
@@ -751,6 +780,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).toContain("自动捞料");
     expect(container.textContent).toContain("打捞请求范围");
     expect(container.textContent).toContain("打捞间隔");
+    expect(container.textContent).toContain("范围 5 到 720 分钟。");
     expect(container.textContent).toContain("保持插件界面打开，命中规则的新动态会自动打捞。");
     expect(container.textContent).toContain("打捞起点");
     expect(container.textContent).toContain("打捞规则");
@@ -1133,8 +1163,12 @@ describe("OptionsApp update diagnostics", () => {
       getButton(container, "全量").click();
     });
     const intervalInput = container.querySelector<HTMLInputElement>(".timed-interval-input");
+    expect(intervalInput?.value).toBe("20");
+    expect(intervalInput?.min).toBe("5");
+    expect(intervalInput?.max).toBe("720");
+    expect(intervalInput?.step).toBe("5");
     await act(async () => {
-      setInputValue(intervalInput!, "60");
+      setInputValue(intervalInput!, "5");
       intervalInput?.dispatchEvent(new Event("input", { bubbles: true }));
       await Promise.resolve();
     });
@@ -1149,7 +1183,7 @@ describe("OptionsApp update diagnostics", () => {
     });
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({
       type: "updateSettings",
-      settings: { timedActivityRefreshIntervalMinutes: 60 }
+      settings: { timedActivityRefreshIntervalMinutes: 5 }
     });
   });
 });

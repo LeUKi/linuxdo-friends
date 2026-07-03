@@ -1,0 +1,281 @@
+.finds-layout {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.finds-section,
+.dredge-rule-panel {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.finds-action-row {
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: 0;
+}
+
+.finds-dredge-button {
+  flex: 0 1 154px;
+}
+
+.finds-count {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 28px;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.finds-rules-button {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.finds-empty,
+.finds-action-hint {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.finds-card,
+.dredge-rule-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.finds-card.is-read {
+  opacity: 0.78;
+}
+
+.finds-card-head,
+.finds-card-foot,
+.dredge-rule-top {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.finds-card-meta {
+  position: relative;
+  display: grid;
+  justify-items: end;
+  min-width: 56px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.finds-card-foot {
+  margin-top: 8px;
+  border-top: 1px solid var(--border-muted);
+  padding-top: 8px;
+}
+
+.finds-card-foot > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finds-card-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.finds-card-actions button,
+.dredge-rule-top button {
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.dredge-rule-list {
+  display: grid;
+  gap: 8px;
+}
+
+.dredge-rule-card {
+  display: grid;
+  gap: 10px;
+}
+
+.dredge-rule-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.dredge-rule-row-main {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.dredge-rule-row-title {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dredge-rule-row-title strong {
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.dredge-rule-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.dredge-rule-badge.is-allow,
+.dredge-rule-badge.is-enabled {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.dredge-rule-badge.is-block {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.dredge-rule-badge.is-disabled {
+  opacity: 0.78;
+}
+
+.dredge-rule-summary {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dredge-rule-summary span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dredge-rule-row-actions,
+.dredge-rule-draft-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.dredge-rule-row-actions button,
+.dredge-rule-draft-actions button {
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.dredge-rule-draft {
+  display: grid;
+  gap: 10px;
+}
+
+.dredge-rule-warning.compact {
+  margin-top: 0;
+}
+
+.compact-toggle {
+  justify-content: flex-start;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dredge-rule-field {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.dredge-rule-field > span {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.dredge-choice-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dredge-choice-row button {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  padding: 5px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dredge-choice-row button.active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.dredge-user-choice-row button:not(:first-child) {
+  max-width: 118px;
+}
+
+.dredge-rule-warning {
+  margin: 0;
+  border-left: 3px solid var(--warning);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  padding: 7px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}

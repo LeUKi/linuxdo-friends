@@ -1,5 +1,6 @@
 import type { AppState, RefreshSettings } from "../shared/types";
 import { defaultRequestStats } from "./requestStats";
+import { DEFAULT_TIMED_ACTIVITY_REFRESH_INTERVAL_MINUTES } from "../shared/settingsLimits";
 
 export const defaultSettings: RefreshSettings = {
   allowAutoRefresh: false,
@@ -8,8 +9,10 @@ export const defaultSettings: RefreshSettings = {
   refreshIntervalMinutes: 120,
   timedActivityRefreshEnabled: false,
   timedActivityRefreshScopeMode: "rules",
-  timedActivityRefreshIntervalMinutes: 120,
-  requestStatsAutoSyncEnabled: false
+  timedActivityRefreshIntervalMinutes: DEFAULT_TIMED_ACTIVITY_REFRESH_INTERVAL_MINUTES,
+  requestStatsAutoSyncEnabled: false,
+  laoFindsBrowserNotificationsEnabled: true,
+  laoFindsManualNotificationsEnabled: false
 };
 
 export const defaultAppState: AppState = {

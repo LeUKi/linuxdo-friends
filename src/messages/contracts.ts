@@ -1,3 +1,4 @@
+import { isValidRefreshIntervalMinutes, isValidTimedActivityRefreshIntervalMinutes } from "../shared/settingsLimits";
 import type { BackgroundCommand } from "../shared/types";
 
 export function isBackgroundCommand(value: unknown): value is BackgroundCommand {
@@ -36,6 +37,8 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
       return command.force === undefined || typeof command.force === "boolean";
     case "repairLinuxDoPageScript":
       return command.tabId === undefined || isPositiveInteger(command.tabId);
+    case "activateLinuxDoPageTab":
+      return isPositiveInteger(command.tabId);
     case "seedFollowedUser":
       return isSeedFollowedCommand(command);
     case "addFriendFromKnownUser":
@@ -57,10 +60,14 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
       return isNonEmptyString(command.id);
     case "resetLaoFindsStartedAt":
       return true;
+    case "completeRuleDerivedLaoFindsDredge":
+      return isValidTimestampString(command.startedAt) && isActivityRefreshScopeList(command.scopes) && isSiteDataTaskTrigger(command.trigger);
     case "markLaoFindsItemRead":
       return isNonEmptyString(command.id) && typeof command.read === "boolean";
     case "archiveLaoFindsItem":
       return isNonEmptyString(command.id) && typeof command.archived === "boolean";
+    case "deleteLaoFindsItem":
+      return isNonEmptyString(command.id);
     case "updateSettings":
       return isSettingsPatch(command.settings);
     default:
@@ -90,8 +97,16 @@ function isActivityRefreshCommand(command: Record<string, unknown>): boolean {
   if (!legacyUsernamesValid) return false;
   if (!isSiteDataTaskOwnership(command)) return false;
   if (command.scope === undefined) return true;
-  if (!isRecord(command.scope)) return false;
-  return isActivityKindFilter(command.scope.kind) && (command.scope.usernames === undefined || isUsernameList(command.scope.usernames));
+  return isActivityRefreshScope(command.scope);
+}
+
+function isActivityRefreshScope(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return isActivityKindFilter(value.kind) && (value.usernames === undefined || isUsernameList(value.usernames));
+}
+
+function isActivityRefreshScopeList(value: unknown): boolean {
+  return Array.isArray(value) && value.every(isActivityRefreshScope);
 }
 
 function isSiteDataTaskOwnership(command: Record<string, unknown>): boolean {
@@ -132,13 +147,16 @@ function isSettingsPatch(value: unknown): boolean {
     (value.allowAutoRefresh === undefined || typeof value.allowAutoRefresh === "boolean") &&
     (value.allowInactiveTabFallback === undefined || typeof value.allowInactiveTabFallback === "boolean") &&
     (value.openActivityLinksInPage === undefined || typeof value.openActivityLinksInPage === "boolean") &&
-    (value.refreshIntervalMinutes === undefined || isValidRefreshInterval(value.refreshIntervalMinutes)) &&
+    (value.refreshIntervalMinutes === undefined || isValidRefreshIntervalMinutes(value.refreshIntervalMinutes)) &&
     (value.timedActivityRefreshEnabled === undefined || typeof value.timedActivityRefreshEnabled === "boolean") &&
     (value.timedActivityRefreshScopeMode === undefined ||
       value.timedActivityRefreshScopeMode === "rules" ||
       value.timedActivityRefreshScopeMode === "all") &&
-    (value.timedActivityRefreshIntervalMinutes === undefined || isValidRefreshInterval(value.timedActivityRefreshIntervalMinutes)) &&
+    (value.timedActivityRefreshIntervalMinutes === undefined ||
+      isValidTimedActivityRefreshIntervalMinutes(value.timedActivityRefreshIntervalMinutes)) &&
     (value.requestStatsAutoSyncEnabled === undefined || typeof value.requestStatsAutoSyncEnabled === "boolean") &&
+    (value.laoFindsBrowserNotificationsEnabled === undefined || typeof value.laoFindsBrowserNotificationsEnabled === "boolean") &&
+    (value.laoFindsManualNotificationsEnabled === undefined || typeof value.laoFindsManualNotificationsEnabled === "boolean") &&
     (value.telegramBotToken === undefined || typeof value.telegramBotToken === "string") &&
     (value.telegramChatId === undefined || typeof value.telegramChatId === "string")
   );
@@ -157,8 +175,9 @@ function isOptionsHash(value: unknown): boolean {
   return typeof value === "string" && /^#[a-z0-9-]+$/i.test(value);
 }
 
-function isValidRefreshInterval(value: unknown): boolean {
-  return typeof value === "number" && Number.isFinite(value) && value >= 30 && value <= 720;
+
+function isSiteDataTaskTrigger(value: unknown): boolean {
+  return value === "manual" || value === "timed";
 }
 
 function isPositiveInteger(value: unknown): boolean {
@@ -183,6 +202,10 @@ function isStringList(value: unknown): boolean {
 
 function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string";
+}
+
+function isValidTimestampString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && !Number.isNaN(Date.parse(value));
 }
 
 function isNonEmptyString(value: unknown): value is string {

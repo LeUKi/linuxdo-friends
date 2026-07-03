@@ -1,18 +1,12 @@
-import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import {
-  ChartColumn,
   Check,
   ChevronDown,
-  Cloud,
-  ExternalLink,
   LoaderCircle,
-  PanelRightOpen,
   RefreshCw,
-  Settings,
   Sparkles,
   Telescope,
-  Timer,
   X
 } from "lucide-react";
 import {
@@ -43,12 +37,14 @@ import {
 } from "../state/timedActivityRefreshAtoms";
 import {
   addFriendFromKnownUserAtom,
-  archiveLaoFindsItemAtom,
   appStateAtom,
+  activateLinuxDoPageTabAtom,
+  completeRuleDerivedLaoFindsDredgeAtom,
   cacheAvatarsAtom,
   checkForUpdatesAtom,
   clearStatusMessageAtom,
   cloudArchiveLocalStateAtom,
+  deleteLaoFindsItemAtom,
   identifyCurrentAccountAtom,
   loadCloudArchiveLocalStateAtom,
   loadPageScriptStatusAtom,
@@ -57,7 +53,6 @@ import {
   loadStateAtom,
   loadUpdateCheckAtom,
   lookupFriendProfileAtom,
-  markLaoFindsItemReadAtom,
   observeAppStateAtom,
   observePageScriptStatusAtom,
   observeSiteDataProgressAtom,
@@ -81,28 +76,48 @@ import {
 import { VersionBadge } from "./VersionStatus";
 import { AvatarImageContext } from "./AvatarContext";
 import { FriendCandidateList } from "./FriendManagement";
-import { kindIcon, kindText } from "./activityKinds";
+import { kindIcon } from "./activityKinds";
 import { UserIdentityRow } from "./UserIdentityRow";
+import { FilterPopover, type FilterOption } from "./FilterPopover";
+import { ActivityCardBody, FeedActivityCard, FeedWaterline } from "./FeedActivityCard";
+import { eventHappenedInside, isLinuxDoActivityHref, profileUrl, shouldHandleActivityLinkClick } from "./activityLinks";
+import { deriveDredgeProgressDisplay, type DredgeProgressDisplay } from "./dredgeProgress";
+import {
+  aggregateProgressStateForScope,
+  aggregateProgressSnapshotFromState,
+  createTimedActivityAggregateRun,
+  isProgressForAggregateRun,
+  type AggregateActivityProgressSnapshot,
+  type TimedActivityAggregateProgressState,
+  type TimedActivityAggregateProgressUpdater
+} from "./dredgeAggregateProgress";
+import {
+  AccountDetectTag,
+  CloudArchiveTag,
+  OptionsPageButton,
+  PageScriptStatusBadge,
+  RequestStatsSummaryChip,
+  SidePanelLauncherButton,
+  repairActionForStatus
+} from "./HeaderStatusChips";
+export { eventHappenedInside, isLinuxDoActivityHref, shouldHandleActivityLinkClick } from "./activityLinks";
 import { loadUiSceneAtom, observeUiSceneAtom, uiSceneAtom, updateUiSceneAtom } from "../state/uiSceneAtoms";
 import { formatRelativeTime } from "../shared/time";
 import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
 import { isStaleRunningSiteDataProgress, SITE_DATA_PROGRESS_RUNNING_TTL_MS } from "../storage/siteDataProgressStorage";
 import type {
-  ActivityItem,
   ActivityKindFilter,
   ActivityRefreshScope,
   AppState,
   BackgroundResponse,
-  CloudArchiveLocalStateResult,
-  RefreshFailureReason,
   FollowedUserInput,
   FriendProfileSummary,
-  PageScriptStatusSnapshot,
   SiteDataTaskProgress,
+  SiteDataTaskTrigger,
   UiSceneState,
   Username
 } from "../shared/types";
-import { deriveTimedActivityRefreshScopes } from "../domain/activityRefresh";
+import { deriveDredgeRefreshAvailability, deriveTimedActivityRefreshScopes } from "../domain/activityRefresh";
 import { deriveRequestStatsView } from "../domain/requestStats";
 import {
   type UserIdentityView,
@@ -121,16 +136,6 @@ import {
 import "../styles/app.css";
 
 type AppSurface = "side-panel" | "in-page";
-type FilterOption<T extends string> = {
-  value: T;
-  label: string;
-  meta?: number | string;
-  icon?: ReactNode;
-  content?: ReactNode;
-  searchText?: string;
-  tone?: ActivityKindFilter;
-};
-
 const RELATIVE_TIME_TICK_MS = 30_000;
 const AUTO_REFRESH_COUNTDOWN_TICK_MS = 1_000;
 const TIMED_ACTIVITY_COUNTDOWN_TICK_MS = 1_000;
@@ -212,7 +217,6 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   const loadUpdateCheck = useSetAtom(loadUpdateCheckAtom);
   const loadUiScene = useSetAtom(loadUiSceneAtom);
   const lookupFriendProfile = useSetAtom(lookupFriendProfileAtom);
-  const markLaoFindsItemRead = useSetAtom(markLaoFindsItemReadAtom);
   const observeAppState = useSetAtom(observeAppStateAtom);
   const observePageScriptStatus = useSetAtom(observePageScriptStatusAtom);
   const observeSiteDataProgress = useSetAtom(observeSiteDataProgressAtom);
@@ -221,9 +225,11 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   const observeTimedActivityRefreshSession = useSetAtom(observeTimedActivityRefreshSessionAtom);
   const observeUiScene = useSetAtom(observeUiSceneAtom);
   const addFriendFromKnownUser = useSetAtom(addFriendFromKnownUserAtom);
+  const completeRuleDerivedLaoFindsDredge = useSetAtom(completeRuleDerivedLaoFindsDredgeAtom);
   const cacheAvatars = useSetAtom(cacheAvatarsAtom);
   const identifyCurrentAccount = useSetAtom(identifyCurrentAccountAtom);
   const openLinuxDoHome = useSetAtom(openLinuxDoHomeAtom);
+  const activateLinuxDoPageTab = useSetAtom(activateLinuxDoPageTabAtom);
   const openActivityLink = useSetAtom(openActivityLinkAtom);
   const openOptionsPage = useSetAtom(openOptionsPageAtom);
   const openSidePanel = useSetAtom(openSidePanelAtom);
@@ -237,6 +243,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   const recordAutoRefreshFinished = useSetAtom(recordAutoRefreshFinishedAtom);
   const syncFollows = useSetAtom(syncFollowsAtom);
   const clearStatus = useSetAtom(clearStatusMessageAtom);
+  const deleteLaoFindsItem = useSetAtom(deleteLaoFindsItemAtom);
   const unregisterAutoRefreshSurface = useSetAtom(unregisterAutoRefreshSurfaceAtom);
   const unregisterTimedActivityRefreshSurface = useSetAtom(unregisterTimedActivityRefreshSurfaceAtom);
   const patchTimedActivityRefreshSession = useSetAtom(patchTimedActivityRefreshSessionAtom);
@@ -244,7 +251,6 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   const updateAutoRefreshEnabled = useSetAtom(updateAutoRefreshEnabledAtom);
   const updateAutoRefreshInterval = useSetAtom(updateAutoRefreshIntervalAtom);
   const updateUiScene = useSetAtom(updateUiSceneAtom);
-  const archiveLaoFindsItem = useSetAtom(archiveLaoFindsItemAtom);
   const [appStateLoaded, setAppStateLoaded] = useState(false);
   const [siteDataProgressLoaded, setSiteDataProgressLoaded] = useState(false);
   const [accountDetecting, setAccountDetecting] = useState(false);
@@ -394,8 +400,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
     () => (isStaleRunningSiteDataProgress(siteDataProgress, progressNow) ? null : siteDataProgress),
     [progressNow, siteDataProgress]
   );
-  const siteDataTaskRunning = visibleSiteDataProgress?.status === "running";
-  const refreshDisabled = loading || siteDataTaskRunning || friends.length === 0;
+  const dredgeRefreshAvailability = useMemo(() => deriveDredgeRefreshAvailability(state), [state]);
   const timedActivityAutoRunEnabledRef = useRef(false);
   useEffect(() => {
     timedActivityAutoRunEnabledRef.current = appStateLoaded && surface === "side-panel" && state.settings.timedActivityRefreshEnabled;
@@ -417,12 +422,17 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
     progress: visibleSiteDataProgress,
     progressLoaded: siteDataProgressLoaded,
     refresh: refreshFriendActivityForTimedRun,
+    completeRuleDerivedLaoFindsDredge,
     session: timedActivityRefreshSession,
     state,
     surface,
     autoRunEnabledRef: timedActivityAutoRunEnabledRef,
     surfaceId: surfaceIdRef.current
   });
+  const displayDredgeProgress = timedActivityRefresh.aggregateProgress?.progress ?? visibleSiteDataProgress;
+  const siteDataTaskRunning = visibleSiteDataProgress?.status === "running" || timedActivityRefresh.aggregateProgress?.progress.status === "running";
+  const refreshDisabled = loading || siteDataTaskRunning || friends.length === 0;
+  const dredgeProgressDisplay = useMemo(() => deriveDredgeProgressDisplay(displayDredgeProgress), [displayDredgeProgress]);
 
   useEffect(() => {
     if (!appStateLoaded) return;
@@ -517,7 +527,12 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
                 {surface === "in-page" ? (
                   <SidePanelLauncherButton status={pageScriptStatus} onOpen={() => void openSidePanel()} />
                 ) : (
-                  <PageScriptStatusBadge status={pageScriptStatus} />
+                  <PageScriptStatusBadge
+                    status={pageScriptStatus}
+                    onActivateTab={(tabId) => void activateLinuxDoPageTab(tabId)}
+                    onOpenLinuxDoHome={() => void openLinuxDoHome()}
+                    onRepairPageScript={() => void repairLinuxDoPageScript()}
+                  />
                 )}
                 <OptionsPageButton onOpen={() => void openOptionsPage()} />
               </div>
@@ -533,6 +548,8 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
                 <div className="header-operation-row">
                   <TimedActivityRefreshControl
                     disabled={siteDataTaskRunning}
+                    dredgeRefreshAvailable={dredgeRefreshAvailability.available}
+                    dredgeRefreshUnavailableMessage={dredgeRefreshAvailability.message}
                     now={relativeNow}
                     onManualRefresh={() => void timedActivityRefresh.runNow()}
                     onOpenSettings={() => void openOptionsPage("#lao-finds")}
@@ -540,7 +557,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
                       timedActivityAutoRunEnabledRef.current = enabled;
                       void updateSettings({ timedActivityRefreshEnabled: enabled });
                     }}
-                    progress={visibleSiteDataProgress}
+                    progress={displayDredgeProgress}
                     session={timedActivityRefreshSession}
                     settings={state.settings}
                   />
@@ -622,13 +639,14 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
           feedTopRef={feedTopRef}
           items={laoFindsItems}
           now={relativeNow}
-          onArchive={(id, archived) => void archiveLaoFindsItem(id, archived)}
-          onMarkRead={(id, read) => void markLaoFindsItemRead(id, read)}
+          onDelete={(id) => void deleteLaoFindsItem(id)}
           onManualRefresh={() => void timedActivityRefresh.runNow()}
           onOpenActivityLink={handleActivityLinkClick}
           onOpenRules={() => void openOptionsPage("#lao-finds")}
+          dredgeProgress={dredgeProgressDisplay}
+          dredgeRefreshAvailable={dredgeRefreshAvailability.available}
+          dredgeRefreshUnavailableMessage={dredgeRefreshAvailability.message}
           refreshDisabled={refreshDisabled}
-          state={state}
         />
       )}
 
@@ -879,78 +897,74 @@ function LaoFindsTab({
   feedTopRef,
   items,
   now,
-  onArchive,
-  onMarkRead,
+  onDelete,
   onManualRefresh,
   onOpenActivityLink,
   onOpenRules,
-  refreshDisabled,
-  state
+  dredgeProgress,
+  dredgeRefreshAvailable,
+  dredgeRefreshUnavailableMessage,
+  refreshDisabled
 }: {
   feedTopRef: React.RefObject<HTMLElement | null>;
   items: ReturnType<typeof deriveLaoFindsItems>;
   now: number;
-  onArchive: (id: string, archived: boolean) => void;
-  onMarkRead: (id: string, read: boolean) => void;
+  onDelete: (id: string) => void;
   onManualRefresh: () => void;
   onOpenActivityLink: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
   onOpenRules: () => void;
+  dredgeProgress: DredgeProgressDisplay;
+  dredgeRefreshAvailable: boolean;
+  dredgeRefreshUnavailableMessage?: string;
   refreshDisabled: boolean;
-  state: Parameters<typeof identityForActivityItem>[0];
 }) {
+  const manualRefreshDisabled = refreshDisabled || !dredgeRefreshAvailable;
+  const manualRefreshTitle = dredgeRefreshAvailable ? "立即按打捞规则刷新并收录佬料" : dredgeRefreshUnavailableMessage;
   return (
     <section ref={feedTopRef}>
       <div className="finds-layout">
         <section className="finds-section">
-          <div className="finds-section-head">
-            <div>
-              <h2 className="finds-title-with-icon">
-                <Telescope size={16} aria-hidden="true" />
-                <span>佬有料</span>
-              </h2>
-            </div>
-            <div className="finds-section-actions">
-              <span className="badge">共 {items.length} 条</span>
-              <button className="small-action primary-action" type="button" onClick={onManualRefresh} disabled={refreshDisabled}>
-                <Telescope size={14} aria-hidden="true" />
-                <span>立即打捞</span>
-              </button>
-              <button className="small-action" type="button" onClick={onOpenRules}>
-                配置打捞规则
-              </button>
-            </div>
+          <div className="tab-action-row finds-action-row">
+            <button className="refresh-button refresh-button-with-meta finds-dredge-button" type="button" onClick={onManualRefresh} disabled={manualRefreshDisabled} title={manualRefreshTitle}>
+              <DredgeRefreshButtonContent progress={dredgeProgress} />
+            </button>
+            <span className="finds-count">共 {items.length} 条</span>
+            <button className="small-action finds-rules-button" type="button" onClick={onOpenRules}>
+              配置打捞规则
+            </button>
           </div>
+          {!dredgeRefreshAvailable && dredgeRefreshUnavailableMessage ? <p className="finds-action-hint">{dredgeRefreshUnavailableMessage}</p> : null}
           {items.length === 0 ? (
             <p className="empty finds-empty">
               暂时没有佬料。先到设置页新建打捞规则，然后手动刷新佬友圈或开启自动捞料。
             </p>
           ) : (
             <div className="list">
-              {items.map(({ item, identity, matchedRules }) => (
-                <article className={`finds-card${item.readAt ? " is-read" : ""}`} key={item.id}>
-                  <div className="finds-card-head">
-                    <UserIdentityRow identity={identity} compact />
-                    <div className="finds-card-meta">
-                      <time dateTime={item.collectedAt}>{formatRelativeTime(item.collectedAt, now)}打捞</time>
-                      {!item.readAt ? <span className="new-dot" aria-label="未读" /> : null}
+              {items.map(({ item, identity, matchedRules }) => {
+                const activityTime = item.activity.occurredAt ?? item.collectedAt;
+                const ruleLabel = matchedRules.length ? `命中 ${matchedRules.map((rule) => rule.name).join("、")}` : "规则已删除";
+                return (
+                  <article className="finds-card" key={item.id}>
+                    <div className="finds-card-head">
+                      <UserIdentityRow identity={identity} compact />
+                      <div className="finds-card-meta">
+                        <time dateTime={activityTime}>{formatRelativeTime(activityTime, now)}</time>
+                      </div>
                     </div>
-                  </div>
-                  <ActivityCardBody item={item.activity} onOpenActivityLink={onOpenActivityLink} />
-                  <div className="finds-card-foot">
-                    <span title={matchedRules.map((rule) => rule.name).join("、")}>
-                      {matchedRules.length ? `命中 ${matchedRules.map((rule) => rule.name).join("、")}` : "规则已删除"}
-                    </span>
-                    <div className="finds-card-actions">
-                      <button type="button" onClick={() => onMarkRead(item.id, !item.readAt)}>
-                        {item.readAt ? "标为未读" : "标为已读"}
-                      </button>
-                      <button type="button" onClick={() => onArchive(item.id, true)}>
-                        归档
-                      </button>
+                    <ActivityCardBody item={item.activity} onOpenActivityLink={onOpenActivityLink} />
+                    <div className="finds-card-foot">
+                      <span title={matchedRules.map((rule) => rule.name).join("、")}>
+                        {ruleLabel} · {formatRelativeTime(item.collectedAt, now)}打捞
+                      </span>
+                      <div className="finds-card-actions">
+                        <button type="button" onClick={() => onDelete(item.id)}>
+                          删除
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>
@@ -960,8 +974,34 @@ function LaoFindsTab({
   );
 }
 
+function DredgeRefreshButtonContent({ progress }: { progress: DredgeProgressDisplay }) {
+  return (
+    <span className={`refresh-button-inner${progress.running ? " is-running" : ""}`}>
+      <span className="refresh-icon-pane" aria-hidden="true">
+        {progress.icon === "spinner" ? <LoaderCircle className="spin-icon" size={15} aria-hidden="true" /> : <Telescope size={15} aria-hidden="true" />}
+      </span>
+      <span className="refresh-button-body">
+        <span className="refresh-button-main">
+          <span className="refresh-button-label" title={progress.localDetail}>
+            {progress.running ? progress.localDetail : "立即打捞"}
+          </span>
+        </span>
+      </span>
+      {progress.running ? (
+        <span className="refresh-progress" aria-hidden="true">
+          <span className="refresh-progress-track">
+            <span style={{ width: `${progress.percent}%` }} />
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function TimedActivityRefreshControl({
   disabled,
+  dredgeRefreshAvailable,
+  dredgeRefreshUnavailableMessage,
   now,
   onManualRefresh,
   onOpenSettings,
@@ -971,6 +1011,8 @@ function TimedActivityRefreshControl({
   settings
 }: {
   disabled: boolean;
+  dredgeRefreshAvailable: boolean;
+  dredgeRefreshUnavailableMessage?: string;
   now: number;
   onManualRefresh: () => void;
   onOpenSettings: () => void;
@@ -983,9 +1025,14 @@ function TimedActivityRefreshControl({
   const [countdownNow, setCountdownNow] = useState(now);
   const menuRef = useRef<HTMLElement>(null);
   const runningProgress = progress?.taskType === "activity" && progress.status === "running" ? progress : null;
-  const model = deriveTimedActivityRefreshControlModel({ now: countdownNow, progress: runningProgress, session, settings });
+  const baseModel = deriveTimedActivityRefreshControlModel({ now: countdownNow, progress: runningProgress, session, settings });
+  const model = !dredgeRefreshAvailable && !baseModel.spinning
+    ? { ...baseModel, copy: "无规则", tone: "waiting" as const, blinking: false, countdownActive: false }
+    : baseModel;
   const nextEnabled = settings.timedActivityRefreshEnabled && !session.pausedReason ? false : true;
-  const toggleLabel = nextEnabled ? "开启自动捞料" : "关闭自动捞料";
+  const toggleLabel = "启用自动捞料";
+  const toggleDisabled = nextEnabled && !dredgeRefreshAvailable;
+  const manualRefreshDisabled = disabled || !dredgeRefreshAvailable;
 
   useEffect(() => {
     setCountdownNow(now);
@@ -1021,7 +1068,7 @@ function TimedActivityRefreshControl({
         <span className="timed-refresh-icon" aria-hidden="true">
           {model.spinning ? <LoaderCircle className="spin-icon" size={15} /> : <Telescope className={model.blinking ? "timed-refresh-pulse-icon" : undefined} size={15} />}
         </span>
-        <span className="timed-refresh-copy" title={model.copy}>
+        <span className="timed-refresh-copy" title={!dredgeRefreshAvailable && dredgeRefreshUnavailableMessage ? dredgeRefreshUnavailableMessage : model.copy}>
           {model.copy}
         </span>
         <ChevronDown size={13} aria-hidden="true" />
@@ -1029,15 +1076,20 @@ function TimedActivityRefreshControl({
       {open ? (
         <div className="refresh-menu timed-refresh-menu">
           <button
-            className={`refresh-menu-option${settings.timedActivityRefreshEnabled && !session.pausedReason ? " is-selected" : ""}`}
+            className={`refresh-menu-option refresh-menu-option-with-note${settings.timedActivityRefreshEnabled && !session.pausedReason ? " is-selected" : ""}`}
             type="button"
             aria-pressed={settings.timedActivityRefreshEnabled && !session.pausedReason}
+            disabled={toggleDisabled}
+            title={toggleDisabled ? dredgeRefreshUnavailableMessage : undefined}
             onClick={() => {
               setOpen(false);
               onToggle(nextEnabled);
             }}
           >
-            <span>{toggleLabel}</span>
+            <span className="refresh-menu-label">
+              <span className="refresh-menu-label-main">{toggleLabel}</span>
+              <span className="refresh-menu-label-note">需保持插件界面前台显示</span>
+            </span>
             <span className="refresh-menu-check" aria-hidden="true">
               {settings.timedActivityRefreshEnabled && !session.pausedReason ? <Check size={16} /> : null}
             </span>
@@ -1045,7 +1097,8 @@ function TimedActivityRefreshControl({
           <button
             className="refresh-menu-option"
             type="button"
-            disabled={disabled}
+            disabled={manualRefreshDisabled}
+            title={!dredgeRefreshAvailable ? dredgeRefreshUnavailableMessage : undefined}
             onClick={() => {
               setOpen(false);
               onManualRefresh();
@@ -1056,7 +1109,7 @@ function TimedActivityRefreshControl({
           </button>
           <div className="refresh-menu-group">
             <button
-              className="refresh-menu-option"
+              className="refresh-menu-option refresh-menu-option-no-icon"
               type="button"
               onClick={() => {
                 setOpen(false);
@@ -1064,7 +1117,6 @@ function TimedActivityRefreshControl({
               }}
             >
               <span>配置打捞规则</span>
-              <Settings size={15} aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -1084,20 +1136,21 @@ function deriveTimedActivityRefreshControlModel({
   session: TimedActivityRefreshSession;
   settings: AppState["settings"];
 }) {
-  if (!settings.timedActivityRefreshEnabled) {
-    return { copy: "未开启", tone: "idle", spinning: false, blinking: false, countdownActive: false };
-  }
-  if (session.pausedReason) {
-    return { copy: "已暂停", tone: "paused", spinning: false, blinking: false, countdownActive: false };
-  }
   if (progress?.status === "running") {
+    const display = deriveDredgeProgressDisplay(progress);
     return {
-      copy: `${progress.currentLabel ?? "自动捞料中"} · ${progress.completed}/${progress.total}`,
+      copy: display.globalCopy ?? "打捞中 0%",
       tone: "running",
       spinning: true,
       blinking: false,
       countdownActive: false
     };
+  }
+  if (!settings.timedActivityRefreshEnabled) {
+    return { copy: "未开启", tone: "idle", spinning: false, blinking: false, countdownActive: false };
+  }
+  if (session.pausedReason) {
+    return { copy: "已暂停", tone: "paused", spinning: false, blinking: false, countdownActive: false };
   }
   if (session.pendingDue) {
     return { copy: "等待空闲", tone: "waiting", spinning: false, blinking: true, countdownActive: false };
@@ -1309,6 +1362,7 @@ function useTimedActivityRefresh({
   progress,
   progressLoaded,
   refresh,
+  completeRuleDerivedLaoFindsDredge,
   session,
   state,
   surface,
@@ -1320,7 +1374,8 @@ function useTimedActivityRefresh({
   patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>;
   progress: SiteDataTaskProgress | null;
   progressLoaded: boolean;
-  refresh: (scope: ActivityRefreshScope, timedRunId: string) => Promise<BackgroundResponse<AppState> | void>;
+  refresh: (scope: ActivityRefreshScope, timedRunId: string, trigger: SiteDataTaskTrigger) => Promise<BackgroundResponse<AppState> | void>;
+  completeRuleDerivedLaoFindsDredge: (startedAt: string, scopes: ActivityRefreshScope[], trigger: SiteDataTaskTrigger) => Promise<BackgroundResponse<AppState> | void>;
   session: TimedActivityRefreshSession;
   state: AppState;
   surface: AppSurface;
@@ -1330,11 +1385,30 @@ function useTimedActivityRefresh({
   const refreshInFlightRef = useRef(false);
   const pendingDueRef = useRef(false);
   const latestRef = useRef({ progress, session, state });
+  const aggregateProgressRef = useRef<TimedActivityAggregateProgressState | null>(null);
+  const [aggregateProgress, setAggregateProgress] = useState<AggregateActivityProgressSnapshot | null>(null);
+
+  function updateAggregateProgress(state: TimedActivityAggregateProgressState | null) {
+    aggregateProgressRef.current = state;
+    setAggregateProgress(state ? aggregateProgressSnapshotFromState(state) : null);
+  }
 
   useEffect(() => {
     latestRef.current = { progress, session, state };
     if (session.pendingDue) pendingDueRef.current = true;
   }, [progress, session, state]);
+
+  useEffect(() => {
+    const aggregate = aggregateProgressRef.current;
+    if (!aggregate || !isProgressForAggregateRun(progress, aggregate.run.runId)) return;
+    setAggregateProgress(aggregateProgressSnapshotFromState(aggregate, progress));
+  }, [progress]);
+
+  useEffect(() => {
+    const aggregate = aggregateProgressRef.current;
+    if (!aggregate || session.activeRunId === aggregate.run.runId) return;
+    updateAggregateProgress(null);
+  }, [session.activeRunId]);
 
   const enabled = appStateLoaded && progressLoaded && surface === "side-panel" && state.settings.timedActivityRefreshEnabled;
   const intervalMinutes = state.settings.timedActivityRefreshIntervalMinutes;
@@ -1365,10 +1439,13 @@ function useTimedActivityRefresh({
           return;
         }
         await runTimedActivityRefresh({
+          trigger: "timed",
           claimController,
           getState: () => latestRef.current.state,
+          onAggregateProgress: updateAggregateProgress,
           patchSession,
           refresh,
+          completeRuleDerivedLaoFindsDredge,
           shouldRun: () => autoRunEnabledRef.current && latestRef.current.state.settings.timedActivityRefreshEnabled,
           surfaceId,
           refreshInFlightRef
@@ -1393,7 +1470,8 @@ function useTimedActivityRefresh({
     refresh,
     scopeMode,
     surfaceId,
-    state.settings.timedActivityRefreshIntervalMinutes
+    state.settings.timedActivityRefreshIntervalMinutes,
+    completeRuleDerivedLaoFindsDredge
   ]);
 
   useEffect(() => {
@@ -1407,24 +1485,42 @@ function useTimedActivityRefresh({
     if (!autoRunEnabledRef.current || !latestRef.current.state.settings.timedActivityRefreshEnabled) return;
     pendingDueRef.current = false;
     void runTimedActivityRefresh({
+      trigger: "timed",
       claimController,
       getState: () => latestRef.current.state,
+      onAggregateProgress: updateAggregateProgress,
       patchSession,
       refresh,
+      completeRuleDerivedLaoFindsDredge,
       shouldRun: () => autoRunEnabledRef.current && latestRef.current.state.settings.timedActivityRefreshEnabled,
       surfaceId,
       refreshInFlightRef
     });
-  }, [claimController, autoRunEnabledRef, controllerSurfaceId, enabled, patchSession, pausedReason, progress?.status, refresh, session.pendingDue, surfaceId]);
+  }, [
+    claimController,
+    autoRunEnabledRef,
+    controllerSurfaceId,
+    enabled,
+    patchSession,
+    pausedReason,
+    progress?.status,
+    refresh,
+    session.pendingDue,
+    surfaceId,
+    completeRuleDerivedLaoFindsDredge
+  ]);
 
   function runNow() {
     if (surface !== "side-panel") return Promise.resolve();
     if (refreshInFlightRef.current || latestRef.current.progress?.status === "running") return Promise.resolve();
     return runTimedActivityRefresh({
+      trigger: "manual",
       claimController,
       getState: () => latestRef.current.state,
+      onAggregateProgress: updateAggregateProgress,
       patchSession,
       refresh,
+      completeRuleDerivedLaoFindsDredge,
       surfaceId,
       refreshInFlightRef
     });
@@ -1445,22 +1541,28 @@ function useTimedActivityRefresh({
     latestRef.current = { ...latestRef.current, session: nextSession };
   }
 
-  return { runNow, suppressPending };
+  return { aggregateProgress, runNow, suppressPending };
 }
 
 async function runTimedActivityRefresh({
   claimController,
   getState,
+  onAggregateProgress,
   patchSession,
   refresh,
+  completeRuleDerivedLaoFindsDredge,
   refreshInFlightRef,
   shouldRun,
-  surfaceId
+  surfaceId,
+  trigger
 }: {
+  trigger: SiteDataTaskTrigger;
   claimController: (surfaceId: string) => Promise<TimedActivityRefreshSession>;
   getState: () => AppState;
+  onAggregateProgress?: TimedActivityAggregateProgressUpdater;
   patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>;
-  refresh: (scope: ActivityRefreshScope, timedRunId: string) => Promise<BackgroundResponse<AppState> | void>;
+  refresh: (scope: ActivityRefreshScope, timedRunId: string, trigger: SiteDataTaskTrigger) => Promise<BackgroundResponse<AppState> | void>;
+  completeRuleDerivedLaoFindsDredge: (startedAt: string, scopes: ActivityRefreshScope[], trigger: SiteDataTaskTrigger) => Promise<BackgroundResponse<AppState> | void>;
   refreshInFlightRef?: React.MutableRefObject<boolean>;
   shouldRun?: () => boolean;
   surfaceId: string;
@@ -1487,13 +1589,14 @@ async function runTimedActivityRefresh({
   }
   const scopes = deriveTimedActivityRefreshScopes(state, state.settings.timedActivityRefreshScopeMode);
   const now = new Date();
+  const runStartedAt = now.toISOString();
   if (scopes.length === 0) {
     const nextDueAt = new Date(now.getTime() + state.settings.timedActivityRefreshIntervalMinutes * 60_000).toISOString();
     await patchSession({
       activeRunId: undefined,
-      enabledAt: claimed.enabledAt ?? now.toISOString(),
+      enabledAt: claimed.enabledAt ?? runStartedAt,
       lastScopeMode: state.settings.timedActivityRefreshScopeMode,
-      noTargetAt: now.toISOString(),
+      noTargetAt: runStartedAt,
       noTargetMessage: "没有启用规则",
       nextDueAt,
       pendingDue: false,
@@ -1505,10 +1608,11 @@ async function runTimedActivityRefresh({
   }
 
   const runId = `timed-activity:${now.getTime()}:${Math.random().toString(36).slice(2)}`;
+  const aggregateRun = createTimedActivityAggregateRun(state, scopes, runId, runStartedAt);
   await patchSession({
     activeRunId: runId,
-    enabledAt: claimed.enabledAt ?? now.toISOString(),
-    lastStartedAt: now.toISOString(),
+    enabledAt: claimed.enabledAt ?? runStartedAt,
+    lastStartedAt: runStartedAt,
     lastScopeMode: state.settings.timedActivityRefreshScopeMode,
     pendingDue: false,
     pausedReason: undefined,
@@ -1516,8 +1620,9 @@ async function runTimedActivityRefresh({
     noTargetMessage: undefined
   });
   try {
-    for (const scope of scopes) {
-      const response = await refresh(scope, runId);
+    for (const [scopeIndex, scope] of scopes.entries()) {
+      onAggregateProgress?.(aggregateProgressStateForScope(aggregateRun, scopeIndex, 0, new Date().toISOString()));
+      const response = await refresh(scope, runId, trigger);
       if (!(await timedRunStillActive(patchSession, runId))) return;
       if (response && !response.ok) {
         if (isBusyRefreshError(response.error)) {
@@ -1537,8 +1642,18 @@ async function runTimedActivityRefresh({
         await patchTimedActivityFailure(patchSession, lastSync.message, lastSync.reason);
         return;
       }
+      onAggregateProgress?.(
+        aggregateProgressStateForScope(aggregateRun, scopeIndex, aggregateRun.scopeTotals[scopeIndex] ?? 0, new Date().toISOString())
+      );
     }
     if (!(await timedRunStillActive(patchSession, runId))) return;
+    if (deriveTimedActivityRefreshScopes(state, "rules").length > 0) {
+      const advanceResponse = await completeRuleDerivedLaoFindsDredge(runStartedAt, scopes, trigger);
+      if (advanceResponse && !advanceResponse.ok) {
+        await patchTimedActivityFailure(patchSession, advanceResponse.error, "unavailable");
+        return;
+      }
+    }
     const finishedAt = new Date().toISOString();
     await patchSession({
       activeRunId: undefined,
@@ -1550,6 +1665,7 @@ async function runTimedActivityRefresh({
       noTargetMessage: undefined
     });
   } finally {
+    onAggregateProgress?.(null);
     localRefreshInFlightRef.current = false;
   }
 }
@@ -1623,42 +1739,6 @@ function isTimedActivityPauseReason(reason: unknown): reason is NonNullable<Time
   return reason === "challenge" || reason === "blocked" || reason === "rate_limited" || reason === "unavailable" || reason === "network_error";
 }
 
-function FeedActivityCard({
-  item,
-  now,
-  onOpenActivityLink,
-  state
-}: {
-  item: ActivityItem;
-  now: number;
-  onOpenActivityLink: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
-  state: Parameters<typeof identityForActivityItem>[0];
-}) {
-  return (
-    <article className="feed-card">
-      <div className="feed-head">
-        <UserIdentityRow identity={identityForActivityItem(state, item)} compact />
-        <div className="feed-time">
-          {item.isNew ? <span className="new-dot" aria-label="新动态" /> : null}
-          <time dateTime={item.occurredAt}>{formatRelativeTime(item.occurredAt, now)}</time>
-        </div>
-      </div>
-      <ActivityCardBody item={item} onOpenActivityLink={onOpenActivityLink} />
-    </article>
-  );
-}
-
-function FeedWaterline({ onBackToTop }: { onBackToTop: () => void }) {
-  return (
-    <div className="feed-waterline" role="separator">
-      <span>-- 上次更新到此为止，</span>
-      <button type="button" onClick={onBackToTop}>
-        点我回到顶部
-      </button>
-      <span> --</span>
-    </div>
-  );
-}
 
 function RefreshButtonContent({
   freshness,
@@ -1740,209 +1820,6 @@ function RefreshButtonContent({
   );
 }
 
-function ActivityCardBody({
-  item,
-  onOpenActivityLink
-}: {
-  item: ActivityItem;
-  onOpenActivityLink: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
-}) {
-  const title = item.topicTitle || item.title;
-  const href = absoluteLinuxDoUrl(item.url);
-  const kindCard = <ActivityKindCard href={href} item={item} onOpenActivityLink={onOpenActivityLink} />;
-  if (item.kind === "boost") {
-    return (
-      <div className="feed-main">
-        {kindCard}
-        <div className="feed-primary-block">
-          <p className="feed-primary">{item.boostText || "Boost 了帖子"}</p>
-          <a className="feed-context-link" href={href} target="_blank" rel="noreferrer" onClick={(event) => onOpenActivityLink(event, href)}>
-            <ExternalText text={title} />
-          </a>
-          {item.excerpt ? <p className="feed-excerpt">{item.excerpt}</p> : null}
-        </div>
-      </div>
-    );
-  }
-  if (item.kind === "reaction") {
-    return (
-      <div className="feed-main">
-        {kindCard}
-        <div className="feed-primary-block">
-          <p className="feed-primary">{item.reactionValue ? `回应了 ${item.reactionValue}` : "回应了帖子"}</p>
-          <a className="feed-context-link" href={href} target="_blank" rel="noreferrer" onClick={(event) => onOpenActivityLink(event, href)}>
-            <ExternalText text={title} />
-          </a>
-          {item.excerpt ? <p className="feed-excerpt">{item.excerpt}</p> : null}
-        </div>
-      </div>
-    );
-  }
-  if (item.kind === "reply") {
-    return (
-      <div className="feed-main">
-        {kindCard}
-        <div className="feed-primary-block">
-          {item.excerpt ? <p className="feed-primary">{item.excerpt}</p> : <p className="feed-primary">回复了话题</p>}
-          <a className="feed-context-link" href={href} target="_blank" rel="noreferrer" onClick={(event) => onOpenActivityLink(event, href)}>
-            <ExternalText text={title} />
-          </a>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="feed-main">
-      {kindCard}
-      <div className="feed-primary-block">
-        <a className="feed-title" href={href} target="_blank" rel="noreferrer" onClick={(event) => onOpenActivityLink(event, href)}>
-          <ExternalText text={title} />
-        </a>
-        {item.excerpt ? <p className="feed-excerpt">{item.excerpt}</p> : null}
-      </div>
-    </div>
-  );
-}
-
-function ActivityKindCard({
-  href,
-  item,
-  onOpenActivityLink
-}: {
-  href: string;
-  item: ActivityItem;
-  onOpenActivityLink: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
-}) {
-  return (
-    <a
-      className={`kind-card kind-${item.kind}`}
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      title={`打开${kindText(item.kind)}动态`}
-      onClick={(event) => onOpenActivityLink(event, href)}
-    >
-      <span className="kind-card-icon">{kindIcon(item.kind, 15)}</span>
-      <span className="kind-card-label">{kindText(item.kind)}</span>
-      {item.kind === "reply" && item.replyToPostNumber ? <span className="kind-card-floor">#{item.replyToPostNumber}</span> : null}
-      <span className="kind-card-link">
-        <ExternalLink size={12} aria-hidden="true" />
-      </span>
-    </a>
-  );
-}
-
-function FilterPopover<T extends string>({
-  label,
-  onChange,
-  onOpenChange,
-  onQueryChange,
-  open,
-  options,
-  query,
-  selectedContent,
-  variant,
-  value
-}: {
-  label: string;
-  onChange: (value: T) => void;
-  onOpenChange: (open: boolean) => void;
-  onQueryChange: (query: string) => void;
-  open: boolean;
-  options: Array<FilterOption<T>>;
-  query: string;
-  selectedContent?: ReactNode;
-  variant: "kind" | "user";
-  value: T;
-}) {
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const normalizedQuery = query.trim().toLowerCase();
-  const selected = options.find((option) => option.value === value) ?? options[0];
-  const filtered = normalizedQuery ? options.filter((option) => optionSearchText(option).includes(normalizedQuery)) : options;
-
-  useEffect(() => {
-    if (!open) return;
-    function handlePointerDown(event: PointerEvent) {
-      if (popoverRef.current && !eventHappenedInside(event, popoverRef.current)) {
-        onOpenChange(false);
-      }
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        onOpenChange(false);
-      }
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onOpenChange, open]);
-
-  return (
-    <div className={`filter-popover filter-popover-${variant}`} ref={popoverRef}>
-      <span>{label}</span>
-      <button
-        className="filter-popover-trigger"
-        type="button"
-        onClick={() => onOpenChange(!open)}
-        aria-expanded={open}
-      >
-        <span className="filter-popover-value">{selectedContent ?? optionContent(selected)}</span>
-        <ChevronDown className="filter-popover-arrow" size={15} aria-hidden="true" />
-      </button>
-      {open ? (
-        <div className="filter-popover-menu">
-          <input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder={`搜索${label}`} />
-          {filtered.map((option) => (
-            <button
-              className={value === option.value ? "active" : ""}
-              key={option.value}
-              onClick={() => {
-                onChange(option.value);
-                onOpenChange(false);
-              }}
-              type="button"
-            >
-              {optionContent(option)}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-export function eventHappenedInside(event: Event, element: HTMLElement) {
-  const path = event.composedPath();
-  if (path.length > 0) {
-    return path.includes(element);
-  }
-  return element.contains(event.target as Node | null);
-}
-
-export function shouldHandleActivityLinkClick(event: React.MouseEvent<HTMLAnchorElement>) {
-  return event.button === 0 && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
-}
-
-export function isLinuxDoActivityHref(href: string) {
-  try {
-    const url = new URL(href, "https://linux.do");
-    return url.protocol === "https:" && url.hostname === "linux.do";
-  } catch {
-    return false;
-  }
-}
-
-function ExternalText({ text }: { text: string }) {
-  return (
-    <span className="external-text">
-      <span>{text}</span>
-      <ExternalLink size={12} aria-hidden="true" />
-    </span>
-  );
-}
 
 function AddFriendModal({
   candidates,
@@ -2051,131 +1928,6 @@ function AddFriendModal({
   );
 }
 
-function PageScriptStatusBadge({ status }: { status: PageScriptStatusSnapshot }) {
-  const label = pageScriptStatusLabel(status);
-  return (
-    <span className={`page-script-badge page-script-${status.status}`} title={pageScriptStatusTitle(status)}>
-      <span aria-hidden="true" />
-      {label}
-    </span>
-  );
-}
-
-function SidePanelLauncherButton({ status, onOpen }: { status: PageScriptStatusSnapshot; onOpen: () => void }) {
-  return (
-    <button className={`header-icon-chip side-panel-chip page-script-${status.status}`} type="button" onClick={onOpen} title="打开浏览器侧栏" aria-label="打开浏览器侧栏">
-      <PanelRightOpen size={14} aria-hidden="true" />
-    </button>
-  );
-}
-
-function AccountDetectTag({
-  detecting,
-  onDetect,
-  username
-}: {
-  detecting: boolean;
-  onDetect: () => void;
-  username?: Username;
-}) {
-  const label = username ? `重新探测本地账号：@${username}` : "探测本地账号";
-  return (
-    <button
-      className={`badge badge-button account-badge${detecting ? " is-loading" : ""}`}
-      type="button"
-      onClick={onDetect}
-      disabled={detecting}
-      title={label}
-      aria-label={label}
-    >
-      {detecting ? <LoaderCircle className="spin-icon" size={13} aria-hidden="true" /> : username ? null : <RefreshCw size={13} aria-hidden="true" />}
-      <span>{detecting ? "识别中" : username ? `@${username}` : "识别账号"}</span>
-    </button>
-  );
-}
-
-function RequestStatsSummaryChip({ today, total, onOpen }: { today: number; total: number; onOpen: () => void }) {
-  return (
-    <button
-      className="request-stats-chip"
-      type="button"
-      onClick={onOpen}
-      title={`今日请求 ${today}，总请求 ${total}。打开请求统计。`}
-      aria-label={`今日请求 ${today}，总请求 ${total}。打开请求统计。`}
-    >
-      <ChartColumn size={13} aria-hidden="true" />
-      <span>今 {today}</span>
-      <span>总 {total}</span>
-    </button>
-  );
-}
-
-function CloudArchiveTag({ state, onOpen }: { state: CloudArchiveLocalStateResult | null; onOpen: () => void }) {
-  const archiveState = state?.archiveState ?? "unbound";
-  const same = archiveState === "same";
-  const text = archiveState === "different" ? "待备份" : archiveState === "unbound" ? "未绑定" : "";
-  const label = same ? "云存档已备份" : archiveState === "different" ? "云存档待备份" : "云存档未绑定";
-  return (
-    <button
-      className={`cloud-archive-chip cloud-archive-${archiveState}`}
-      type="button"
-      onClick={onOpen}
-      title={`${label}，打开云端备份设置`}
-      aria-label={`${label}，打开云端备份设置`}
-    >
-      <span className="cloud-archive-icon" aria-hidden="true">
-        <Cloud size={13} />
-        {archiveState === "unbound" ? <span className="cloud-archive-cross" /> : null}
-      </span>
-      {text ? <span className="cloud-archive-text">{text}</span> : null}
-    </button>
-  );
-}
-
-function OptionsPageButton({ onOpen }: { onOpen: () => void }) {
-  return (
-    <button className="header-icon-chip settings-chip" type="button" onClick={onOpen} title="打开配置页" aria-label="打开配置页">
-      <Settings size={14} aria-hidden="true" />
-    </button>
-  );
-}
-
-function pageScriptStatusLabel(status: PageScriptStatusSnapshot) {
-  if (status.status === "connected") return `关联会话 ${status.connectedCount}`;
-  if (status.status === "challenge") return "页面验证";
-  if (status.status === "stale") return "页面断开";
-  return "页面未连";
-}
-
-function pageScriptStatusTitle(status: PageScriptStatusSnapshot) {
-  const latest = status.heartbeats[0];
-  if (!latest) return "还没有 linux.do 页面脚本心跳。";
-  return `最近页面：${latest.title || latest.url}`;
-}
-
-function repairActionForStatus(status: string, onRepairPageScript: () => void, onOpenLinuxDoHome: () => void) {
-  if (status.includes("未加载佬朋友脚本") || status.includes("没有响应")) {
-    return { label: "一键刷新页面", onClick: onRepairPageScript };
-  }
-  if (status.includes("浏览器验证") || status.includes("请打开一个 linux.do 页面")) {
-    return { label: "打开 linux.do", onClick: onOpenLinuxDoHome };
-  }
-  return null;
-}
-
-function optionContent<T extends string>(option: FilterOption<T>) {
-  return option.content ?? (
-    <span className="filter-option-content">
-      {option.tone ? <span className={`filter-option-icon kind-${option.tone}`}>{option.icon}</span> : option.icon}
-      <span className="filter-option-label">{option.label}</span>
-      {option.meta !== undefined ? <span className="filter-option-count">{option.meta}</span> : null}
-    </span>
-  );
-}
-
-function optionSearchText<T extends string>(option: FilterOption<T>) {
-  return (option.searchText ?? `${option.label} ${option.value}`).toLowerCase();
-}
 
 function sameScope(left: ActivityRefreshScope, right: ActivityRefreshScope) {
   if (left.kind !== right.kind) return false;
@@ -2230,14 +1982,4 @@ function formatLongCountdown(milliseconds: number) {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function absoluteLinuxDoUrl(url?: string) {
-  if (!url) return "https://linux.do";
-  if (url.startsWith("http")) return url;
-  return `https://linux.do${url}`;
-}
-
-function profileUrl(username: Username) {
-  return `https://linux.do/u/${encodeURIComponent(username)}`;
 }

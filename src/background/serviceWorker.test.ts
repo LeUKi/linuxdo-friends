@@ -53,8 +53,10 @@ describe("message contracts", () => {
     ).toBe(true);
     expect(isBackgroundCommand({ type: "removeDredgeRule", id: "rule-1" })).toBe(true);
     expect(isBackgroundCommand({ type: "resetLaoFindsStartedAt" })).toBe(true);
+    expect(isBackgroundCommand({ type: "completeRuleDerivedLaoFindsDredge", startedAt: "2026-06-28T00:00:00.000Z", scopes: [{ kind: "topic", usernames: ["neo"] }], trigger: "manual" })).toBe(true);
     expect(isBackgroundCommand({ type: "markLaoFindsItemRead", id: "item-1", read: true })).toBe(true);
     expect(isBackgroundCommand({ type: "archiveLaoFindsItem", id: "item-1", archived: true })).toBe(true);
+    expect(isBackgroundCommand({ type: "deleteLaoFindsItem", id: "item-1" })).toBe(true);
     expect(isBackgroundCommand({ type: "cacheAvatars", usernames: ["neil"] })).toBe(true);
     expect(isBackgroundCommand({ type: "getSiteDataProgress" })).toBe(true);
     expect(isBackgroundCommand({ type: "getPageScriptStatus" })).toBe(true);
@@ -69,6 +71,7 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "restoreCloudConfig" })).toBe(true);
     expect(isBackgroundCommand({ type: "clearCloudBinding" })).toBe(true);
     expect(isBackgroundCommand({ type: "repairLinuxDoPageScript", tabId: 123 })).toBe(true);
+    expect(isBackgroundCommand({ type: "activateLinuxDoPageTab", tabId: 123 })).toBe(true);
     expect(isBackgroundCommand({ type: "openSidePanel" })).toBe(true);
     expect(isBackgroundCommand({ type: "openOptionsPage" })).toBe(true);
     expect(isBackgroundCommand({ type: "openOptionsPage", hash: "#cloud-backup" })).toBe(true);
@@ -95,6 +98,8 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "refreshFriendProfiles", usernames: ["ok", ""] })).toBe(false);
     expect(isBackgroundCommand({ type: "cacheAvatars", usernames: ["ok", ""] })).toBe(false);
     expect(isBackgroundCommand({ type: "repairLinuxDoPageScript", tabId: 0 })).toBe(false);
+    expect(isBackgroundCommand({ type: "activateLinuxDoPageTab" })).toBe(false);
+    expect(isBackgroundCommand({ type: "activateLinuxDoPageTab", tabId: 0 })).toBe(false);
     expect(isBackgroundCommand({ type: "checkForUpdates", force: "yes" })).toBe(false);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "bad", usernames: ["ok"] } })).toBe(false);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "timed" })).toBe(false);
@@ -107,13 +112,20 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { mode: "deny" } })).toBe(false);
     expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { patterns: ["AI", 1] } })).toBe(false);
     expect(isBackgroundCommand({ type: "removeDredgeRule", id: "" })).toBe(false);
+    expect(isBackgroundCommand({ type: "completeRuleDerivedLaoFindsDredge", startedAt: "bad", scopes: [{ kind: "topic", usernames: ["neo"] }], trigger: "manual" })).toBe(false);
+    expect(isBackgroundCommand({ type: "completeRuleDerivedLaoFindsDredge", startedAt: "2026-06-28T00:00:00.000Z", scopes: [{ kind: "bad", usernames: ["neo"] }], trigger: "manual" })).toBe(false);
+    expect(isBackgroundCommand({ type: "completeRuleDerivedLaoFindsDredge", startedAt: "2026-06-28T00:00:00.000Z", scopes: [{ kind: "topic", usernames: ["neo"] }] })).toBe(false);
+    expect(isBackgroundCommand({ type: "completeRuleDerivedLaoFindsDredge", startedAt: "2026-06-28T00:00:00.000Z", scopes: [{ kind: "topic", usernames: ["neo"] }], trigger: "bad" })).toBe(false);
     expect(isBackgroundCommand({ type: "markLaoFindsItemRead", id: "item-1", read: "yes" })).toBe(false);
     expect(isBackgroundCommand({ type: "archiveLaoFindsItem", id: "item-1", archived: "yes" })).toBe(false);
+    expect(isBackgroundCommand({ type: "deleteLaoFindsItem", id: "" })).toBe(false);
     expect(isBackgroundCommand({ type: "updateFriend", username: "neil", patch: { activityKinds: ["bad"] } })).toBe(false);
     expect(isBackgroundCommand({ type: "seedFollowedUser", user: { name: "No username" } })).toBe(false);
     expect(isBackgroundCommand({ type: "updateSettings", settings: { refreshIntervalMinutes: 1 } })).toBe(false);
+    expect(isBackgroundCommand({ type: "updateSettings", settings: { refreshIntervalMinutes: 5 } })).toBe(false);
     expect(isBackgroundCommand({ type: "updateSettings", settings: { timedActivityRefreshScopeMode: "bad" } })).toBe(false);
-    expect(isBackgroundCommand({ type: "updateSettings", settings: { timedActivityRefreshIntervalMinutes: 1 } })).toBe(false);
+    expect(isBackgroundCommand({ type: "updateSettings", settings: { timedActivityRefreshIntervalMinutes: 4 } })).toBe(false);
+    expect(isBackgroundCommand({ type: "updateSettings", settings: { timedActivityRefreshIntervalMinutes: 5 } })).toBe(true);
     expect(isBackgroundCommand({ type: "updateSettings", settings: { requestStatsAutoSyncEnabled: "yes" } })).toBe(false);
     expect(isBackgroundCommand({ type: "openActivityLink", url: "https://example.com/t/topic/1" })).toBe(false);
     expect(isBackgroundCommand({ type: "importConfig", json: "" })).toBe(false);
@@ -136,6 +148,251 @@ describe("message contracts", () => {
         }
       }
     });
+  });
+
+  it("advances lao finds start point only for the completed current rule-derived scope set", async () => {
+    const state: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
+      dredgeRules: [
+        {
+          schemaVersion: 2,
+          id: "rule-topic",
+          name: "Topic",
+          enabled: true,
+          mode: "allow",
+          usernames: ["neo"],
+          kinds: ["topic"],
+          patterns: [],
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      ]
+    };
+    const { send } = await setupWorker({
+      initialState: state
+    });
+
+    const mismatch = await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "boost", usernames: ["neo"] }],
+      trigger: "manual"
+    });
+    const response = await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "topic", usernames: ["neo"] }],
+      trigger: "manual"
+    });
+
+    expect(mismatch).toMatchObject({
+      ok: true,
+      data: {
+        laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
+        lastSync: {
+          ok: true,
+          source: "manual",
+          message: "打捞已完成，但打捞规则范围已变化，未更新打捞起点。"
+        }
+      }
+    });
+    expect(response).toMatchObject({
+      ok: true,
+      data: { laoFindsStartedAt: "2026-06-28T00:00:00.000Z" }
+    });
+  });
+
+  it("sends Lao Finds notifications for automatic completed rule-derived dredges", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const state = laoFindsNotificationState({
+      telegramBotToken: "bot-token",
+      telegramChatId: "chat-id",
+      laoFindsBrowserNotificationsEnabled: true
+    });
+    const { send, notifications } = await setupWorker({ initialState: state });
+
+    const response = await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "topic", usernames: ["neo"] }],
+      trigger: "timed"
+    });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+
+    expect(response).toMatchObject({ ok: true, data: { laoFindsStartedAt: "2026-06-28T00:00:00.000Z" } });
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.stringMatching(/^linuxdoFriends\.laoFinds\./),
+      expect.objectContaining({ title: "佬有料有新收录", message: "自动捞料新增 1 条，点击查看佬有料。" })
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.telegram.org/botbot-token/sendMessage",
+      expect.objectContaining({ body: expect.stringContaining("佬有料 自动捞料新增 1 条") })
+    );
+  });
+
+  it("sends Lao Finds notifications when a completed all-scope timed run covers rule-derived scopes", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const state = laoFindsNotificationState({
+      telegramBotToken: "bot-token",
+      telegramChatId: "chat-id",
+      laoFindsBrowserNotificationsEnabled: true
+    });
+    const { send, notifications } = await setupWorker({ initialState: state });
+
+    const response = await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "all" }],
+      trigger: "timed"
+    });
+
+    expect(response).toMatchObject({ ok: true, data: { laoFindsStartedAt: "2026-06-28T00:00:00.000Z" } });
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.stringMatching(/^linuxdoFriends\.laoFinds\./),
+      expect.objectContaining({ message: "自动捞料新增 1 条，点击查看佬有料。" })
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.telegram.org/botbot-token/sendMessage",
+      expect.objectContaining({ body: expect.stringContaining("佬有料 自动捞料新增 1 条") })
+    );
+  });
+
+  it("notifies only current-run Lao Finds items", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const state = laoFindsNotificationState({
+      telegramBotToken: "bot-token",
+      telegramChatId: "chat-id",
+      laoFindsBrowserNotificationsEnabled: true
+    });
+    const { send, notifications } = await setupWorker({
+      initialState: {
+        ...state,
+        laoFindsItems: {
+          ...state.laoFindsItems,
+          "topic:neo:old": {
+            id: "topic:neo:old",
+            activityId: "topic:neo:old",
+            collectedAt: "2026-06-27T23:59:59.000Z",
+            matchedRuleIds: ["rule-topic"],
+            activity: {
+              id: "topic:neo:old",
+              username: "neo",
+              kind: "topic",
+              title: "旧收录",
+              url: "/t/topic/old",
+              occurredAt: "2026-06-27T23:59:00.000Z"
+            }
+          }
+        }
+      }
+    });
+
+    await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "topic", usernames: ["neo"] }],
+      trigger: "timed"
+    });
+
+    expect(notifications.create).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ message: "自动捞料新增 1 条，点击查看佬有料。" }));
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.telegram.org/botbot-token/sendMessage",
+      expect.objectContaining({
+        body: expect.stringContaining("AI 工具")
+      })
+    );
+    expect(fetch).not.toHaveBeenCalledWith(
+      "https://api.telegram.org/botbot-token/sendMessage",
+      expect.objectContaining({
+        body: expect.stringContaining("旧收录")
+      })
+    );
+  });
+
+  it("does not send Telegram for ordinary activity isNew refresh results", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const state: AppState = {
+      ...defaultAppState,
+      settings: { ...defaultAppState.settings, telegramBotToken: "bot-token", telegramChatId: "chat-id" },
+      activity: {
+        neo: {
+          username: "neo",
+          refreshedAt: "2026-06-28T00:00:00.000Z",
+          items: [{ id: "old", username: "neo", kind: "topic", title: "旧普通动态", isNew: true }]
+        }
+      }
+    };
+    const { send } = await setupWorker({ initialState: state });
+
+    await send({ type: "refreshFriendActivity", scope: { kind: "all" } });
+    for (let index = 0; index < 4; index += 1) await Promise.resolve();
+
+    expect(fetch).not.toHaveBeenCalledWith("https://api.telegram.org/botbot-token/sendMessage", expect.anything());
+  });
+
+  it("still sends Telegram when the browser notification surface fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const state = laoFindsNotificationState({ telegramBotToken: "bot-token", telegramChatId: "chat-id" });
+    const { send, notifications } = await setupWorker({ initialState: state });
+    notifications.create.mockRejectedValueOnce(new Error("notifications unavailable"));
+
+    await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "topic", usernames: ["neo"] }],
+      trigger: "timed"
+    });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+
+    expect(notifications.create).toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith("https://api.telegram.org/botbot-token/sendMessage", expect.anything());
+  });
+
+  it("does not notify for manual completed dredges by default", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const { send, notifications } = await setupWorker({
+      initialState: laoFindsNotificationState({ telegramBotToken: "bot-token", telegramChatId: "chat-id" })
+    });
+
+    await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "topic", usernames: ["neo"] }],
+      trigger: "manual"
+    });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+
+    expect(notifications.create).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("sends manual Lao Finds notifications when the manual setting is enabled", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const { send, notifications } = await setupWorker({
+      initialState: laoFindsNotificationState({
+        telegramBotToken: "bot-token",
+        telegramChatId: "chat-id",
+        laoFindsManualNotificationsEnabled: true
+      })
+    });
+
+    await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "topic", usernames: ["neo"] }],
+      trigger: "manual"
+    });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.stringMatching(/^linuxdoFriends\.laoFinds\./),
+      expect.objectContaining({ message: "手动打捞新增 1 条，点击查看佬有料。" })
+    );
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.telegram.org/botbot-token/sendMessage",
+      expect.objectContaining({ body: expect.stringContaining("佬有料 手动打捞新增 1 条") })
+    );
   });
 
   it("records failed direct linux.do attempts for non-mutating profile lookup", async () => {
@@ -819,6 +1076,18 @@ describe("message contracts", () => {
     });
   });
 
+  it("opens Lao Finds settings when a Lao Finds browser notification is clicked", async () => {
+    const { tabs, triggerNotificationClick } = await setupWorker();
+
+    triggerNotificationClick("linuxdoFriends.laoFinds.123");
+    for (let index = 0; index < 6; index += 1) await Promise.resolve();
+
+    expect(tabs.create).toHaveBeenCalledWith({
+      url: "chrome-extension://linuxdo-friends/src/options/index.html#lao-finds",
+      active: true
+    });
+  });
+
   it("reuses the current-window options tab before checking other windows", async () => {
     const { send, tabs, windows } = await setupWorker({
       tabs: {
@@ -952,7 +1221,7 @@ describe("message contracts", () => {
         status: "ready",
         hasLauncher: true
       },
-      { tab: { id: 123, windowId: 7 } as chrome.tabs.Tab }
+      { tab: { id: 123, windowId: 7, url: "https://linux.do/", active: true } as chrome.tabs.Tab }
     );
 
     expect(sessionStorage.dump()).toMatchObject({
@@ -1811,7 +2080,7 @@ describe("message contracts", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
     const { send, tabs } = await setupWorker({
       tabs: {
-        query: vi.fn(async () => [{ id: 321, url: "https://linux.do/latest" } as chrome.tabs.Tab]),
+        query: vi.fn(async () => [{ id: 777, url: "https://linux.do/latest", active: true } as chrome.tabs.Tab]),
         sendMessage: vi.fn(async () => ({
           ok: true,
           profile: {
@@ -1825,7 +2094,7 @@ describe("message contracts", () => {
 
     await send(
       { type: "linuxdoFriends.pageHeartbeat", url: "https://linux.do/latest", title: "latest", status: "ready", hasLauncher: true },
-      { tab: { id: 777, windowId: 9, url: "https://linux.do/latest" } as chrome.tabs.Tab }
+      { tab: { id: 777, windowId: 9, url: "https://linux.do/latest", active: true } as chrome.tabs.Tab }
     );
     const status = await send({ type: "getPageScriptStatus" });
     const response = await send({ type: "addFriendByProfile", username: "Neil" });
@@ -1853,6 +2122,73 @@ describe("message contracts", () => {
     expect(tabs.update).toHaveBeenCalledWith(123, { active: true });
     expect(tabs.reload).toHaveBeenCalledWith(123);
     expect(windows.update).toHaveBeenCalledWith(7, { focused: true });
+  });
+
+  it("activates a chosen linux.do tab without reloading it", async () => {
+    const { send, tabs, windows } = await setupWorker({
+      tabs: {
+        query: vi.fn(async () => []),
+        sendMessage: vi.fn(),
+        get: vi.fn(async () => ({ id: 123, windowId: 7, url: "https://linux.do/t/topic/1" }) as chrome.tabs.Tab),
+        update: vi.fn(async () => ({ id: 123 } as chrome.tabs.Tab)),
+        reload: vi.fn(async () => undefined),
+        create: vi.fn()
+      }
+    });
+
+    const response = await send({ type: "activateLinuxDoPageTab", tabId: 123 });
+
+    expect(response).toMatchObject({ ok: true, data: { tabId: 123, openedNewTab: false, message: "已切换到 linux.do 页面。" } });
+    expect(tabs.update).toHaveBeenCalledWith(123, { active: true });
+    expect(windows.update).toHaveBeenCalledWith(7, { focused: true });
+    expect(tabs.reload).not.toHaveBeenCalled();
+    expect(tabs.create).not.toHaveBeenCalled();
+  });
+
+  it("marks the chosen active ready tab immediately after activate-only switching", async () => {
+    const { send } = await setupWorker({
+      tabs: {
+        query: vi.fn(async () => []),
+        sendMessage: vi.fn(),
+        get: vi.fn(async (tabId: number) => ({ id: tabId, windowId: 7, url: `https://linux.do/t/topic/${tabId}` }) as chrome.tabs.Tab),
+        update: vi.fn(async (tabId: number) => ({ id: tabId } as chrome.tabs.Tab)),
+        reload: vi.fn(async () => undefined),
+        create: vi.fn()
+      }
+    });
+    await send(
+      { type: "linuxdoFriends.pageHeartbeat", url: "https://linux.do/t/topic/123", title: "Ready 123", status: "ready", hasLauncher: true },
+      { tab: { id: 123, windowId: 7, url: "https://linux.do/t/topic/123", active: false } as chrome.tabs.Tab }
+    );
+    await send(
+      { type: "linuxdoFriends.pageHeartbeat", url: "https://linux.do/t/topic/456", title: "Ready 456", status: "ready", hasLauncher: true },
+      { tab: { id: 456, windowId: 7, url: "https://linux.do/t/topic/456", active: true } as chrome.tabs.Tab }
+    );
+
+    await send({ type: "activateLinuxDoPageTab", tabId: 123 });
+    const status = await send({ type: "getPageScriptStatus" });
+
+    expect(status).toMatchObject({ ok: true, data: { status: "connected", connectedCount: 2, selectedTabId: 123 } });
+  });
+
+  it("rejects activate-only tab switching for non-linux.do tabs", async () => {
+    const { send, tabs } = await setupWorker({
+      tabs: {
+        query: vi.fn(async () => []),
+        sendMessage: vi.fn(),
+        get: vi.fn(async () => ({ id: 123, windowId: 7, url: "https://example.com/" }) as chrome.tabs.Tab),
+        update: vi.fn(async () => ({ id: 123 } as chrome.tabs.Tab)),
+        reload: vi.fn(async () => undefined),
+        create: vi.fn()
+      }
+    });
+
+    const response = await send({ type: "activateLinuxDoPageTab", tabId: 123 });
+
+    expect(response).toMatchObject({ ok: false, error: "只能切换到当前可用的 linux.do 页面。" });
+    expect(tabs.update).not.toHaveBeenCalled();
+    expect(tabs.reload).not.toHaveBeenCalled();
+    expect(tabs.create).not.toHaveBeenCalled();
   });
 
   it("opens linux.do home from an explicit repair action when no page exists", async () => {
@@ -2107,7 +2443,24 @@ describe("message contracts", () => {
 
   it("passes activity scope to direct refresh and exposes endpoint progress", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ boosts: [] }), { status: 200 })));
-    const state = addFriendFromProfile(defaultAppState, { username: "misaka7369", refreshedAt: "2026-06-28T00:00:00.000Z" });
+    const state: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "misaka7369", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
+      dredgeRules: [
+        {
+          schemaVersion: 2,
+          id: "rule-boost",
+          name: "Boost",
+          enabled: true,
+          mode: "allow",
+          usernames: ["misaka7369"],
+          kinds: ["boost"],
+          patterns: [],
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      ]
+    };
     const { send, runtime, sessionStorage } = await setupWorker({ initialState: state });
 
     const response = await send({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["Misaka7369"] } });
@@ -2117,6 +2470,7 @@ describe("message contracts", () => {
       ok: true,
       data: {
         activityRefreshLedger: { "misaka7369:boost": { kind: "boost", source: "direct_fetch" } },
+        laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
         requestStats: { total: 1, byFamily: { activity: 1 } },
         lastSync: { ok: true, source: "direct_fetch" }
       }
@@ -2787,6 +3141,45 @@ describe("message contracts", () => {
   });
 });
 
+function laoFindsNotificationState(settings: Partial<AppState["settings"]> = {}): AppState {
+  const state = addFriendFromProfile(defaultAppState, { username: "neo", refreshedAt: "2026-06-28T00:00:00.000Z" });
+  return {
+    ...state,
+    settings: { ...state.settings, ...settings },
+    laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
+    dredgeRules: [
+      {
+        schemaVersion: 2,
+        id: "rule-topic",
+        name: "Topic",
+        enabled: true,
+        mode: "allow",
+        usernames: ["neo"],
+        kinds: ["topic"],
+        patterns: [],
+        createdAt: "2026-06-28T00:00:00.000Z",
+        updatedAt: "2026-06-28T00:00:00.000Z"
+      }
+    ],
+    laoFindsItems: {
+      "topic:neo:1": {
+        id: "topic:neo:1",
+        activityId: "topic:neo:1",
+        collectedAt: "2026-06-28T00:00:01.000Z",
+        matchedRuleIds: ["rule-topic"],
+        activity: {
+          id: "topic:neo:1",
+          username: "neo",
+          kind: "topic",
+          title: "AI 工具",
+          url: "/t/topic/1",
+          occurredAt: "2026-06-28T00:00:00.500Z"
+        }
+      }
+    }
+  };
+}
+
 type MockTabs = {
   query: ReturnType<typeof vi.fn>;
   sendMessage: ReturnType<typeof vi.fn>;
@@ -2810,6 +3203,7 @@ async function setupWorker(
   let listener: ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean) | null = null;
   const startupListeners: Array<() => void> = [];
   const alarmListeners: Array<(alarm: chrome.alarms.Alarm) => void> = [];
+  const notificationClickListeners: Array<(notificationId: string) => void> = [];
   const runtime = {
     sendMessage: vi.fn(),
     openOptionsPage: vi.fn(),
@@ -2852,6 +3246,14 @@ async function setupWorker(
       })
     }
   };
+  const notifications = {
+    create: vi.fn(async () => undefined),
+    onClicked: {
+      addListener: vi.fn((callback) => {
+        notificationClickListeners.push(callback);
+      })
+    }
+  };
   const sessionStorage = {
     ...createMockStorage(overrides.initialSession ?? {}),
     ...(overrides.includeSessionAccessLevel === false ? {} : { setAccessLevel: vi.fn() })
@@ -2877,7 +3279,8 @@ async function setupWorker(
     tabs,
     windows,
     sidePanel,
-    alarms
+    alarms,
+    notifications
   });
 
   await import("./serviceWorker");
@@ -2890,6 +3293,7 @@ async function setupWorker(
     tabs,
     windows,
     alarms,
+    notifications,
     async triggerAlarm(name: string) {
       for (const alarmListener of alarmListeners) {
         alarmListener({ name, scheduledTime: Date.now() });
@@ -2901,6 +3305,9 @@ async function setupWorker(
       for (const startupListener of startupListeners) startupListener();
       await Promise.resolve();
       await Promise.resolve();
+    },
+    triggerNotificationClick(notificationId: string) {
+      for (const listener of notificationClickListeners) listener(notificationId);
     },
     send(message: unknown, sender: chrome.runtime.MessageSender = {}) {
       return new Promise((resolve) => {

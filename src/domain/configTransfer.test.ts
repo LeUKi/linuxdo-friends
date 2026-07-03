@@ -112,6 +112,8 @@ describe("config transfer", () => {
         refreshIntervalMinutes: 120,
         timedActivityRefreshScopeMode: "all",
         timedActivityRefreshIntervalMinutes: 240,
+        laoFindsBrowserNotificationsEnabled: true,
+        laoFindsManualNotificationsEnabled: false,
         telegramBotToken: undefined,
         telegramChatId: undefined
       }
@@ -167,8 +169,10 @@ describe("config transfer", () => {
           openActivityLinksInPage: true,
           timedActivityRefreshEnabled: true,
           timedActivityRefreshScopeMode: "all",
-          timedActivityRefreshIntervalMinutes: 240,
-          requestStatsAutoSyncEnabled: true
+          timedActivityRefreshIntervalMinutes: 5,
+          requestStatsAutoSyncEnabled: true,
+          laoFindsBrowserNotificationsEnabled: false,
+          laoFindsManualNotificationsEnabled: true
         },
         requestStats: {
           total: 9,
@@ -192,7 +196,9 @@ describe("config transfer", () => {
       openActivityLinksInPage: true,
       refreshIntervalMinutes: 60,
       timedActivityRefreshScopeMode: "all",
-      timedActivityRefreshIntervalMinutes: 240
+      timedActivityRefreshIntervalMinutes: 5,
+      laoFindsBrowserNotificationsEnabled: false,
+      laoFindsManualNotificationsEnabled: true
     });
     expect(file.settings).not.toHaveProperty("timedActivityRefreshEnabled");
     expect(file.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
@@ -278,7 +284,9 @@ describe("config transfer", () => {
     expect(file.friends.quiet.activityKinds).toEqual([]);
     expect(file.settings.openActivityLinksInPage).toBe(true);
     expect(file.settings.timedActivityRefreshScopeMode).toBe("rules");
-    expect(file.settings.timedActivityRefreshIntervalMinutes).toBe(120);
+    expect(file.settings.timedActivityRefreshIntervalMinutes).toBe(20);
+    expect(file.settings.laoFindsBrowserNotificationsEnabled).toBe(true);
+    expect(file.settings.laoFindsManualNotificationsEnabled).toBe(false);
     expect(file.settings).not.toHaveProperty("timedActivityRefreshEnabled");
     expect(file.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
     expect(file.requestStats).toEqual({ total: 0, byFamily: {}, days: {} });
@@ -316,7 +324,7 @@ describe("config transfer", () => {
           source: "linuxdo-friends",
           exportedAt: "2026-06-28T00:00:00.000Z",
           friends: {},
-          settings: { refreshIntervalMinutes: 60, timedActivityRefreshIntervalMinutes: 1 }
+          settings: { refreshIntervalMinutes: 60, timedActivityRefreshIntervalMinutes: 4 }
         })
       )
     ).toThrow("配置文件的定时刷新间隔不正确。");
@@ -331,6 +339,28 @@ describe("config transfer", () => {
         })
       )
     ).toThrow("配置文件的请求统计自动同步设置不正确。");
+    expect(() =>
+      parseConfigImportJson(
+        JSON.stringify({
+          schemaVersion: 1,
+          source: "linuxdo-friends",
+          exportedAt: "2026-06-28T00:00:00.000Z",
+          friends: {},
+          settings: { refreshIntervalMinutes: 60, laoFindsBrowserNotificationsEnabled: "yes" }
+        })
+      )
+    ).toThrow("配置文件的佬有料浏览器通知设置不正确。");
+    expect(() =>
+      parseConfigImportJson(
+        JSON.stringify({
+          schemaVersion: 1,
+          source: "linuxdo-friends",
+          exportedAt: "2026-06-28T00:00:00.000Z",
+          friends: {},
+          settings: { refreshIntervalMinutes: 60, laoFindsManualNotificationsEnabled: "yes" }
+        })
+      )
+    ).toThrow("配置文件的手动打捞通知设置不正确。");
     expect(() =>
       parseConfigImportJson(
         JSON.stringify({
@@ -408,6 +438,8 @@ describe("config transfer", () => {
     expect(state.settings.openActivityLinksInPage).toBe(true);
     expect(state.settings.timedActivityRefreshEnabled).toBe(false);
     expect(state.settings.requestStatsAutoSyncEnabled).toBe(false);
+    expect(state.settings.laoFindsBrowserNotificationsEnabled).toBe(true);
+    expect(state.settings.laoFindsManualNotificationsEnabled).toBe(false);
     expect(state.activity).toEqual({});
     expect(state.currentAccount).toBeUndefined();
     expect(state.lastSync?.message).toBe("已导入 1 位佬朋友配置。");
@@ -499,6 +531,14 @@ describe("config transfer", () => {
       ...base,
       settings: { ...base.settings, timedActivityRefreshIntervalMinutes: 240 }
     };
+    const changedBrowserNotifications = {
+      ...base,
+      settings: { ...base.settings, laoFindsBrowserNotificationsEnabled: !base.settings.laoFindsBrowserNotificationsEnabled }
+    };
+    const changedManualNotifications = {
+      ...base,
+      settings: { ...base.settings, laoFindsManualNotificationsEnabled: !base.settings.laoFindsManualNotificationsEnabled }
+    };
     const changedStartedAt = {
       ...base,
       laoFindsStartedAt: "2026-06-28T00:01:00.000Z"
@@ -528,6 +568,8 @@ describe("config transfer", () => {
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedSettings));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedTimedRefreshScopeMode));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedTimedRefreshInterval));
+    expect(fingerprint).not.toBe(await createConfigFingerprint(changedBrowserNotifications));
+    expect(fingerprint).not.toBe(await createConfigFingerprint(changedManualNotifications));
     expect(fingerprint).toBe(await createConfigFingerprint(changedTimedRefreshEnabled));
     expect(fingerprint).toBe(await createConfigFingerprint(changedRequestStatsAutoSync));
     expect(fingerprint).toBe(await createConfigFingerprint(changedStartedAt));

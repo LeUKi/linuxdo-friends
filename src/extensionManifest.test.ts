@@ -1,9 +1,18 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const manifest = JSON.parse(readFileSync(resolve(__dirname, "../public/manifest.json"), "utf8"));
-const appCss = readFileSync(resolve(__dirname, "styles/app.css"), "utf8");
+const appCss = readCssWithLocalImports(resolve(__dirname, "styles/app.css"));
+
+function readCssWithLocalImports(path: string, seen = new Set<string>()): string {
+  if (seen.has(path)) return "";
+  seen.add(path);
+  const css = readFileSync(path, "utf8");
+  return css.replace(/^@import\s+["'](\.[^"']+)["'];?\s*$/gm, (_statement, importPath: string) => {
+    return readCssWithLocalImports(resolve(dirname(path), importPath), seen);
+  });
+}
 
 describe("extension manifest safety", () => {
   it("declares the MV3 extension surfaces inside the linux.do boundary", () => {
@@ -35,7 +44,7 @@ describe("extension manifest safety", () => {
   });
 
   it("only adds alarms for best-effort scheduled stats sync, without cookie, proxy, or external messaging surfaces", () => {
-    expect(manifest.permissions).toEqual(["storage", "tabs", "sidePanel", "alarms"]);
+    expect(manifest.permissions).toEqual(["storage", "tabs", "sidePanel", "alarms", "notifications"]);
     expect(manifest.permissions).not.toContain("cookies");
     expect(manifest.permissions).not.toContain("identity");
     expect(manifest.permissions).not.toContain("proxy");
@@ -79,6 +88,18 @@ describe("extension manifest safety", () => {
     expect(appCss).toContain(".account-badge > span {\n  min-width: 0;\n  overflow: hidden;\n  text-overflow: ellipsis;");
     expect(appCss).not.toContain(".timed-refresh-copy strong");
     expect(appCss).not.toContain(".timed-refresh-copy span");
+  });
+
+  it("keeps the page-script header chip aligned and popover-scoped", () => {
+    expect(appCss).toContain(".page-script-status-control {\n  position: relative;");
+    expect(appCss).toContain(".page-script-badge {\n  display: inline-flex;\n  height: 28px;");
+    expect(appCss).toContain("font-size: 10.5px;");
+    expect(appCss).toContain(".header-icon-chip {\n  display: inline-grid;\n  width: 28px;\n  height: 28px;");
+    expect(appCss).toContain(".page-script-popover {\n  position: absolute;");
+    expect(appCss).toContain(".page-script-tab-option {\n  display: grid;");
+    expect(appCss).toContain("grid-template-columns: minmax(0, 1fr) 18px;");
+    expect(appCss).toContain(".page-script-tab-option.is-selected {\n  background: var(--accent-soft);");
+    expect(appCss).toContain(".page-script-tab-check {\n  color: var(--accent-text);");
   });
 
   it("keeps feed filters roomy without reintroducing the old bottom padding", () => {

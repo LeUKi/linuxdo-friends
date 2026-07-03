@@ -3,6 +3,7 @@ import { normalizeActivityKinds, normalizeFriendUser, normalizeUsername } from "
 import { normalizeDredgeRules } from "./laoFinds";
 import { normalizeRequestStats } from "./requestStats";
 import { sha256Base64url } from "../shared/crypto";
+import { isValidRefreshIntervalMinutes, isValidTimedActivityRefreshIntervalMinutes } from "../shared/settingsLimits";
 import { nowIso } from "../shared/time";
 import type { AppState, ConfigExportFile, ConfigExportSettings, FriendUser, DredgeRule, RefreshSettings } from "../shared/types";
 
@@ -127,18 +128,11 @@ function normalizeGroups(value: unknown): string[] {
 }
 
 function normalizeExportSettings(value: Partial<RefreshSettings> | Record<string, unknown>): ConfigExportSettings {
-  const refreshIntervalMinutes =
-    typeof value.refreshIntervalMinutes === "number" &&
-    Number.isFinite(value.refreshIntervalMinutes) &&
-    value.refreshIntervalMinutes >= 30 &&
-    value.refreshIntervalMinutes <= 720
-      ? value.refreshIntervalMinutes
-      : defaultAppState.settings.refreshIntervalMinutes;
+  const refreshIntervalMinutes = isValidRefreshIntervalMinutes(value.refreshIntervalMinutes)
+    ? value.refreshIntervalMinutes
+    : defaultAppState.settings.refreshIntervalMinutes;
   const timedActivityRefreshIntervalMinutes =
-    typeof value.timedActivityRefreshIntervalMinutes === "number" &&
-    Number.isFinite(value.timedActivityRefreshIntervalMinutes) &&
-    value.timedActivityRefreshIntervalMinutes >= 30 &&
-    value.timedActivityRefreshIntervalMinutes <= 720
+    isValidTimedActivityRefreshIntervalMinutes(value.timedActivityRefreshIntervalMinutes)
       ? value.timedActivityRefreshIntervalMinutes
       : defaultAppState.settings.timedActivityRefreshIntervalMinutes;
   return {
@@ -150,6 +144,14 @@ function normalizeExportSettings(value: Partial<RefreshSettings> | Record<string
         ? value.timedActivityRefreshScopeMode
         : defaultAppState.settings.timedActivityRefreshScopeMode,
     timedActivityRefreshIntervalMinutes,
+    laoFindsBrowserNotificationsEnabled:
+      typeof value.laoFindsBrowserNotificationsEnabled === "boolean"
+        ? value.laoFindsBrowserNotificationsEnabled
+        : defaultAppState.settings.laoFindsBrowserNotificationsEnabled,
+    laoFindsManualNotificationsEnabled:
+      typeof value.laoFindsManualNotificationsEnabled === "boolean"
+        ? value.laoFindsManualNotificationsEnabled
+        : defaultAppState.settings.laoFindsManualNotificationsEnabled,
     telegramBotToken: typeof value.telegramBotToken === "string" && value.telegramBotToken ? value.telegramBotToken : undefined,
     telegramChatId: typeof value.telegramChatId === "string" && value.telegramChatId ? value.telegramChatId : undefined
   };
@@ -157,10 +159,7 @@ function normalizeExportSettings(value: Partial<RefreshSettings> | Record<string
 
 function normalizeImportedSettings(value: Partial<RefreshSettings> | Record<string, unknown>): RefreshSettings {
   if (
-    typeof value.refreshIntervalMinutes !== "number" ||
-    !Number.isFinite(value.refreshIntervalMinutes) ||
-    value.refreshIntervalMinutes < 30 ||
-    value.refreshIntervalMinutes > 720
+    !isValidRefreshIntervalMinutes(value.refreshIntervalMinutes)
   ) {
     throw new Error("配置文件的刷新间隔不正确。");
   }
@@ -185,15 +184,18 @@ function normalizeImportedSettings(value: Partial<RefreshSettings> | Record<stri
   }
   if (
     value.timedActivityRefreshIntervalMinutes !== undefined &&
-    (typeof value.timedActivityRefreshIntervalMinutes !== "number" ||
-      !Number.isFinite(value.timedActivityRefreshIntervalMinutes) ||
-      value.timedActivityRefreshIntervalMinutes < 30 ||
-      value.timedActivityRefreshIntervalMinutes > 720)
+    !isValidTimedActivityRefreshIntervalMinutes(value.timedActivityRefreshIntervalMinutes)
   ) {
     throw new Error("配置文件的定时刷新间隔不正确。");
   }
   if (value.requestStatsAutoSyncEnabled !== undefined && typeof value.requestStatsAutoSyncEnabled !== "boolean") {
     throw new Error("配置文件的请求统计自动同步设置不正确。");
+  }
+  if (value.laoFindsBrowserNotificationsEnabled !== undefined && typeof value.laoFindsBrowserNotificationsEnabled !== "boolean") {
+    throw new Error("配置文件的佬有料浏览器通知设置不正确。");
+  }
+  if (value.laoFindsManualNotificationsEnabled !== undefined && typeof value.laoFindsManualNotificationsEnabled !== "boolean") {
+    throw new Error("配置文件的手动打捞通知设置不正确。");
   }
   const exportSettings = normalizeExportSettings(value);
   return {

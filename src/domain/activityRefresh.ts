@@ -29,6 +29,15 @@ export interface ActivityRefreshTarget {
   refreshedKinds: ActivityRefreshKind[];
 }
 
+export const DREDGE_REFRESH_UNAVAILABLE_MESSAGE = "当前没有可打捞范围，请先调整规则。";
+
+export interface DredgeRefreshAvailability {
+  available: boolean;
+  scopes: ActivityRefreshScope[];
+  unavailableReason?: "no_targets";
+  message?: string;
+}
+
 export function normalizeActivityRefreshScope(scope?: ActivityRefreshScope, usernames?: Username[]): ActivityRefreshScope {
   return {
     kind: isActivityKindFilter(scope?.kind) ? scope.kind : "all",
@@ -89,6 +98,21 @@ export function deriveTimedActivityRefreshScopes(state: AppState, mode: TimedAct
       return usernames.length ? { kind, usernames } : undefined;
     })
     .filter((scope): scope is ActivityRefreshScope => Boolean(scope));
+}
+
+export function deriveDredgeRefreshAvailability(
+  state: AppState,
+  mode: TimedActivityRefreshScopeMode = state.settings.timedActivityRefreshScopeMode
+): DredgeRefreshAvailability {
+  const scopes = deriveTimedActivityRefreshScopes(state, mode);
+  return scopes.length > 0
+    ? { available: true, scopes }
+    : {
+        available: false,
+        scopes,
+        unavailableReason: "no_targets",
+        message: DREDGE_REFRESH_UNAVAILABLE_MESSAGE
+      };
 }
 
 export function effectiveActivityKindsForFriend(

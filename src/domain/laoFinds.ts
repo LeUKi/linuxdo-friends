@@ -118,6 +118,12 @@ export function archiveLaoFindsItem(state: AppState, id: string, archived: boole
   };
 }
 
+export function deleteLaoFindsItem(state: AppState, id: string): AppState {
+  if (!state.laoFindsItems[id]) return state;
+  const { [id]: _deleted, ...laoFindsItems } = state.laoFindsItems;
+  return { ...state, laoFindsItems };
+}
+
 export function collectLaoFindsItems(
   state: AppState,
   candidates: ActivityItem[],

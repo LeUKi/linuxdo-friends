@@ -16,6 +16,7 @@ import type {
   PageScriptStatusSnapshot,
   RefreshSettings,
   SiteDataTaskProgress,
+  SiteDataTaskTrigger,
   UpdateCheckState
 } from "../shared/types";
 import { defaultUpdateCheckState } from "../domain/versionCheck";
@@ -276,6 +277,12 @@ export const resetLaoFindsStartedAtAtom = atom(null, async (_get, set) => {
   applyStateResponse(set, response, response.ok ? null : undefined);
 });
 
+export const completeRuleDerivedLaoFindsDredgeAtom = atom(null, async (_get, set, startedAt: string, scopes: ActivityRefreshScope[], trigger: SiteDataTaskTrigger) => {
+  const response = await sendCommand<AppState>({ type: "completeRuleDerivedLaoFindsDredge", startedAt, scopes, trigger });
+  applyStateResponse(set, response, response.ok && response.data.laoFindsStartedAt === startedAt ? null : undefined);
+  return response;
+});
+
 export const markLaoFindsItemReadAtom = atom(null, async (_get, set, id: string, read: boolean) => {
   const response = await sendCommand<AppState>({ type: "markLaoFindsItemRead", id, read });
   applyStateResponse(set, response, response.ok ? null : undefined);
@@ -283,6 +290,11 @@ export const markLaoFindsItemReadAtom = atom(null, async (_get, set, id: string,
 
 export const archiveLaoFindsItemAtom = atom(null, async (_get, set, id: string, archived: boolean) => {
   const response = await sendCommand<AppState>({ type: "archiveLaoFindsItem", id, archived });
+  applyStateResponse(set, response, response.ok ? null : undefined);
+});
+
+export const deleteLaoFindsItemAtom = atom(null, async (_get, set, id: string) => {
+  const response = await sendCommand<AppState>({ type: "deleteLaoFindsItem", id });
   applyStateResponse(set, response, response.ok ? null : undefined);
 });
 
@@ -303,8 +315,8 @@ export const refreshFriendActivityAtom = atom(null, async (_get, set, scope?: Ac
   return response;
 });
 
-export const refreshFriendActivityForTimedRunAtom = atom(null, async (_get, set, scope: ActivityRefreshScope, timedRunId: string) => {
-  const response = await sendCommand<AppState>({ type: "refreshFriendActivity", scope, trigger: "timed", timedRunId });
+export const refreshFriendActivityForTimedRunAtom = atom(null, async (_get, set, scope: ActivityRefreshScope, timedRunId: string, trigger: SiteDataTaskTrigger = "timed") => {
+  const response = await sendCommand<AppState>({ type: "refreshFriendActivity", scope, trigger, timedRunId });
   if (response.ok) {
     set(appStateAtom, response.data);
   }
@@ -363,7 +375,18 @@ export const repairLinuxDoPageScriptAtom = atom(null, async (get, set) => {
   }
 });
 
-export const openLinuxDoHomeAtom = atom(null, async (get, set) => {
+export const activateLinuxDoPageTabAtom = atom(null, async (_get, set, tabId: number) => {
+  const response = await sendCommand<PageRepairResult>({ type: "activateLinuxDoPageTab", tabId });
+  if (response.ok) {
+    set(statusMessageAtom, response.data.message);
+    await refreshPageScriptStatus(set);
+  } else {
+    set(statusMessageAtom, response.error);
+    await refreshPageScriptStatus(set);
+  }
+});
+
+export const openLinuxDoHomeAtom = atom(null, async (_get, set) => {
   const response = await sendCommand<PageRepairResult>({ type: "openLinuxDoHome" });
   if (response.ok) {
     set(statusMessageAtom, response.data.message);
