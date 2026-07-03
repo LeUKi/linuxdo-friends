@@ -1,5 +1,5 @@
 import { nowIso } from "../shared/time";
-import type { ActivityItem, ActivityRefreshKind, AppState, LaoFindsItem, DredgeRule, Username } from "../shared/types";
+import type { ActivityItem, ActivityRefreshKind, AppState, LaoFindsItem, DredgeRule, DredgeRuleMode, Username } from "../shared/types";
 import { ALL_ACTIVITY_KINDS, normalizeActivityKinds, normalizeUsername } from "./friends";
 
 export function normalizeDredgeRules(value: unknown, fallback: DredgeRule[] = []): DredgeRule[] {
@@ -37,16 +37,22 @@ export function normalizeLaoFindsItems(value: unknown): Record<string, LaoFindsI
 }
 
 export function normalizeDredgeRule(value: Partial<DredgeRule> & { id?: string }, timestamp: string = nowIso()): DredgeRule | null {
+  if (value.schemaVersion !== 2) return null;
+  if (!isDredgeRuleMode(value.mode)) return null;
+  const patterns = normalizeDredgeRulePatterns(value.patterns);
+  if (!patterns.valid) return null;
   const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : createDredgeRuleId(timestamp);
   const createdAt = typeof value.createdAt === "string" && value.createdAt.trim() ? value.createdAt : timestamp;
   const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : "未命名打捞规则";
   return {
+    schemaVersion: 2,
     id,
     name,
     enabled: value.enabled !== false,
+    mode: value.mode,
     usernames: normalizeRuleUsernames(value.usernames),
     kinds: normalizeActivityKinds(value.kinds, ALL_ACTIVITY_KINDS),
-    keywords: normalizeKeywords(value.keywords),
+    patterns: patterns.patterns,
     createdAt,
     updatedAt: typeof value.updatedAt === "string" && value.updatedAt.trim() ? value.updatedAt : timestamp
   };
@@ -117,8 +123,9 @@ export function collectLaoFindsItems(
   candidates: ActivityItem[],
   collectedAt: string = nowIso()
 ): { state: AppState; collectedCount: number } {
-  const activeRules = state.dredgeRules.filter((rule) => rule.enabled);
-  if (activeRules.length === 0) return { state, collectedCount: 0 };
+  const activeAllowRules = state.dredgeRules.filter((rule) => rule.enabled && rule.mode === "allow");
+  if (activeAllowRules.length === 0) return { state, collectedCount: 0 };
+  const activeBlockRules = state.dredgeRules.filter((rule) => rule.enabled && rule.mode === "block");
   const startedAtMs = parseTimestamp(state.laoFindsStartedAt);
   if (startedAtMs === undefined) return { state: resetLaoFindsStartedAt(state, collectedAt), collectedCount: 0 };
   if (candidates.length === 0) return { state, collectedCount: 0 };
@@ -130,7 +137,8 @@ export function collectLaoFindsItems(
     if (!isCollectableKind(candidate.kind)) continue;
     const occurredAtMs = parseTimestamp(candidate.occurredAt);
     if (occurredAtMs === undefined || occurredAtMs <= startedAtMs) continue;
-    const matchedRuleIds = activeRules.filter((rule) => dredgeRuleMatches(rule, candidate)).map((rule) => rule.id);
+    if (activeBlockRules.some((rule) => dredgeRuleMatches(rule, candidate))) continue;
+    const matchedRuleIds = activeAllowRules.filter((rule) => dredgeRuleMatches(rule, candidate)).map((rule) => rule.id);
     if (matchedRuleIds.length === 0) continue;
 
     const existing = nextItems[candidate.id];
@@ -166,9 +174,10 @@ function dredgeRuleSemanticChanged(existing: DredgeRule | undefined, next: Dredg
   if (!existing) return true;
   return (
     existing.enabled !== next.enabled ||
+    existing.mode !== next.mode ||
     !sameRuleUsernames(existing.usernames, next.usernames) ||
     !sameStringList(existing.kinds, next.kinds) ||
-    !sameStringList(existing.keywords, next.keywords)
+    !sameStringList(existing.patterns, next.patterns)
   );
 }
 
@@ -191,46 +200,70 @@ export function dredgeRuleMatches(rule: DredgeRule, item: ActivityItem): boolean
   if (!rule.enabled || !isCollectableKind(item.kind)) return false;
   if (!rule.kinds.includes(item.kind)) return false;
   if (!ruleUsernamesMatch(rule.usernames, item)) return false;
-  if (rule.keywords.length === 0) return true;
+  if (rule.patterns.length === 0) return true;
   const text = searchableTextForActivity(item);
-  return rule.keywords.some((keyword) => text.includes(normalizeKeyword(keyword)));
+  return rule.patterns.some((pattern) => regexMatches(pattern, text));
 }
 
 export function searchableTextForActivity(item: ActivityItem): string {
-  return normalizeKeyword(
-    [
-      item.title,
-      item.topicTitle,
-      item.excerpt,
-      item.boostText,
-      item.reactionValue,
-      item.username,
-      item.actorUsername,
-      item.actorName,
-      item.targetUsername,
-      item.targetName
-    ]
-      .filter(Boolean)
-      .join(" ")
-  );
+  return [
+    item.title,
+    item.topicTitle,
+    item.excerpt,
+    item.boostText,
+    item.reactionValue,
+    item.username,
+    item.actorUsername,
+    item.actorName,
+    item.targetUsername,
+    item.targetName
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
-export function normalizeKeywords(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
+export interface DredgeRulePatternValidation {
+  valid: boolean;
+  patterns: string[];
+  invalidPattern?: string;
+  error?: string;
+}
+
+export function isDredgeRuleMode(value: unknown): value is DredgeRuleMode {
+  return value === "allow" || value === "block";
+}
+
+export function normalizeDredgeRulePatterns(value: unknown): DredgeRulePatternValidation {
+  if (!Array.isArray(value)) return { valid: false, patterns: [] };
   const seen = new Set<string>();
-  const keywords: string[] = [];
+  const patterns: string[] = [];
   for (const item of value) {
     if (typeof item !== "string") continue;
-    const keyword = normalizeKeyword(item);
-    if (!keyword || seen.has(keyword)) continue;
-    seen.add(keyword);
-    keywords.push(keyword);
+    const pattern = item.trim();
+    if (!pattern || seen.has(pattern)) continue;
+    const error = validateDredgeRulePattern(pattern);
+    if (error) return { valid: false, patterns: [], invalidPattern: pattern, error };
+    seen.add(pattern);
+    patterns.push(pattern);
   }
-  return keywords;
+  return { valid: true, patterns };
 }
 
-function normalizeKeyword(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
+export function validateDredgeRulePattern(pattern: string): string | undefined {
+  try {
+    new RegExp(pattern, "i");
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error.message : "正则表达式不正确。";
+  }
+}
+
+function regexMatches(pattern: string, text: string): boolean {
+  try {
+    return new RegExp(pattern, "i").test(text);
+  } catch {
+    return false;
+  }
 }
 
 function normalizeRuleUsernames(value: unknown): "all" | Username[] {

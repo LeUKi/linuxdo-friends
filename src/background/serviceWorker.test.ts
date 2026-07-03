@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createConfigFingerprint as createConfigFingerprintForTest } from "../domain/configTransfer";
 import { defaultAppState } from "../domain/defaultState";
 import { addFriendFromProfile, updateFriend, upsertFollowedUser } from "../domain/friends";
@@ -12,7 +12,18 @@ import type { AppState } from "../shared/types";
 
 describe("message contracts", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    try {
+      vi.clearAllTimers();
+    } catch {
+      // Some tests use real timers only; timer cleanup is best-effort.
+    }
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -34,7 +45,12 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "refreshFriendActivity", usernames: ["neil"] })).toBe(true);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neil"] } })).toBe(true);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neil"] }, trigger: "timed", timedRunId: "run-1" })).toBe(true);
-    expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { id: "rule-1", name: "AI", usernames: ["neil"], kinds: ["topic"], keywords: ["AI"] } })).toBe(true);
+    expect(
+      isBackgroundCommand({
+        type: "upsertDredgeRule",
+        rule: { schemaVersion: 2, id: "rule-1", name: "AI", mode: "allow", usernames: ["neil"], kinds: ["topic"], patterns: ["AI"] }
+      })
+    ).toBe(true);
     expect(isBackgroundCommand({ type: "removeDredgeRule", id: "rule-1" })).toBe(true);
     expect(isBackgroundCommand({ type: "resetLaoFindsStartedAt" })).toBe(true);
     expect(isBackgroundCommand({ type: "markLaoFindsItemRead", id: "item-1", read: true })).toBe(true);
@@ -87,6 +103,9 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "bad", timedRunId: "run-1" })).toBe(false);
     expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { usernames: [""] } })).toBe(false);
     expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { kinds: ["bad"] } })).toBe(false);
+    expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { keywords: ["AI"] } })).toBe(false);
+    expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { mode: "deny" } })).toBe(false);
+    expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { patterns: ["AI", 1] } })).toBe(false);
     expect(isBackgroundCommand({ type: "removeDredgeRule", id: "" })).toBe(false);
     expect(isBackgroundCommand({ type: "markLaoFindsItemRead", id: "item-1", read: "yes" })).toBe(false);
     expect(isBackgroundCommand({ type: "archiveLaoFindsItem", id: "item-1", archived: "yes" })).toBe(false);
@@ -273,11 +292,13 @@ describe("message contracts", () => {
     await send({
       type: "upsertDredgeRule",
       rule: {
+        schemaVersion: 2,
         name: "Neo",
         enabled: true,
+        mode: "allow",
         usernames: ["neo"],
         kinds: ["topic"],
-        keywords: []
+        patterns: []
       }
     });
     await send({ type: "updateSettings", settings: { timedActivityRefreshEnabled: true } });
@@ -340,12 +361,14 @@ describe("message contracts", () => {
         ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
         dredgeRules: [
           {
+            schemaVersion: 2,
             id: "rule-neo",
             name: "Neo",
             enabled: true,
+            mode: "allow",
             usernames: ["neo"],
             kinds: ["topic"],
-            keywords: [],
+            patterns: [],
             createdAt: "2026-06-28T00:00:00.000Z",
             updatedAt: "2026-06-28T00:00:00.000Z"
           }
@@ -385,12 +408,14 @@ describe("message contracts", () => {
       },
       dredgeRules: [
         {
+          schemaVersion: 2,
           id: "rule-ghost",
           name: "Ghost",
           enabled: true,
+          mode: "allow",
           usernames: ["ghost"],
           kinds: ["topic"],
-          keywords: [],
+          patterns: [],
           createdAt: "2026-06-28T00:00:00.000Z",
           updatedAt: "2026-06-28T00:00:00.000Z"
         }
@@ -1486,7 +1511,7 @@ describe("message contracts", () => {
     fetchImpl.mockClear();
 
     await triggerAlarm("linuxdoFriends.requestStatsAutoSync");
-    await flushAsync();
+    await waitForCloudAuth(localStorage, (auth) => typeof auth.lastRequestStatsSyncedAt === "string");
     await triggerAlarm("linuxdoFriends.requestStatsAutoSync");
     await flushAsync();
 
@@ -1521,15 +1546,14 @@ describe("message contracts", () => {
     await flushAsync();
 
     await triggerAlarm("linuxdoFriends.requestStatsAutoSync");
-    await flushAsync();
+    const storedAuth = await waitForCloudAuth(localStorage, (auth) => Boolean(auth.lastRequestStatsAutoSyncError));
 
-    expect(localStorage.dump()[CLOUD_AUTH_STORAGE_KEY]).toMatchObject({
+    expect(storedAuth).toMatchObject({
       lastRequestStatsAutoSyncError: {
         state: "network_error",
         message: "request failed Authorization: Bearer <redacted> token=<redacted>"
       }
     });
-    const storedAuth = localStorage.dump()[CLOUD_AUTH_STORAGE_KEY] as { lastRequestStatsAutoSyncError?: unknown };
     expect(JSON.stringify(storedAuth.lastRequestStatsAutoSyncError)).not.toContain("secret-token");
   });
 
@@ -1562,12 +1586,14 @@ describe("message contracts", () => {
         },
         dredgeRules: [
           {
+            schemaVersion: 2,
             id: "rule-neil",
             name: "Neil",
             enabled: true,
+            mode: "allow",
             usernames: ["neil"],
             kinds: ["topic"],
-            keywords: [],
+            patterns: [],
             createdAt: "2026-06-28T00:00:00.000Z",
             updatedAt: "2026-06-28T00:00:00.000Z"
           }
@@ -1913,12 +1939,14 @@ describe("message contracts", () => {
       laoFindsStartedAt: "2026-06-26T00:00:00.000Z",
       dredgeRules: [
         {
+          schemaVersion: 2,
           id: "rule-activity",
           name: "动态",
           enabled: true,
+          mode: "allow",
           usernames: ["misaka7369"],
           kinds: ["reply"],
-          keywords: ["动态"],
+          patterns: ["动态"],
           createdAt: "2026-06-28T00:00:00.000Z",
           updatedAt: "2026-06-28T00:00:00.000Z"
         }
@@ -2905,10 +2933,28 @@ function sendCloudExchangeCode(
   );
 }
 
+async function waitForCloudAuth(
+  localStorage: ReturnType<typeof createMockStorage>,
+  predicate: (auth: Record<string, unknown>) => boolean
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await flushAsync();
+    const auth = localStorage.dump()[CLOUD_AUTH_STORAGE_KEY];
+    if (auth && typeof auth === "object" && !Array.isArray(auth) && predicate(auth as Record<string, unknown>)) {
+      return auth as Record<string, unknown>;
+    }
+  }
+  throw new Error("Timed out waiting for stored cloud auth metadata.");
+}
+
 async function flushAsync() {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 4; index += 1) {
+    await Promise.resolve();
+  }
   await new Promise((resolve) => setTimeout(resolve, 0));
+  for (let index = 0; index < 4; index += 1) {
+    await Promise.resolve();
+  }
 }
 
 function createPendingJsonFetch(payload: unknown) {

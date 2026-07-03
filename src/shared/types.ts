@@ -140,13 +140,17 @@ export interface RequestStatsState {
   days: Record<string, RequestStatsDayEntry>;
 }
 
+export type DredgeRuleMode = "allow" | "block";
+
 export interface DredgeRule {
+  schemaVersion: 2;
   id: string;
   name: string;
   enabled: boolean;
+  mode: DredgeRuleMode;
   usernames: "all" | Username[];
   kinds: ActivityRefreshKind[];
-  keywords: string[];
+  patterns: string[];
   createdAt: string;
   updatedAt: string;
 }

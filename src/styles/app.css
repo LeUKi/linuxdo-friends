@@ -250,7 +250,8 @@ html,
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -274,7 +275,8 @@ button:disabled {
 }
 
 input:not([type="checkbox"]):not([type="radio"]),
-select {
+select,
+textarea {
   display: block;
   width: 100%;
   height: 36px;
@@ -287,8 +289,16 @@ select {
   color: var(--text);
 }
 
-input::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: var(--text-subtle);
+}
+
+textarea {
+  min-height: 82px;
+  max-height: none;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 input[type="checkbox"] {
@@ -375,6 +385,65 @@ input[type="checkbox"] {
 
 .options-content {
   min-width: 0;
+}
+
+.settings-card-list {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.settings-card {
+  min-width: 0;
+}
+
+.settings-card-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-card-title-block {
+  min-width: 0;
+}
+
+.settings-card-actions {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-card-body {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.settings-card-unavailable {
+  border-style: dashed;
+  background: var(--surface-raised);
+}
+
+.settings-card-danger {
+  border-color: var(--danger-border);
+}
+
+.settings-unavailable-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .header {
@@ -3050,6 +3119,110 @@ input[type="checkbox"] {
 .dredge-rule-card {
   display: grid;
   gap: 10px;
+}
+
+.dredge-rule-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.dredge-rule-row-main {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
+.dredge-rule-row-title {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dredge-rule-row-title strong {
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 13px;
+}
+
+.dredge-rule-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.dredge-rule-badge.is-allow,
+.dredge-rule-badge.is-enabled {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.dredge-rule-badge.is-block {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.dredge-rule-badge.is-disabled {
+  opacity: 0.78;
+}
+
+.dredge-rule-summary {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dredge-rule-summary span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dredge-rule-row-actions,
+.dredge-rule-draft-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.dredge-rule-row-actions button,
+.dredge-rule-draft-actions button {
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.dredge-rule-draft {
+  display: grid;
+  gap: 10px;
+}
+
+.dredge-rule-warning.compact {
+  margin-top: 0;
 }
 
 .compact-toggle {

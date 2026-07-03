@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useAtom, useSetAtom } from "jotai";
-import { Cloud, Send } from "lucide-react";
 import {
   addFriendFromKnownUserAtom,
   appStateAtom,
@@ -56,6 +55,10 @@ import {
 } from "../domain/requestStats";
 import "../styles/app.css";
 
+function classNames(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(" ");
+}
+
 const LDC_SPONSOR_20_URL = "https://credit.linux.do/paying/online?token=3b78efe60d34a77c55d52e84d60e33270b5cc69f7aa8979bbab4d1b41b6f95b7";
 const LDC_SPONSOR_200_URL = "https://credit.linux.do/paying/online?token=276b84998e7864428f277f6d7260f7e65e8c531cda5413cb061ff4a91cc3caa4";
 
@@ -78,6 +81,33 @@ const HASH_ALIASES = new Map<string, { hash: string; preserve?: boolean }>([
   ["#maintenance", { hash: "#data" }],
   ["#cloud-backup", { hash: "#data", preserve: true }]
 ]);
+
+type SettingsCardProps = Omit<React.HTMLAttributes<HTMLElement>, "title"> & {
+  actions?: React.ReactNode;
+  children?: React.ReactNode;
+  subtitle?: React.ReactNode;
+  title: React.ReactNode;
+  variant?: "default" | "unavailable" | "danger";
+};
+
+const SettingsCard = React.forwardRef<HTMLElement, SettingsCardProps>(function SettingsCard(
+  { actions, children, className, subtitle, title, variant = "default", ...sectionProps },
+  ref
+) {
+  const variantClass = variant === "default" ? null : `settings-card-${variant}`;
+  return (
+    <section {...sectionProps} ref={ref} className={classNames("panel settings-card", variantClass, className)}>
+      <div className={classNames("settings-card-header")}>
+        <div className={classNames("settings-card-title-block")}>
+          <h2>{title}</h2>
+          {subtitle ? <p className={classNames("panel-subtitle")}>{subtitle}</p> : null}
+        </div>
+        {actions ? <div className={classNames("settings-card-actions")}>{actions}</div> : null}
+      </div>
+      {children ? <div className={classNames("settings-card-body")}>{children}</div> : null}
+    </section>
+  );
+});
 
 function sectionFromHash(hash: string): OptionsSectionId {
   const canonicalHash = canonicalizeOptionsHash(hash);
@@ -149,7 +179,7 @@ export function OptionsApp() {
   const [telegramMessage, setTelegramMessage] = useState<string | null>(null);
   const [telegramBusy, setTelegramBusy] = useState<"save" | "test" | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
-  const cloudBackupRef = useRef<HTMLDivElement | null>(null);
+  const cloudBackupRef = useRef<HTMLElement | null>(null);
   const activeSection = sectionFromHash(activeHash);
   const friends = deriveFriendList(state);
   const followedCandidates = deriveFollowedCandidates(state);
@@ -418,22 +448,22 @@ export function OptionsApp() {
   }
 
   return (
-    <main className="options-shell options-shell-wide">
-      <header className="header">
+    <main className={classNames("options-shell options-shell-wide")}>
+      <header className={classNames("header")}>
         <div>
-          <p className="eyebrow">LinuxDo Friends</p>
-          <h1>佬朋友设置</h1>
+          <p className={classNames("eyebrow")}>LinuxDo Friends</p>
+          <h1 >佬朋友设置</h1>
         </div>
-        <div className="header-status">
+        <div className={classNames("header-status")}>
           <VersionBadge state={updateCheck} />
         </div>
       </header>
 
-      <div className="options-layout">
-        <nav className="options-nav" aria-label="设置导航">
+      <div className={classNames("options-layout")}>
+        <nav className={classNames("options-nav")} aria-label="设置导航">
           {OPTIONS_SECTIONS.map((section) => (
             <button
-              className={activeSection === section.id ? "active" : ""}
+              className={classNames(activeSection === section.id && "active")}
               key={section.id}
               type="button"
               onClick={() => switchSection(section.id)}
@@ -443,98 +473,88 @@ export function OptionsApp() {
           ))}
         </nav>
 
-        <div className="options-content">
+        <div className={classNames("options-content")}>
           {activeSection === "basic" ? (
-            <>
+            <div className={classNames("settings-card-list")}>
               <VersionDiagnostics now={relativeNow} onCheck={() => void checkForUpdates(true)} state={updateCheck} />
-              <section className="panel">
-                <div className="panel-title-row">
-                  <div>
-                    <h2>本地账号探测</h2>
-                    <p className="panel-subtitle">
-                      {state.currentAccount
-                        ? `当前探测为 @${state.currentAccount.username}`
-                        : "尚未探测到 linux.do 登录账号。"}
-                    </p>
-                  </div>
-                  <button className="small-action" type="button" disabled={accountBusy} onClick={() => void handleIdentifyAccount()}>
+              <SettingsCard
+                title="本地账号探测"
+                subtitle={state.currentAccount ? `当前探测为 @${state.currentAccount.username}` : "尚未探测到 linux.do 登录账号。"}
+                actions={
+                  <button className={classNames("small-action")} type="button" disabled={accountBusy} onClick={() => void handleIdentifyAccount()}>
                     {accountBusy ? "探测中" : "重新探测"}
                   </button>
-                </div>
+                }
+              >
                 {state.currentAccount?.verifiedAt ? (
-                  <p className="settings-meta">上次探测：{new Date(state.currentAccount.verifiedAt).toLocaleString()}</p>
+                  <p className={classNames("settings-meta")}>上次探测：{new Date(state.currentAccount.verifiedAt).toLocaleString()}</p>
                 ) : (
-                  <p className="settings-meta">打开已登录的 linux.do 页面后可探测当前账号。</p>
+                  <p className={classNames("settings-meta")}>打开已登录的 linux.do 页面后可探测当前账号。</p>
                 )}
-              </section>
-              <section className="panel">
-                <h2>动态跳转</h2>
-                <div className="settings-placeholder" style={{ marginTop: 12 }}>
-                  <div className="segmented-control" role="radiogroup" aria-label="动态跳转">
-                    <button
-                      className={`segmented-option${state.settings.openActivityLinksInPage ? " active" : ""}`}
-                      type="button"
-                      aria-pressed={state.settings.openActivityLinksInPage}
-                      onClick={() => void updateSettings({ openActivityLinksInPage: true })}
-                    >
-                      页内跳转
-                    </button>
-                    <button
-                      className={`segmented-option${!state.settings.openActivityLinksInPage ? " active" : ""}`}
-                      type="button"
-                      aria-pressed={!state.settings.openActivityLinksInPage}
-                      onClick={() => void updateSettings({ openActivityLinksInPage: false })}
-                    >
-                      新标签页
-                    </button>
-                  </div>
-                  <p className="settings-meta">页内跳转会优先使用当前 linux.do 标签页；不可用时仍打开新标签。</p>
+              </SettingsCard>
+              <SettingsCard title="动态跳转" subtitle="选择打开动态详情的位置。">
+                <div className={classNames("segmented-control")} role="radiogroup" aria-label="动态跳转">
+                  <button
+                    className={classNames("segmented-option", state.settings.openActivityLinksInPage && "active")}
+                    type="button"
+                    aria-pressed={state.settings.openActivityLinksInPage}
+                    onClick={() => void updateSettings({ openActivityLinksInPage: true })}
+                  >
+                    页内跳转
+                  </button>
+                  <button
+                    className={classNames("segmented-option", !state.settings.openActivityLinksInPage && "active")}
+                    type="button"
+                    aria-pressed={!state.settings.openActivityLinksInPage}
+                    onClick={() => void updateSettings({ openActivityLinksInPage: false })}
+                  >
+                    新标签页
+                  </button>
                 </div>
-              </section>
-            </>
+                <p className={classNames("settings-meta")}>页内跳转会优先使用当前 linux.do 标签页；不可用时仍打开新标签。</p>
+              </SettingsCard>
+            </div>
           ) : null}
 
           {activeSection === "scope" ? (
-            <section className="panel">
-              <div className="panel-title-row">
-                <div>
-                  <h2>视奸范围</h2>
-                </div>
-                <button className="small-action" type="button" disabled={syncBusy} onClick={() => void handleSyncFollows()}>
-                  {syncBusy ? "获取中" : "获取我的关注列表"}
-                </button>
-              </div>
-              <input
-                className="modal-search-input settings-search-input"
-                value={friendsQuery}
-                onChange={(event) => setFriendsQuery(event.target.value)}
-                placeholder="筛选已关注，或输入用户名"
+            <div className={classNames("settings-card-list")}>
+              <SettingsCard
+                title="关注同步"
+                subtitle="获取你的 linux.do 关注列表，便于添加佬朋友。"
+                actions={
+                  <button className={classNames("small-action")} type="button" disabled={syncBusy} onClick={() => void handleSyncFollows()}>
+                    {syncBusy ? "获取中" : "获取我的关注列表"}
+                  </button>
+                }
               />
-              <FriendCandidateList
-                candidates={followedCandidates}
-                friends={friends}
-                loading={syncBusy}
-                mode="full"
-                onAdd={(target, profile) => void addFriendFromKnownUser(target, profile)}
-                onLookup={(target) => lookupFriendProfile(target)}
-                onRemove={(target) => void removeFriend(target)}
-                onUpdateScope={handleUpdateFriendScope}
-                query={friendsQuery}
-              />
-              {friends.length > 0 ? <p className="friend-count-footer">共 {friends.length} 位佬朋友</p> : null}
-            </section>
+              <SettingsCard title="范围管理" subtitle="管理会被打捞和展示动态的已关注用户。">
+                <input
+                  className={classNames("modal-search-input settings-search-input")}
+                  value={friendsQuery}
+                  onChange={(event) => setFriendsQuery(event.target.value)}
+                  placeholder="筛选已关注，或输入用户名"
+                />
+                <FriendCandidateList
+                  candidates={followedCandidates}
+                  friends={friends}
+                  loading={syncBusy}
+                  mode="full"
+                  onAdd={(target, profile) => void addFriendFromKnownUser(target, profile)}
+                  onLookup={(target) => lookupFriendProfile(target)}
+                  onRemove={(target) => void removeFriend(target)}
+                  onUpdateScope={handleUpdateFriendScope}
+                  query={friendsQuery}
+                />
+                {friends.length > 0 ? <p className={classNames("friend-count-footer")}>共 {friends.length} 位佬朋友</p> : null}
+              </SettingsCard>
+            </div>
           ) : null}
 
           {activeSection === "notifications" ? (
-            <section className="panel">
-              <h2>通知渠道</h2>
-              <div className="settings-placeholder" style={{ marginTop: 12 }}>
-                <h3>
-                  <Send size={13} aria-hidden="true" style={{ display: "inline", verticalAlign: "middle", marginRight: 4 }} />
-                  Telegram
-                </h3>
+            <div className={classNames("settings-card-list")}>
+              <SettingsCard title="Telegram" subtitle="刷新到新动态时发送提醒。">
                 <div>
-                  <label className="settings-meta" htmlFor="tg-bot-token" style={{ display: "block", marginBottom: 4 }}>
+                  <label className={classNames("settings-meta")} htmlFor="tg-bot-token" style={{ display: "block", marginBottom: 4 }}>
                     Bot Token
                   </label>
                   <input
@@ -547,7 +567,7 @@ export function OptionsApp() {
                   />
                 </div>
                 <div>
-                  <label className="settings-meta" htmlFor="tg-chat-id" style={{ display: "block", marginBottom: 4 }}>
+                  <label className={classNames("settings-meta")} htmlFor="tg-chat-id" style={{ display: "block", marginBottom: 4 }}>
                     Chat ID
                   </label>
                   <input
@@ -559,61 +579,54 @@ export function OptionsApp() {
                     autoComplete="off"
                   />
                 </div>
-                <div className="maintenance-actions">
-                  <button className="small-action" type="button" disabled={telegramBusy != null} onClick={() => void handleSaveTelegram()}>
+                <div className={classNames("maintenance-actions")}>
+                  <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={() => void handleSaveTelegram()}>
                     {telegramBusy === "save" ? "保存中" : "保存"}
                   </button>
-                  <button className="small-action" type="button" disabled={telegramBusy != null} onClick={() => void handleTestTelegram()}>
+                  <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={() => void handleTestTelegram()}>
                     {telegramBusy === "test" ? "发送中" : "发送测试消息"}
                   </button>
                 </div>
-                {telegramMessage ? <p className="settings-meta">{telegramMessage}</p> : null}
-                <p className="settings-meta">
-                  刷新到新动态时自动推送 Telegram 消息。需自行创建 Bot（向 @BotFather 发送 /newbot）并使用 @userinfobot 获取自己的 Chat ID。
-                </p>
-              </div>
-              <div className="settings-construction-card" aria-label="Webhook 通知正在施工">
-                <div>
-                  <h3>Webhook</h3>
-                  <p>正在施工</p>
-                </div>
-                <span className="construction-badge">WIP</span>
-              </div>
-            </section>
+                {telegramMessage ? <p className={classNames("settings-meta")}>{telegramMessage}</p> : null}
+                <p className={classNames("settings-meta")}>先在 Telegram 创建 Bot，再填入自己的 Chat ID。</p>
+              </SettingsCard>
+              <SettingsCard
+                variant="unavailable"
+                title="Webhook 通知"
+                subtitle="以后可把提醒发送到你自己的地址。"
+                actions={<span className={classNames("settings-unavailable-badge")}>暂未开放</span>}
+              />
+            </div>
           ) : null}
 
           {activeSection === "lao-finds" ? (
-            <>
-              <section className="panel">
-                <div className="panel-title-row">
+            <div className={classNames("settings-card-list")}>
+              <SettingsCard title="自动捞料" subtitle="保持插件界面打开，命中规则的新动态会自动打捞。">
+                <div className={classNames("settings-setting-row timed-setting-row")}>
                   <div>
-                    <h2>佬有料</h2>
-                    <p className="panel-subtitle">侧栏打开时运行自动捞料。</p>
+                    <strong>运行状态</strong>
+                    <span>{state.settings.timedActivityRefreshEnabled ? "已开启自动捞料。" : "开启后会按规则定时打捞。"}</span>
                   </div>
+                  <button
+                    className={classNames("switch-button", state.settings.timedActivityRefreshEnabled && "active")}
+                    type="button"
+                    aria-pressed={state.settings.timedActivityRefreshEnabled}
+                    onClick={() => void updateSettings({ timedActivityRefreshEnabled: !state.settings.timedActivityRefreshEnabled })}
+                  >
+                    {state.settings.timedActivityRefreshEnabled ? "已启用" : "未启用"}
+                  </button>
                 </div>
-                <div className="timed-settings-grid">
-                  <div className="timed-setting-row">
-                    <div>
-                      <strong>自动捞料</strong>
-                      <span>保持插件界面打开，自动捞料才会运行。</span>
-                    </div>
-                    <button
-                      className={`switch-button${state.settings.timedActivityRefreshEnabled ? " active" : ""}`}
-                      type="button"
-                      aria-pressed={state.settings.timedActivityRefreshEnabled}
-                      onClick={() => void updateSettings({ timedActivityRefreshEnabled: !state.settings.timedActivityRefreshEnabled })}
-                    >
-                      {state.settings.timedActivityRefreshEnabled ? "已启用" : "未启用"}
-                    </button>
-                  </div>
-                  <div className="timed-setting-row">
+              </SettingsCard>
+              <SettingsCard title="打捞设置" subtitle="控制自动捞料的请求范围、间隔和起点。">
+                <div className={classNames("timed-settings-grid")}>
+                  <div className={classNames("settings-setting-row timed-setting-row")}>
                     <div>
                       <strong>打捞请求范围</strong>
-                      <span>按规则会从启用的打捞规则反推请求范围；全量会按每位用户的视奸范围刷新。</span>
+                      <span>按规则只请求命中规则需要的范围；全量会按每位用户的视奸范围刷新。</span>
                     </div>
-                    <div className="segmented-control timed-mode-control" role="radiogroup" aria-label="打捞请求范围">
+                    <div className={classNames("segmented-control timed-mode-control")} role="radiogroup" aria-label="打捞请求范围">
                       <button
-                        className={`segmented-option${state.settings.timedActivityRefreshScopeMode === "rules" ? " active" : ""}`}
+                        className={classNames("segmented-option", state.settings.timedActivityRefreshScopeMode === "rules" && "active")}
                         type="button"
                         aria-pressed={state.settings.timedActivityRefreshScopeMode === "rules"}
                         onClick={() => void updateSettings({ timedActivityRefreshScopeMode: "rules" })}
@@ -621,7 +634,7 @@ export function OptionsApp() {
                         按规则
                       </button>
                       <button
-                        className={`segmented-option${state.settings.timedActivityRefreshScopeMode === "all" ? " active" : ""}`}
+                        className={classNames("segmented-option", state.settings.timedActivityRefreshScopeMode === "all" && "active")}
                         type="button"
                         aria-pressed={state.settings.timedActivityRefreshScopeMode === "all"}
                         onClick={() => void updateSettings({ timedActivityRefreshScopeMode: "all" })}
@@ -630,13 +643,13 @@ export function OptionsApp() {
                       </button>
                     </div>
                   </div>
-                  <div className="timed-setting-row">
+                  <div className={classNames("settings-setting-row timed-setting-row")}>
                     <div>
                       <strong>打捞间隔</strong>
                       <span>范围 30 到 720 分钟。</span>
                     </div>
                     <input
-                      className="timed-interval-input"
+                      className={classNames("timed-interval-input")}
                       type="number"
                       min={30}
                       max={720}
@@ -650,17 +663,17 @@ export function OptionsApp() {
                       aria-label="打捞间隔分钟"
                     />
                   </div>
-                  <div className="timed-setting-row">
+                  <div className={classNames("settings-setting-row timed-setting-row")}>
                     <div>
                       <strong>打捞起点</strong>
                       <span>{formatLaoFindsStartedAt(state.laoFindsStartedAt, relativeNow)}</span>
                     </div>
-                    <button className="small-action" type="button" onClick={() => void handleResetLaoFindsStartedAt()} disabled={dredgeRulesLocked}>
+                    <button className={classNames("small-action")} type="button" onClick={() => void handleResetLaoFindsStartedAt()} disabled={dredgeRulesLocked}>
                       重设为现在
                     </button>
                   </div>
                 </div>
-              </section>
+              </SettingsCard>
               <DredgeRuleEditor
                 locked={dredgeRulesLocked}
                 lockReason={dredgeRulesLockReason}
@@ -669,22 +682,20 @@ export function OptionsApp() {
                 onRemoveRule={(id) => void removeDredgeRule(id)}
                 onUpsertRule={(rule) => void upsertDredgeRule(rule)}
               />
-            </>
+            </div>
           ) : null}
 
           {activeSection === "data" ? (
-            <section className="panel">
-              <div className="settings-group">
-                <div className="panel-title-row">
-                  <div>
-                    <h2>配置迁移</h2>
-                    <p className="panel-subtitle">导入导出佬朋友、刷新设置和请求统计，不包含账号、动态、头像缓存、页面现场或 Cookie。</p>
-                  </div>
-                  <div className="maintenance-actions">
-                    <button className="small-action" type="button" onClick={() => void handleExportConfig()}>
+            <div className={classNames("settings-card-list")}>
+              <SettingsCard
+                title="配置迁移"
+                subtitle="导入导出佬朋友、设置和请求统计；账号登录状态、动态内容和头像缓存不会导出。"
+                actions={
+                  <>
+                    <button className={classNames("small-action")} type="button" onClick={() => void handleExportConfig()}>
                       导出配置
                     </button>
-                    <button className="small-action" type="button" onClick={() => importInputRef.current?.click()}>
+                    <button className={classNames("small-action")} type="button" onClick={() => importInputRef.current?.click()}>
                       导入配置
                     </button>
                     <input
@@ -694,31 +705,27 @@ export function OptionsApp() {
                       accept="application/json,.json"
                       onChange={(event) => void handleImportConfig(event.currentTarget.files?.[0])}
                     />
-                  </div>
-                </div>
-                {configMessage ? <p className="settings-meta">{configMessage}</p> : null}
-              </div>
+                  </>
+                }
+              >
+                {configMessage ? <p className={classNames("settings-meta")}>{configMessage}</p> : null}
+              </SettingsCard>
 
-              <div className="settings-section-divider" />
-
-              <div className="settings-group" id="cloud-backup" ref={cloudBackupRef}>
-                <div className="panel-title-row">
-                  <div>
-                    <h2 className="settings-title-with-icon">
-                      <Cloud size={16} aria-hidden="true" />
-                      <span>云端备份</span>
-                    </h2>
-                    <p className="panel-subtitle">{cloudArchiveStatusDescription(cloudArchiveState)}</p>
-                  </div>
-                  <div className="maintenance-actions">
-                    <button className="small-action" type="button" disabled={cloudBusy != null} onClick={() => void handleBindCloudSave()}>
+              <SettingsCard
+                id="cloud-backup"
+                ref={cloudBackupRef}
+                title="云存档"
+                subtitle={cloudArchiveStatusDescription(cloudArchiveState)}
+                actions={
+                  <>
+                    <button className={classNames("small-action")} type="button" disabled={cloudBusy != null} onClick={() => void handleBindCloudSave()}>
                       {cloudBusy === "bind" ? "绑定中" : cloudBound ? "重新绑定" : "绑定"}
                     </button>
-                    <button className="small-action" type="button" disabled={cloudBusy != null} onClick={() => void refreshCloudStatus()}>
+                    <button className={classNames("small-action")} type="button" disabled={cloudBusy != null} onClick={() => void refreshCloudStatus()}>
                       {cloudBusy === "status" ? "检查中" : "检查云端"}
                     </button>
                     <button
-                      className={`small-action${cloudArchiveState?.archiveState === "different" ? " primary-action" : ""}`}
+                      className={classNames("small-action", cloudArchiveState?.archiveState === "different" && "primary-action")}
                       type="button"
                       disabled={cloudBusy != null || !cloudBound}
                       onClick={() => void handleBackupCloudConfig()}
@@ -726,7 +733,7 @@ export function OptionsApp() {
                       {cloudBusy === "backup" ? "备份中" : "备份到云端"}
                     </button>
                     <button
-                      className="small-action"
+                      className={classNames("small-action")}
                       type="button"
                       disabled={cloudBusy != null || !cloudBound}
                       onClick={() => void handleRestoreCloudConfig()}
@@ -734,32 +741,40 @@ export function OptionsApp() {
                       {cloudBusy === "restore" ? "恢复中" : "从云端恢复"}
                     </button>
                     <button
-                      className="small-action danger-action"
+                      className={classNames("small-action danger-action")}
                       type="button"
                       disabled={cloudBusy != null || !cloudBound}
                       onClick={() => void handleClearCloudBinding()}
                     >
                       断开绑定
                     </button>
-                  </div>
-                </div>
-                <div className={`cloud-backup-status cloud-backup-${cloudArchiveState?.archiveState ?? "unbound"}`}>
+                  </>
+                }
+              >
+                <div className={classNames(`cloud-backup-status cloud-backup-${cloudArchiveState?.archiveState ?? "unbound"}`)}>
                   <strong>{cloudArchiveStatusTitle(cloudArchiveState)}</strong>
                   <span>{cloudArchiveStatusHint(cloudArchiveState)}</span>
                 </div>
-                <p className="settings-meta cloud-backup-remote">{cloudStatusText(cloudState?.status)}</p>
-                {cloudBinding ? <p className="settings-meta cloud-backup-meta">{cloudBindingMetaText(cloudBinding)}</p> : null}
-                <div className="timed-setting-row cloud-stats-sync-row">
+                <p className={classNames("settings-meta cloud-backup-remote")}>{cloudStatusText(cloudState?.status)}</p>
+                {cloudBinding ? <p className={classNames("settings-meta cloud-backup-meta")}>{cloudBindingMetaText(cloudBinding)}</p> : null}
+                {cloudMessage ? <p className={classNames("settings-meta")}>{cloudMessage}</p> : null}
+              </SettingsCard>
+
+              <SettingsCard
+                title="请求统计每日自动同步"
+                subtitle={cloudBound ? "开启后每天最多自动上传一次请求统计。" : "绑定云存档后可开启，本地统计不会丢失。"}
+              >
+                <div className={classNames("settings-setting-row timed-setting-row cloud-stats-sync-row")}>
                   <div>
-                    <strong>请求统计每日自动同步</strong>
+                    <strong>同步状态</strong>
                     <span>
                       {cloudBound
-                        ? "开启后每天最多自动上传一次请求统计；不会自动从云端恢复，多设备以后上传的统计覆盖云端。"
+                        ? "只自动上传，不会自动从云端恢复；多设备以后上传的统计会覆盖云端。"
                         : "绑定云存档后可开启；本地统计不会因为未绑定而丢失。"}
                     </span>
                   </div>
                   <button
-                    className={`switch-button${state.settings.requestStatsAutoSyncEnabled && cloudBound ? " active" : ""}`}
+                    className={classNames("switch-button", state.settings.requestStatsAutoSyncEnabled && cloudBound && "active")}
                     type="button"
                     disabled={cloudBusy != null || (!cloudBound && !state.settings.requestStatsAutoSyncEnabled)}
                     onClick={() => void updateSettings({ requestStatsAutoSyncEnabled: !state.settings.requestStatsAutoSyncEnabled })}
@@ -767,50 +782,47 @@ export function OptionsApp() {
                     {!cloudBound && !state.settings.requestStatsAutoSyncEnabled ? "未绑定" : state.settings.requestStatsAutoSyncEnabled ? "关闭" : "开启"}
                   </button>
                 </div>
-                <p className="settings-meta cloud-backup-meta">{requestStatsSyncText(cloudBinding)}</p>
-                {cloudMessage ? <p className="settings-meta">{cloudMessage}</p> : null}
-              </div>
+                <p className={classNames("settings-meta cloud-backup-meta")}>{requestStatsSyncText(cloudBinding)}</p>
+              </SettingsCard>
 
-              <div className="settings-section-divider" />
-
-              <div className="settings-group danger-panel">
-                <div className="panel-title-row">
-                  <div>
-                    <h2>数据维护</h2>
-                    <p className="panel-subtitle">清理缓存会保留佬朋友、设置和当前账号；全量重置会恢复到刚安装状态。</p>
-                  </div>
-                  <div className="maintenance-actions">
-                    <button className="small-action" type="button" onClick={() => void handleClearCache()}>
+              <SettingsCard
+                variant="danger"
+                title="数据维护"
+                subtitle="清理缓存会保留佬朋友、设置和当前账号；全量重置会恢复到刚安装状态。"
+                actions={
+                  <>
+                    <button className={classNames("small-action")} type="button" onClick={() => void handleClearCache()}>
                       清理缓存
                     </button>
-                    <button className="small-action danger-action" type="button" onClick={() => void handleResetExtension()}>
+                    <button className={classNames("small-action danger-action")} type="button" onClick={() => void handleResetExtension()}>
                       全量重置
                     </button>
-                  </div>
-                </div>
-              </div>
-            </section>
+                  </>
+                }
+              />
+            </div>
           ) : null}
 
           {activeSection === "request-stats" ? <RequestStatsSettingsPanel view={requestStatsView} /> : null}
 
           {activeSection === "sponsor" ? (
-            <section className="panel sponsor-panel">
-              <div className="panel-title-row">
-                <div>
-                  <h2>赞助本项目</h2>
-                  <p className="panel-subtitle">给佬朋友续一口 LDC。</p>
-                </div>
-                <div className="maintenance-actions sponsor-actions">
-                  <a className="small-action sponsor-action" href={LDC_SPONSOR_20_URL} target="_blank" rel="noreferrer">
-                    20 LDC
-                  </a>
-                  <a className="small-action sponsor-action" href={LDC_SPONSOR_200_URL} target="_blank" rel="noreferrer">
-                    200 LDC
-                  </a>
-                </div>
-              </div>
-            </section>
+            <div className={classNames("settings-card-list")}>
+              <SettingsCard
+                className="sponsor-panel"
+                title="赞助本项目"
+                subtitle="给佬朋友续一口 LDC。"
+                actions={
+                  <div className={classNames("sponsor-actions")}>
+                    <a className={classNames("small-action sponsor-action")} href={LDC_SPONSOR_20_URL} target="_blank" rel="noreferrer">
+                      20 LDC
+                    </a>
+                    <a className={classNames("small-action sponsor-action")} href={LDC_SPONSOR_200_URL} target="_blank" rel="noreferrer">
+                      200 LDC
+                    </a>
+                  </div>
+                }
+              />
+            </div>
           ) : null}
         </div>
       </div>
@@ -822,26 +834,27 @@ function RequestStatsSettingsPanel({ view }: { view: RequestStatsView }) {
   const [hourlyTab, setHourlyTab] = useState<"today" | "yesterday">("today");
   const hourlyItems = hourlyTab === "today" ? view.todayHours : view.yesterdayHours;
   const hourlyLabel = hourlyTab === "today" ? "今天" : "昨天";
+  const hourlySubtitle = hourlyTab === "today" ? "今天 0 点到现在的请求次数。" : "昨天全天的请求次数。";
 
   return (
-    <section className="panel request-stats-panel">
-      <div className="panel-title-row">
-        <div>
-          <h2>请求统计</h2>
-          <p className="panel-subtitle">统计插件已发出的 linux.do 请求，失败和被拦截的请求也会计入。</p>
-        </div>
-        <div className="request-stats-total-badge" aria-label={`总请求 ${view.total}`}>
-          <span>总请求</span>
-          <strong>{view.total}</strong>
-        </div>
-      </div>
-      <div className="settings-section-divider" />
-      <div className="request-stats-section">
-        <div className="request-stats-section-title-row">
-          <h3>按小时</h3>
-          <div className="segmented-control request-stats-tabs" role="tablist" aria-label="请求统计小时视图">
+    <div className={classNames("settings-card-list request-stats-panel")}>
+      <SettingsCard
+        title="统计总览"
+        subtitle="统计插件已发出的 linux.do 请求，失败和被拦截的请求也会计入。"
+        actions={
+          <div className={classNames("request-stats-total-badge")} aria-label={`总请求 ${view.total}`}>
+            <span>总请求</span>
+            <strong>{view.total}</strong>
+          </div>
+        }
+      />
+      <SettingsCard
+        title="按小时"
+        subtitle={hourlySubtitle}
+        actions={
+          <div className={classNames("segmented-control request-stats-tabs")} role="tablist" aria-label="请求统计小时视图">
             <button
-              className={`segmented-option${hourlyTab === "today" ? " active" : ""}`}
+              className={classNames("segmented-option", hourlyTab === "today" && "active")}
               type="button"
               role="tab"
               aria-selected={hourlyTab === "today"}
@@ -851,7 +864,7 @@ function RequestStatsSettingsPanel({ view }: { view: RequestStatsView }) {
               今天
             </button>
             <button
-              className={`segmented-option${hourlyTab === "yesterday" ? " active" : ""}`}
+              className={classNames("segmented-option", hourlyTab === "yesterday" && "active")}
               type="button"
               role="tab"
               aria-selected={hourlyTab === "yesterday"}
@@ -861,15 +874,14 @@ function RequestStatsSettingsPanel({ view }: { view: RequestStatsView }) {
               昨天
             </button>
           </div>
-        </div>
+        }
+      >
         <RequestStatsBarChart id="request-stats-hourly-chart" ariaLabel={`${hourlyLabel}每小时请求次数柱状图`} density="hourly" items={hourlyItems} />
-      </div>
-      <div className="settings-section-divider" />
-      <div className="request-stats-section">
-        <h3>近 7 天</h3>
+      </SettingsCard>
+      <SettingsCard title="近 7 天" subtitle="含今天在内的 7 天滑动窗口。">
         <RequestStatsBarChart ariaLabel="近 7 天每天请求次数柱状图" density="daily" items={view.last7Days} />
-      </div>
-    </section>
+      </SettingsCard>
+    </div>
   );
 }
 
@@ -886,8 +898,8 @@ function RequestStatsBarChart({
 }) {
   const maxTotal = Math.max(1, ...items.map((item) => item.total));
   return (
-    <div className="request-stats-chart-scroll">
-      <div className={`request-stats-chart request-stats-chart-${density}`} id={id} role="list" aria-label={ariaLabel}>
+    <div className={classNames("request-stats-chart-scroll")}>
+      <div className={classNames("request-stats-chart", `request-stats-chart-${density}`)} id={id} role="list" aria-label={ariaLabel}>
         {items.map((item) => {
           const height = item.total === 0 ? 0 : Math.max(8, Math.round((item.total / maxTotal) * 100));
           const key = "hour" in item ? item.hour : item.date;
@@ -895,20 +907,20 @@ function RequestStatsBarChart({
           const axisLabel = chartAxisLabel(item, density);
           return (
             <div
-              className={`request-stats-bar-item${item.total === 0 ? " is-zero" : ""}`}
+              className={classNames("request-stats-bar-item", item.total === 0 && "is-zero")}
               key={key}
               role="listitem"
               aria-label={itemLabel}
               tabIndex={0}
             >
-              <span className="request-stats-bar-tooltip" aria-hidden="true">
+              <span className={classNames("request-stats-bar-tooltip")} aria-hidden="true">
                 {itemLabel}
               </span>
-              <span className="request-stats-bar-value">{item.total}</span>
-              <span className="request-stats-bar-track" aria-hidden="true">
-                <span className="request-stats-bar-fill" style={{ height: `${height}%` }} />
+              <span className={classNames("request-stats-bar-value")}>{item.total}</span>
+              <span className={classNames("request-stats-bar-track")} aria-hidden="true">
+                <span className={classNames("request-stats-bar-fill")} style={{ height: `${height}%` }} />
               </span>
-              <span className="request-stats-bar-label" aria-hidden={axisLabel ? undefined : "true"}>
+              <span className={classNames("request-stats-bar-label")} aria-hidden={axisLabel ? undefined : "true"}>
                 {axisLabel}
               </span>
             </div>
@@ -972,7 +984,7 @@ function cloudArchiveStatusCopy(state: CloudArchiveLocalStateResult | null): { t
   return {
     title: "未绑定",
     description: "绑定后可以把佬朋友、设置和请求统计备份到云端。",
-    hint: "尚未绑定 linuxdo-cloud-save。"
+    hint: "尚未绑定云存档。"
   };
 }
 

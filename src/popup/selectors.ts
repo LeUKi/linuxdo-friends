@@ -222,7 +222,7 @@ export function deriveLaoFindsItems(state: AppState, options: { includeArchived?
     });
 }
 
-export function deriveDredgeRuleScopeWarning(state: AppState, rule: DredgeRule): string | undefined {
+export function deriveDredgeRuleScopeWarning(state: AppState, rule: Pick<DredgeRule, "usernames" | "kinds">): string | undefined {
   const usernames = rule.usernames === "all" ? Object.keys(state.friends) : rule.usernames;
   const missingScope = usernames
     .map(normalizeUsername)

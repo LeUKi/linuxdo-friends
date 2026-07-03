@@ -6,9 +6,10 @@ import { addFriendFromKnownUser, addFriendFromProfile, removeFriend, updateFrien
 import { removeDredgeRule, upsertDredgeRule } from "../domain/laoFinds";
 import { defaultAppState } from "../domain/defaultState";
 import { recordRequestAttempts } from "../domain/requestStats";
-import type { AppState, CloudArchiveLocalStateResult } from "../shared/types";
+import type { AppState, CloudArchiveLocalStateResult, DredgeRule } from "../shared/types";
 import { resetAppStateObserverForTest, resetRuntimeObserversForTest } from "../state/atoms";
 import { APP_STATE_STORAGE_KEY } from "../storage/storage";
+import { SITE_DATA_PROGRESS_STORAGE_KEY } from "../storage/siteDataProgressStorage";
 import { createMockStorage } from "../test/mockStorage";
 import { OptionsApp } from "./main";
 
@@ -239,6 +240,7 @@ describe("OptionsApp update diagnostics", () => {
       expect(container.querySelector(".request-stats-total-badge")?.textContent).toBe("总请求6");
       expect(container.querySelector(".request-stats-total-badge")?.getAttribute("aria-label")).toBe("总请求 6");
       expect(container.querySelectorAll(".request-stat-block")).toHaveLength(0);
+      expect(container.textContent).toContain("今天 0 点到现在的请求次数。");
       expect(getButton(container, "今天").getAttribute("aria-selected")).toBe("true");
       let hourlyBars = Array.from(container.querySelectorAll(".request-stats-chart-hourly .request-stats-bar-item"));
       expect(hourlyBars).toHaveLength(24);
@@ -258,6 +260,8 @@ describe("OptionsApp update diagnostics", () => {
       });
 
       expect(getButton(container, "昨天").getAttribute("aria-selected")).toBe("true");
+      expect(container.textContent).toContain("昨天全天的请求次数。");
+      expect(container.textContent).not.toContain("昨天 0 点到现在的请求次数。");
       hourlyBars = Array.from(container.querySelectorAll(".request-stats-chart-hourly .request-stats-bar-item"));
       expect(hourlyBars).toHaveLength(24);
       expect(hourlyBars[18].getAttribute("aria-label")).toBe("18:00：3");
@@ -388,7 +392,7 @@ describe("OptionsApp update diagnostics", () => {
     });
     const { container } = await renderOptionsApp("#data");
 
-    expect(container.textContent).toContain("尚未绑定 linuxdo-cloud-save。");
+    expect(container.textContent).toContain("尚未绑定云存档。");
 
     chromeMock.setCloudState(boundCloudState("云端配置：1 位佬朋友。"));
     chromeMock.setCloudArchiveState(sameCloudArchiveState());
@@ -517,7 +521,7 @@ describe("OptionsApp update diagnostics", () => {
     await act(async () => {
       getButton(container, "佬有料").click();
     });
-    expect(headingByText(container, "佬有料").querySelector("svg")).toBeFalsy();
+    expect(getButton(container, "佬有料").classList.contains("active")).toBe(true);
     expect(container.textContent).toContain("自动捞料");
     expect(container.textContent).toContain("打捞请求范围");
     expect(container.textContent).toContain("打捞间隔");
@@ -526,7 +530,8 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).not.toContain("刷新间隔");
     expect(container.textContent).not.toContain("后台刷新");
     expect(container.textContent).not.toContain("正在施工");
-    expect(container.querySelector(".settings-construction-card[aria-label='后台刷新设置正在施工']")).toBeFalsy();
+    expect(container.textContent).not.toContain("WIP");
+    expect(container.textContent).not.toContain("开发中");
     expect(container.textContent).not.toContain("边界");
     expect(container.textContent).not.toContain("webhook");
     expect(container.textContent).not.toContain("规则匹配");
@@ -540,7 +545,12 @@ describe("OptionsApp update diagnostics", () => {
     expect(getButton(container, "通知渠道").classList.contains("active")).toBe(true);
     expect(container.textContent).toContain("通知渠道");
     expect(container.textContent).toContain("Telegram");
-    expect(container.textContent).toContain("Webhook");
+    expect(container.textContent).toContain("Webhook 通知");
+    expect(container.textContent).toContain("暂未开放");
+    expect(container.textContent).not.toContain("正在施工");
+    expect(container.textContent).not.toContain("WIP");
+    expect(container.textContent).not.toContain("开发中");
+    expect(allSettingHeadings(container).every((heading) => heading.querySelector("svg") == null)).toBe(true);
 
     const { tokenInput, chatInput } = getTelegramInputs(container);
     await act(async () => {
@@ -560,25 +570,26 @@ describe("OptionsApp update diagnostics", () => {
     });
   });
 
-  it("groups config migration and cloud backup in one panel with a divider", async () => {
+  it("separates data tasks into independent settings cards without dividers", async () => {
     const { container } = await renderOptionsApp("#data");
     const migrationHeading = headingByText(container, "配置迁移");
-    const cloudHeading = headingByText(container, "云端备份");
-    const sharedPanel = migrationHeading.closest("section");
+    const cloudHeading = headingByText(container, "云存档");
+    const statsHeading = headingByText(container, "请求统计每日自动同步");
+    const maintenanceHeading = headingByText(container, "数据维护");
 
-    expect(sharedPanel).toBeTruthy();
-    expect(sharedPanel).toBe(cloudHeading.closest("section"));
-    expect(sharedPanel?.querySelector(".settings-section-divider")).toBeTruthy();
+    expect(container.querySelectorAll(".options-content .settings-card")).toHaveLength(4);
+    expect(migrationHeading.closest(".settings-card")).not.toBe(cloudHeading.closest(".settings-card"));
+    expect(cloudHeading.closest(".settings-card")).not.toBe(statsHeading.closest(".settings-card"));
+    expect(statsHeading.closest(".settings-card")).not.toBe(maintenanceHeading.closest(".settings-card"));
+    expect(container.querySelector(".settings-section-divider")).toBeFalsy();
     expect(container.textContent).toContain("数据维护");
     expect(getButton(container, "数据管理").classList.contains("active")).toBe(true);
   });
 
-  it("shows a cloud icon before the cloud backup title", async () => {
+  it("keeps settings card headings free of icons", async () => {
     const { container } = await renderOptionsApp("#data");
-    const cloudHeading = headingByText(container, "云端备份");
 
-    expect(cloudHeading.classList.contains("settings-title-with-icon")).toBe(true);
-    expect(cloudHeading.querySelector("svg")).toBeTruthy();
+    expect(allSettingHeadings(container).every((heading) => heading.querySelector("svg") == null)).toBe(true);
   });
 
   it("scrolls the cloud backup section into view when opened with a hash", async () => {
@@ -681,11 +692,14 @@ describe("OptionsApp update diagnostics", () => {
     const chromeMock = setupChrome({ state: defaultAppState });
     const { container } = await renderOptionsApp("#scope");
 
+    expect(headingByText(container, "关注同步").closest(".settings-card")).not.toBe(headingByText(container, "范围管理").closest(".settings-card"));
+    expect(container.querySelectorAll(".options-content .settings-card")).toHaveLength(2);
+
     await act(async () => {
       getButton(container, "获取我的关注列表").click();
     });
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "syncFollowedUsers" });
-    expect(container.textContent).toContain("Neo");
+    expect(container.textContent).toContain("@neo");
 
     const input = container.querySelector<HTMLInputElement>(".settings-search-input");
     await act(async () => {
@@ -712,7 +726,7 @@ describe("OptionsApp update diagnostics", () => {
     });
   });
 
-  it("creates, edits, and deletes lao finds rules from the lao-finds section", async () => {
+  it("creates, edits, validates, cancels, and deletes lao finds rules from the lao-finds section", async () => {
     const state: AppState = {
       ...addFriendFromProfile(defaultAppState, {
         username: "Neo",
@@ -721,16 +735,14 @@ describe("OptionsApp update diagnostics", () => {
       }),
       laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
       dredgeRules: [
-        {
+        currentRule({
           id: "rule-ai",
           name: "AI",
-          enabled: true,
+          mode: "allow",
           usernames: "all",
           kinds: ["topic"],
-          keywords: [],
-          createdAt: "2026-06-28T00:00:00.000Z",
-          updatedAt: "2026-06-28T00:00:00.000Z"
-        }
+          patterns: []
+        })
       ]
     };
     const chromeMock = setupChrome({ state });
@@ -739,62 +751,162 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).toContain("自动捞料");
     expect(container.textContent).toContain("打捞请求范围");
     expect(container.textContent).toContain("打捞间隔");
-    expect(container.textContent).toContain("保持插件界面打开，自动捞料才会运行。");
+    expect(container.textContent).toContain("保持插件界面打开，命中规则的新动态会自动打捞。");
     expect(container.textContent).toContain("打捞起点");
     expect(container.textContent).toContain("打捞规则");
-    expect(headingByText(container, "佬有料").querySelector("svg")).toBeFalsy();
+    expect(container.textContent).toContain("允许");
+    expect(container.textContent).toContain("全部内容");
+    expect(headingByText(container, "自动捞料").closest(".settings-card")).not.toBe(headingByText(container, "打捞设置").closest(".settings-card"));
+    expect(headingByText(container, "打捞设置").closest(".settings-card")).not.toBe(headingByText(container, "打捞规则").closest(".settings-card"));
+    expect(headingByText(container, "打捞规则").tagName).toBe("H2");
+    expect(headingByText(container, "自动捞料").querySelector("svg")).toBeFalsy();
     expect(headingByText(container, "打捞规则").querySelector("svg")).toBeFalsy();
+    expect(container.querySelectorAll(".options-content .settings-card")).toHaveLength(3);
     expect(container.textContent).not.toContain("启用定时刷新");
     expect(container.textContent).not.toContain("刷新范围");
     expect(container.textContent).not.toContain("刷新间隔");
     expect(container.querySelector(".dredge-choice-row svg")).toBeFalsy();
+
     await act(async () => {
       vi.spyOn(window, "confirm").mockReturnValueOnce(true);
       getButton(container, "重设为现在").click();
       await Promise.resolve();
     });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "resetLaoFindsStartedAt" });
+
+    chromeMock.sendMessage.mockClear();
     await act(async () => {
       getButton(container, "新建").click();
     });
+    expect(getRuleDialog(container).textContent).toContain("新建打捞规则");
+    expect(container.querySelector(".dredge-rule-list textarea")).toBeFalsy();
+    const createTextarea = getRegexTextarea(container);
     await act(async () => {
-      getButton(container, "回复").click();
+      setTextareaValue(createTextarea, "AI\nLLM");
+      createTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
     });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertDredgeRule" }));
     await act(async () => {
-      getButton(container, "Neo").click();
+      getButton(container, "保存").click();
+      await Promise.resolve();
     });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "upsertDredgeRule",
+      rule: expect.objectContaining({ schemaVersion: 2, name: "新打捞规则", mode: "allow", usernames: "all", patterns: ["AI", "LLM"] })
+    });
+    expect(container.querySelector("[role='dialog']")).toBeFalsy();
 
-    const keywordInput = Array.from(container.querySelectorAll<HTMLInputElement>(".dredge-rule-field input")).find(
-      (input) => input.placeholder === "空白表示打捞所选范围内全部动态"
-    );
+    chromeMock.sendMessage.mockClear();
     await act(async () => {
-      setInputValue(keywordInput!, "AI,LLM");
-      keywordInput?.dispatchEvent(new Event("input", { bubbles: true }));
+      getButton(container, "编辑").click();
+    });
+    expect(getRuleDialog(container).textContent).toContain("编辑打捞规则");
+    expect(getRegexTextarea(container).value).toBe("");
+    await act(async () => {
+      getButton(container, "屏蔽").click();
       await Promise.resolve();
     });
     await act(async () => {
-      getButton(container, "删除").click();
+      const editTextarea = getRegexTextarea(container);
+      setTextareaValue(editTextarea, "[");
+      editTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "保存").click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("正则表达式无效");
+    expect(getRuleDialog(container)).toBeTruthy();
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertDredgeRule" }));
+
+    await act(async () => {
+      const editTextarea = getRegexTextarea(container);
+      setTextareaValue(editTextarea, "LLM");
+      editTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "保存").click();
+      await Promise.resolve();
+    });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "upsertDredgeRule",
+      rule: expect.objectContaining({ id: "rule-ai", schemaVersion: 2, mode: "block", patterns: ["LLM"] })
     });
 
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
-      type: "resetLaoFindsStartedAt"
+    chromeMock.sendMessage.mockClear();
+    await act(async () => {
+      getButton(container, "编辑").click();
     });
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
-      type: "upsertDredgeRule",
-      rule: expect.objectContaining({ name: "新打捞规则", usernames: "all", kinds: ["topic", "reply", "boost", "reaction"] })
+    expect(getButton(container, "删除").disabled).toBe(true);
+    expect(getRuleDialog(container).textContent).not.toContain("删除");
+    const nameInput = Array.from(container.querySelectorAll<HTMLInputElement>(".dredge-rule-field input")).find((input) => input.value === "AI");
+    await act(async () => {
+      setInputValue(nameInput!, "AI 规则");
+      nameInput?.dispatchEvent(new Event("input", { bubbles: true }));
+      getButton(container, "取消").click();
+      await Promise.resolve();
     });
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
-      type: "upsertDredgeRule",
-      rule: expect.objectContaining({ id: "rule-ai", kinds: ["topic", "reply"] })
-    });
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
-      type: "upsertDredgeRule",
-      rule: expect.objectContaining({ id: "rule-ai", usernames: ["neo"] })
-    });
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
-      type: "upsertDredgeRule",
-      rule: expect.objectContaining({ id: "rule-ai", keywords: ["AI", "LLM"] })
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertDredgeRule" }));
+
+    await act(async () => {
+      getButton(container, "删除").click();
     });
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "removeDredgeRule", id: "rule-ai" });
+  });
+
+  it("discards lao finds rule modal drafts from close, backdrop, and escape", async () => {
+    const state: AppState = {
+      ...addFriendFromProfile(defaultAppState, {
+        username: "Neo",
+        name: "Neo",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      dredgeRules: [currentRule({ id: "rule-ai", name: "AI", patterns: ["AI"] })]
+    };
+    const chromeMock = setupChrome({ state });
+    const { container } = await renderOptionsApp("#lao-finds");
+
+    await act(async () => {
+      getButton(container, "编辑").click();
+    });
+    const closeTextarea = getRegexTextarea(container);
+    await act(async () => {
+      setTextareaValue(closeTextarea, "discarded-close");
+      closeTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+      getCloseRuleDialogButton(container).click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector("[role='dialog']")).toBeFalsy();
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertDredgeRule" }));
+
+    await act(async () => {
+      getButton(container, "编辑").click();
+    });
+    const backdropTextarea = getRegexTextarea(container);
+    await act(async () => {
+      setTextareaValue(backdropTextarea, "discarded-backdrop");
+      backdropTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+      getRuleDialog(container).parentElement?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(container.querySelector("[role='dialog']")).toBeFalsy();
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertDredgeRule" }));
+
+    await act(async () => {
+      getButton(container, "编辑").click();
+    });
+    const escapeTextarea = getRegexTextarea(container);
+    await act(async () => {
+      setTextareaValue(escapeTextarea, "discarded-escape");
+      escapeTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(container.querySelector("[role='dialog']")).toBeFalsy();
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertDredgeRule" }));
   });
 
   it("locks lao finds rules while timed activity refresh is enabled", async () => {
@@ -802,16 +914,14 @@ describe("OptionsApp update diagnostics", () => {
       ...defaultAppState,
       settings: { ...defaultAppState.settings, timedActivityRefreshEnabled: true },
       dredgeRules: [
-        {
+        currentRule({
           id: "rule-ai",
           name: "AI",
-          enabled: true,
+          mode: "allow",
           usernames: "all",
           kinds: ["topic"],
-          keywords: [],
-          createdAt: "2026-06-28T00:00:00.000Z",
-          updatedAt: "2026-06-28T00:00:00.000Z"
-        }
+          patterns: []
+        })
       ]
     };
     setupChrome({ state });
@@ -819,8 +929,114 @@ describe("OptionsApp update diagnostics", () => {
 
     expect(container.textContent).toContain("关闭自动捞料后可修改规则。");
     expect(getButton(container, "新建").disabled).toBe(true);
+    expect(getButton(container, "编辑").disabled).toBe(true);
     expect(getButton(container, "删除").disabled).toBe(true);
     expect(getButton(container, "重设为现在").disabled).toBe(true);
+  });
+
+  it("locks lao finds rules while an activity refresh task is running", async () => {
+    const state: AppState = {
+      ...defaultAppState,
+      dredgeRules: [currentRule({ id: "rule-ai", name: "AI", kinds: ["topic"] })]
+    };
+    const chromeMock = setupChrome({ state });
+    const { container } = await renderOptionsApp("#lao-finds");
+
+    await act(async () => {
+      chromeMock.emitStorageChange(
+        {
+          [SITE_DATA_PROGRESS_STORAGE_KEY]: {
+            oldValue: undefined,
+            newValue: {
+              taskId: "activity-running",
+              taskType: "activity",
+              scope: { kind: "topic" },
+              status: "running",
+              completed: 0,
+              total: 1,
+              startedAt: "2026-06-28T00:00:00.000Z",
+              updatedAt: "2026-06-28T00:00:00.000Z"
+            }
+          }
+        },
+        "session"
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("刷新动态运行中，完成后可修改规则。");
+    expect(getButton(container, "新建").disabled).toBe(true);
+    expect(getButton(container, "编辑").disabled).toBe(true);
+    expect(getButton(container, "删除").disabled).toBe(true);
+
+    await act(async () => {
+      chromeMock.emitStorageChange(
+        {
+          [SITE_DATA_PROGRESS_STORAGE_KEY]: {
+            oldValue: undefined,
+            newValue: null
+          }
+        },
+        "session"
+      );
+      await Promise.resolve();
+    });
+  });
+
+  it("disables an open lao finds rule modal when activity refresh starts", async () => {
+    const state: AppState = {
+      ...defaultAppState,
+      dredgeRules: [currentRule({ id: "rule-ai", name: "AI", patterns: ["AI"] })]
+    };
+    const chromeMock = setupChrome({ state });
+    const { container } = await renderOptionsApp("#lao-finds");
+
+    await act(async () => {
+      getButton(container, "编辑").click();
+    });
+    expect(getButton(container, "保存").disabled).toBe(false);
+
+    await act(async () => {
+      chromeMock.emitStorageChange(
+        {
+          [SITE_DATA_PROGRESS_STORAGE_KEY]: {
+            oldValue: undefined,
+            newValue: {
+              taskId: "activity-running",
+              taskType: "activity",
+              scope: { kind: "topic" },
+              status: "running",
+              completed: 0,
+              total: 1,
+              startedAt: "2026-06-28T00:00:00.000Z",
+              updatedAt: "2026-06-28T00:00:00.000Z"
+            }
+          }
+        },
+        "session"
+      );
+      await Promise.resolve();
+    });
+
+    expect(getButton(container, "保存").disabled).toBe(true);
+    await act(async () => {
+      getButton(container, "保存").click();
+      await Promise.resolve();
+    });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertDredgeRule" }));
+
+    await act(async () => {
+      chromeMock.emitStorageChange(
+        {
+          [SITE_DATA_PROGRESS_STORAGE_KEY]: {
+            oldValue: undefined,
+            newValue: null
+          }
+        },
+        "session"
+      );
+      await Promise.resolve();
+    });
   });
 
   it("live-syncs durable app state changes into settings without reload", async () => {
@@ -849,16 +1065,15 @@ describe("OptionsApp update diagnostics", () => {
         telegramChatId: "98765"
       },
       dredgeRules: [
-        {
+        currentRule({
           id: "rule-ai",
           name: "AI",
           enabled: true,
+          mode: "allow",
           usernames: ["neo"],
           kinds: ["topic"],
-          keywords: ["LLM"],
-          createdAt: "2026-06-28T00:00:00.000Z",
-          updatedAt: "2026-06-28T00:00:00.000Z"
-        }
+          patterns: ["LLM"]
+        })
       ]
     };
     const chromeMock = setupChrome({ state: initialState });
@@ -896,14 +1111,20 @@ describe("OptionsApp update diagnostics", () => {
     expect(getButton(container, "全量").getAttribute("aria-pressed")).toBe("true");
     expect(container.querySelector<HTMLInputElement>(".timed-interval-input")?.value).toBe("60");
     expect(container.textContent).toContain("关闭自动捞料后可修改规则。");
-    expect(Array.from(container.querySelectorAll<HTMLInputElement>(".dredge-rule-field input")).some((input) => input.value === "AI")).toBe(true);
-    expect(container.textContent).toContain("Neo");
+    expect(container.textContent).toContain("AI");
+    expect(container.textContent).toContain("1 条正则：LLM");
+    expect(container.textContent).toContain("@neo");
     expect(getButton(container, "新建").disabled).toBe(true);
+    expect(getButton(container, "编辑").disabled).toBe(true);
   });
 
   it("configures timed refresh from the lao-finds section", async () => {
     const chromeMock = setupChrome();
     const { container } = await renderOptionsApp("#lao-finds");
+
+    expect(container.textContent).toContain("当前没有打捞规则；新建规则后再开始打捞。");
+    expect(container.textContent).not.toContain("旧关键词规则");
+    expect(container.textContent).not.toContain("黑白规则模型");
 
     await act(async () => {
       getButton(container, "未启用").click();
@@ -952,6 +1173,47 @@ async function renderOptionsApp(hash?: string) {
 function setInputValue(input: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
   setter?.call(input, value);
+}
+
+function setTextareaValue(input: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+  setter?.call(input, value);
+}
+
+function getRegexTextarea(container: HTMLElement) {
+  const textarea = Array.from(container.querySelectorAll<HTMLTextAreaElement>("textarea")).find((input) =>
+    input.placeholder.includes("一行一条正则")
+  );
+  if (!textarea) throw new Error("Regex textarea not found");
+  return textarea;
+}
+
+function getRuleDialog(container: HTMLElement) {
+  const dialog = container.querySelector<HTMLElement>("[role='dialog'][aria-labelledby='dredge-rule-modal-title']");
+  if (!dialog) throw new Error("Dredge rule dialog not found");
+  return dialog;
+}
+
+function getCloseRuleDialogButton(container: HTMLElement) {
+  const button = container.querySelector<HTMLButtonElement>("button[aria-label='关闭规则弹窗']");
+  if (!button) throw new Error("Dredge rule dialog close button not found");
+  return button;
+}
+
+function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
+  return {
+    schemaVersion: 2,
+    id: "rule",
+    name: "规则",
+    enabled: true,
+    mode: "allow",
+    usernames: "all",
+    kinds: ["topic", "reply", "boost", "reaction"],
+    patterns: [],
+    createdAt: "2026-06-28T00:00:00.000Z",
+    updatedAt: "2026-06-28T00:00:00.000Z",
+    ...patch
+  };
 }
 
 function getTelegramInputs(container: HTMLElement) {
@@ -1195,6 +1457,10 @@ function headingByText(container: HTMLElement, text: string): HTMLHeadingElement
   const heading = Array.from(container.querySelectorAll<HTMLHeadingElement>("h2, h3")).find((candidate) => candidate.textContent === text);
   if (!heading) throw new Error(`heading not found: ${text}`);
   return heading;
+}
+
+function allSettingHeadings(container: HTMLElement): HTMLHeadingElement[] {
+  return Array.from(container.querySelectorAll<HTMLHeadingElement>(".options-content h2, .options-content h3"));
 }
 
 function createPendingIdentifyResponse() {

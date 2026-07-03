@@ -1,7 +1,7 @@
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addFriendFromProfile, removeFriend, updateFriend } from "../domain/friends";
 import { defaultAppState } from "../domain/defaultState";
 import { recordRequestAttempts } from "../domain/requestStats";
@@ -15,7 +15,7 @@ import { resetRuntimeObserversForTest } from "../state/atoms";
 import { resetAutoRefreshSessionObserverForTest } from "../state/autoRefreshAtoms";
 import { resetTimedActivityRefreshSessionObserverForTest } from "../state/timedActivityRefreshAtoms";
 import { resetUiSceneObserverForTest } from "../state/uiSceneAtoms";
-import type { ActivityRefreshScope, AppState, BackgroundResponse, CloudArchiveLocalStateResult, SiteDataTaskProgress } from "../shared/types";
+import type { ActivityRefreshScope, AppState, BackgroundResponse, CloudArchiveLocalStateResult, DredgeRule, SiteDataTaskProgress } from "../shared/types";
 import { eventHappenedInside, isLinuxDoActivityHref, shouldHandleActivityLinkClick } from "./FriendsApp";
 import { FriendsApp } from "./FriendsApp";
 
@@ -101,6 +101,14 @@ describe("activity link click handling", () => {
   });
 });
 
+type MountedFriendsAppRoot = {
+  host: HTMLDivElement;
+  root: ReturnType<typeof createRoot>;
+  unmounted: boolean;
+};
+
+const mountedFriendsAppRoots: MountedFriendsAppRoot[] = [];
+
 describe("FriendsApp UI scene persistence", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
@@ -109,6 +117,24 @@ describe("FriendsApp UI scene persistence", () => {
     resetTimedActivityRefreshSessionObserverForTest();
     resetUiSceneObserverForTest();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    for (const mounted of mountedFriendsAppRoots.splice(0)) {
+      if (!mounted.unmounted) {
+        act(() => {
+          mounted.root.unmount();
+        });
+      }
+      mounted.host.remove();
+    }
+    document.body.replaceChildren();
+    try {
+      vi.clearAllTimers();
+    } catch {
+      // Some tests use real timers only; timer cleanup is best-effort.
+    }
+    vi.useRealTimers();
   });
 
   it("restores tab, modal query, and filter popover scene from session storage", async () => {
@@ -942,16 +968,7 @@ describe("FriendsApp UI scene persistence", () => {
     const state: AppState = {
       ...activityFeedState(),
       dredgeRules: [
-        {
-          id: "rule-ai",
-          name: "AI",
-          enabled: true,
-          usernames: "all",
-          kinds: ["topic"],
-          keywords: ["AI"],
-          createdAt: "2026-06-28T00:00:00.000Z",
-          updatedAt: "2026-06-28T00:00:00.000Z"
-        }
+        currentRule({ id: "rule-ai", name: "AI", usernames: "all", kinds: ["topic"], patterns: ["AI"] })
       ],
       laoFindsItems: {
         "topic:neo:1": {
@@ -1001,16 +1018,7 @@ describe("FriendsApp UI scene persistence", () => {
       state: {
         ...activityFeedState(),
         dredgeRules: [
-          {
-            id: "rule-ai",
-            name: "AI",
-            enabled: true,
-            usernames: "all",
-            kinds: ["topic"],
-            keywords: [],
-            createdAt: "2026-06-28T00:00:00.000Z",
-            updatedAt: "2026-06-28T00:00:00.000Z"
-          }
+          currentRule({ id: "rule-ai", name: "AI", usernames: "all", kinds: ["topic"], patterns: [] })
         ]
       }
     });
@@ -1760,12 +1768,20 @@ describe("FriendsApp UI scene persistence", () => {
     vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
     const sidePanelSession = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
     await renderFriendsAppWithChrome({ session: sidePanelSession, surface: "side-panel", pageStatus: missingPageStatus() });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     expect(Object.keys((await loadTimedActivityRefreshSessionState(sidePanelSession)).visibleSurfaces)).toHaveLength(1);
 
     const inPageSession = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
     setupChrome({ session: inPageSession });
     await renderFriendsApp("in-page");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
     expect(Object.keys((await loadTimedActivityRefreshSessionState(inPageSession)).visibleSurfaces)).toHaveLength(0);
     vi.useRealTimers();
@@ -2387,6 +2403,15 @@ async function renderFriendsApp(surface?: React.ComponentProps<typeof FriendsApp
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
+  const mounted: MountedFriendsAppRoot = { host, root, unmounted: false };
+  const unmount = root.unmount.bind(root);
+  root.unmount = () => {
+    if (mounted.unmounted) return;
+    mounted.unmounted = true;
+    unmount();
+    host.remove();
+  };
+  mountedFriendsAppRoots.push(mounted);
   await act(async () => {
     root.render(React.createElement(FriendsApp, surface ? { surface } : undefined));
   });
@@ -2676,6 +2701,22 @@ function activityFeedState(url = "/t/topic/1"): AppState {
   };
 }
 
+function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
+  return {
+    schemaVersion: 2,
+    id: "rule",
+    name: "Rule",
+    enabled: true,
+    mode: "allow",
+    usernames: "all",
+    kinds: ["topic", "reply", "boost", "reaction"],
+    patterns: [],
+    createdAt: "2026-06-28T00:00:00.000Z",
+    updatedAt: "2026-06-28T00:00:00.000Z",
+    ...patch
+  };
+}
+
 function timedActivityState(settings: Partial<AppState["settings"]> = {}): AppState {
   return {
     ...defaultAppState,
@@ -2691,16 +2732,13 @@ function timedActivityState(settings: Partial<AppState["settings"]> = {}): AppSt
       }
     },
     dredgeRules: [
-      {
+      currentRule({
         id: "rule-neo",
         name: "Neo",
-        enabled: true,
         usernames: ["neo"],
         kinds: ["topic", "reply", "reaction"],
-        keywords: [],
-        createdAt: "2026-06-28T00:00:00.000Z",
-        updatedAt: "2026-06-28T00:00:00.000Z"
-      }
+        patterns: []
+      })
     ],
     settings: {
       ...defaultAppState.settings,

@@ -4,6 +4,7 @@ import {
   archiveLaoFindsItem,
   collectLaoFindsItems,
   markLaoFindsItemRead,
+  normalizeDredgeRules,
   removeDredgeRule,
   upsertDredgeRule
 } from "./laoFinds";
@@ -17,16 +18,25 @@ describe("lao finds collection", () => {
     expect(result.state.laoFindsItems).toEqual({});
   });
 
-  it("matches enabled rules by user, kind, and normalized keyword", () => {
-    const state = withRules([rule({ id: "rule-ai", usernames: ["Neo"], kinds: ["topic"], keywords: ["AI 工具"] })], "2026-06-29T00:00:00.000Z");
+  it("collects nothing when there is no enabled allow rule", () => {
+    const state = withRules([rule({ id: "block-ai", mode: "block", patterns: ["AI"] })], "2026-06-29T00:00:00.000Z");
+
+    const result = collectLaoFindsItems(state, [activity({ id: "a1", title: "AI 工具" })], "2026-06-30T00:00:00.000Z");
+
+    expect(result.collectedCount).toBe(0);
+    expect(result.state.laoFindsItems).toEqual({});
+  });
+
+  it("matches enabled allow rules by user, kind, and regex pattern", () => {
+    const state = withRules([rule({ id: "rule-ai", usernames: ["Neo"], kinds: ["topic"], patterns: ["AI|LLM"] })], "2026-06-29T00:00:00.000Z");
 
     const result = collectLaoFindsItems(
       state,
       [
-        activity({ id: "hit", username: "neo", kind: "topic", title: "一个 AI 工具" }),
+        activity({ id: "hit", username: "neo", kind: "topic", title: "一个 ai 工具" }),
         activity({ id: "wrong-user", username: "ada", kind: "topic", title: "一个 AI 工具" }),
         activity({ id: "wrong-kind", username: "neo", kind: "reply", title: "一个 AI 工具" }),
-        activity({ id: "wrong-keyword", username: "neo", kind: "topic", title: "闲聊" })
+        activity({ id: "wrong-pattern", username: "neo", kind: "topic", title: "闲聊" })
       ],
       "2026-06-30T00:00:00.000Z"
     );
@@ -35,17 +45,57 @@ describe("lao finds collection", () => {
     expect(result.state.laoFindsItems.hit).toMatchObject({ matchedRuleIds: ["rule-ai"], collectedAt: "2026-06-30T00:00:00.000Z" });
   });
 
-  it("treats empty keywords as collect-all inside selected user and kind scope", () => {
-    const state = withRules([rule({ id: "rule-all-neo", usernames: ["neo"], kinds: ["boost"], keywords: [] })], "2026-06-29T00:00:00.000Z");
+  it("lets a block rule globally veto an allow match", () => {
+    const state = withRules(
+      [
+        rule({ id: "allow-ai", mode: "allow", patterns: ["AI"] }),
+        rule({ id: "block-spam", mode: "block", patterns: ["spam"] })
+      ],
+      "2026-06-29T00:00:00.000Z"
+    );
 
-    const result = collectLaoFindsItems(state, [activity({ id: "boost-1", username: "neo", kind: "boost", title: "Boost" })]);
+    const result = collectLaoFindsItems(state, [activity({ id: "blocked", title: "AI spam" })]);
+
+    expect(result.collectedCount).toBe(0);
+    expect(result.state.laoFindsItems).toEqual({});
+  });
+
+  it("does not let unrelated block rules prevent allow matches", () => {
+    const state = withRules(
+      [
+        rule({ id: "allow-ai", mode: "allow", patterns: ["AI"] }),
+        rule({ id: "block-spam", mode: "block", patterns: ["spam"] })
+      ],
+      "2026-06-29T00:00:00.000Z"
+    );
+
+    const result = collectLaoFindsItems(state, [activity({ id: "hit", title: "AI 工具" })]);
 
     expect(result.collectedCount).toBe(1);
-    expect(result.state.laoFindsItems["boost-1"].matchedRuleIds).toEqual(["rule-all-neo"]);
+    expect(result.state.laoFindsItems.hit.matchedRuleIds).toEqual(["allow-ai"]);
+  });
+
+  it("treats empty patterns as match-all inside selected user and kind scope", () => {
+    const allowState = withRules([rule({ id: "allow-all-neo", mode: "allow", usernames: ["neo"], kinds: ["boost"], patterns: [] })], "2026-06-29T00:00:00.000Z");
+    const allowed = collectLaoFindsItems(allowState, [activity({ id: "boost-1", username: "neo", kind: "boost", title: "Boost" })]);
+
+    const blockState = withRules(
+      [
+        rule({ id: "allow-all", mode: "allow", patterns: [] }),
+        rule({ id: "block-all-neo", mode: "block", usernames: ["neo"], kinds: ["boost"], patterns: [] })
+      ],
+      "2026-06-29T00:00:00.000Z"
+    );
+    const blocked = collectLaoFindsItems(blockState, [activity({ id: "boost-2", username: "neo", kind: "boost", title: "Boost" })]);
+
+    expect(allowed.collectedCount).toBe(1);
+    expect(allowed.state.laoFindsItems["boost-1"].matchedRuleIds).toEqual(["allow-all-neo"]);
+    expect(blocked.collectedCount).toBe(0);
+    expect(blocked.state.laoFindsItems).toEqual({});
   });
 
   it("ignores disabled rules", () => {
-    const state = withRules([rule({ id: "disabled", enabled: false, keywords: ["AI"] })], "2026-06-29T00:00:00.000Z");
+    const state = withRules([rule({ id: "disabled", enabled: false, patterns: ["AI"] })], "2026-06-29T00:00:00.000Z");
 
     const result = collectLaoFindsItems(state, [activity({ id: "a1", title: "AI" })]);
 
@@ -53,7 +103,7 @@ describe("lao finds collection", () => {
   });
 
   it("deduplicates repeated refreshes and preserves read/archive flags", () => {
-    const state = withRules([rule({ id: "rule-ai", keywords: ["AI"] })], "2026-06-29T00:00:00.000Z");
+    const state = withRules([rule({ id: "rule-ai", patterns: ["AI"] })], "2026-06-29T00:00:00.000Z");
     const first = collectLaoFindsItems(state, [activity({ id: "a1", title: "AI", excerpt: "old" })], "2026-06-30T00:00:00.000Z").state;
     const marked = archiveLaoFindsItem(markLaoFindsItemRead(first, "a1", true), "a1", true);
 
@@ -66,8 +116,8 @@ describe("lao finds collection", () => {
     expect(second.state.laoFindsItems.a1.archivedAt).toBeTruthy();
   });
 
-  it("merges rule matches and removes deleted rule ids from existing items", () => {
-    const state = withRules([rule({ id: "rule-ai", keywords: ["AI"] }), rule({ id: "rule-llm", keywords: ["LLM"] })], "2026-06-29T00:00:00.000Z");
+  it("merges allow rule matches and removes deleted rule ids from existing items", () => {
+    const state = withRules([rule({ id: "rule-ai", patterns: ["AI"] }), rule({ id: "rule-llm", patterns: ["LLM"] })], "2026-06-29T00:00:00.000Z");
     const collected = collectLaoFindsItems(state, [activity({ id: "a1", title: "AI LLM" })]).state;
 
     expect(collected.laoFindsItems.a1.matchedRuleIds).toEqual(["rule-ai", "rule-llm"]);
@@ -77,22 +127,36 @@ describe("lao finds collection", () => {
     expect(removed.laoFindsStartedAt).toBeTruthy();
   });
 
-  it("upserts rules with normalized usernames, kinds, and keywords", () => {
+  it("upserts current rules with normalized usernames, kinds, and patterns", () => {
     const state = upsertDredgeRule(defaultAppState, {
+      schemaVersion: 2,
       id: "rule-1",
       name: "  AI  ",
+      mode: "allow",
       usernames: ["@Neo", "neo"],
       kinds: ["reply", "topic"],
-      keywords: [" AI  工具 ", "ai 工具"]
+      patterns: [" AI  工具 ", "AI  工具"]
     });
 
     expect(state.dredgeRules[0]).toMatchObject({
+      schemaVersion: 2,
       id: "rule-1",
       name: "AI",
+      mode: "allow",
       usernames: ["neo"],
       kinds: ["topic", "reply"],
-      keywords: ["ai 工具"]
+      patterns: ["AI  工具"]
     });
+  });
+
+  it("drops legacy keyword-only rules and invalid current regex rules during normalization", () => {
+    const normalized = normalizeDredgeRules([
+      { id: "legacy", name: "Legacy", enabled: true, usernames: "all", kinds: ["topic"], keywords: ["AI"] },
+      { schemaVersion: 2, id: "invalid", name: "Invalid", enabled: true, mode: "allow", usernames: "all", kinds: ["topic"], patterns: ["["] },
+      rule({ id: "valid", patterns: ["AI"] })
+    ]);
+
+    expect(normalized.map((item) => item.id)).toEqual(["valid"]);
   });
 
   it("does not retroactively collect cached activity when a rule is edited", () => {
@@ -107,7 +171,7 @@ describe("lao finds collection", () => {
       }
     };
 
-    const next = upsertDredgeRule(cachedActivityState, { id: "rule-ai", keywords: ["AI"] });
+    const next = upsertDredgeRule(cachedActivityState, { schemaVersion: 2, id: "rule-ai", mode: "allow", patterns: ["AI"] });
 
     expect(next.dredgeRules).toHaveLength(1);
     expect(next.laoFindsItems).toEqual({});
@@ -118,20 +182,22 @@ describe("lao finds collection", () => {
     const base: AppState = {
       ...defaultAppState,
       laoFindsStartedAt: "2026-06-29T00:00:00.000Z",
-      dredgeRules: [rule({ id: "rule-ai", name: "AI", keywords: ["ai"] })]
+      dredgeRules: [rule({ id: "rule-ai", name: "AI", patterns: ["ai"] })]
     };
 
     const renamed = upsertDredgeRule(base, { id: "rule-ai", name: "AI 规则" });
-    const retargeted = upsertDredgeRule(base, { id: "rule-ai", keywords: ["llm"] });
+    const retargeted = upsertDredgeRule(base, { id: "rule-ai", patterns: ["llm"] });
+    const remoded = upsertDredgeRule(base, { id: "rule-ai", mode: "block" });
     const toggled = upsertDredgeRule(base, { id: "rule-ai", enabled: false });
 
     expect(renamed.laoFindsStartedAt).toBe("2026-06-29T00:00:00.000Z");
     expect(retargeted.laoFindsStartedAt).not.toBe("2026-06-29T00:00:00.000Z");
+    expect(remoded.laoFindsStartedAt).not.toBe("2026-06-29T00:00:00.000Z");
     expect(toggled.laoFindsStartedAt).not.toBe("2026-06-29T00:00:00.000Z");
   });
 
   it("filters collection by the rule-set start point", () => {
-    const state = withRules([rule({ id: "rule-ai", keywords: ["AI"] })], "2026-06-30T00:00:00.000Z");
+    const state = withRules([rule({ id: "rule-ai", patterns: ["AI"] })], "2026-06-30T00:00:00.000Z");
 
     const result = collectLaoFindsItems(
       state,
@@ -149,7 +215,7 @@ describe("lao finds collection", () => {
   });
 
   it("establishes a missing or invalid start point without backfilling the current batch", () => {
-    const missing = withRules([rule({ id: "rule-ai", keywords: ["AI"] })]);
+    const missing = withRules([rule({ id: "rule-ai", patterns: ["AI"] })]);
     const invalid = { ...missing, laoFindsStartedAt: "bad" };
 
     const missingResult = collectLaoFindsItems(missing, [activity({ id: "a1", title: "AI" })], "2026-06-30T00:02:00.000Z");
@@ -164,7 +230,7 @@ describe("lao finds collection", () => {
 
   it("establishes a missing start point even when the current batch is empty", () => {
     const bootstrapped = collectLaoFindsItems(
-      withRules([rule({ id: "rule-ai", keywords: ["AI"] })]),
+      withRules([rule({ id: "rule-ai", patterns: ["AI"] })]),
       [],
       "2026-06-30T00:02:00.000Z"
     );
@@ -189,12 +255,14 @@ function withRules(rules: DredgeRule[], laoFindsStartedAt?: string): AppState {
 
 function rule(patch: Partial<DredgeRule>): DredgeRule {
   return {
+    schemaVersion: 2,
     id: "rule",
     name: "规则",
     enabled: true,
+    mode: "allow",
     usernames: "all",
     kinds: ["topic", "reply", "boost", "reaction"],
-    keywords: [],
+    patterns: [],
     createdAt: "2026-06-30T00:00:00.000Z",
     updatedAt: "2026-06-30T00:00:00.000Z",
     ...patch

@@ -68,7 +68,7 @@ export function deriveTimedActivityRefreshScopes(state: AppState, mode: TimedAct
 
   const usernamesByKind = new Map<ActivityRefreshKind, Set<Username>>();
   for (const rule of state.dredgeRules) {
-    if (!rule.enabled) continue;
+    if (!rule.enabled || rule.mode !== "allow") continue;
     const candidateUsernames = rule.usernames === "all" ? Object.keys(state.friends) : rule.usernames;
     for (const rawUsername of candidateUsernames) {
       const username = normalizeUsername(rawUsername);

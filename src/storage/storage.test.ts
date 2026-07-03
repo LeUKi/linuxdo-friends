@@ -45,12 +45,14 @@ describe("storage migration", () => {
       linuxdoFriendsState: {
         dredgeRules: [
           {
+            schemaVersion: 2,
             id: "rule-1",
             name: "AI",
             enabled: true,
+            mode: "allow",
             usernames: ["Neo"],
             kinds: ["reply", "bad"],
-            keywords: [" AI "],
+            patterns: [" AI "],
             createdAt: "2026-06-30T00:00:00.000Z",
             updatedAt: "2026-06-30T00:00:00.000Z"
           }
@@ -69,7 +71,7 @@ describe("storage migration", () => {
     });
 
     await expect(loadState(storage)).resolves.toMatchObject({
-      dredgeRules: [{ id: "rule-1", usernames: ["neo"], kinds: ["reply"], keywords: ["ai"] }],
+      dredgeRules: [{ id: "rule-1", schemaVersion: 2, mode: "allow", usernames: ["neo"], kinds: ["reply"], patterns: ["AI"] }],
       laoFindsStartedAt: "2026-06-30T00:00:00.000Z",
       laoFindsItems: { item1: { activityId: "activity1", matchedRuleIds: ["rule-1"] } }
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppState } from "../shared/types";
+import type { AppState, DredgeRule } from "../shared/types";
 import { defaultAppState } from "./defaultState";
 import { createConfigExport, createConfigFingerprint, parseConfigImportJson, applyConfigImport } from "./configTransfer";
 
@@ -23,16 +23,15 @@ describe("config transfer", () => {
           }
         },
         dredgeRules: [
-          {
+          currentRule({
             id: "rule-ai",
             name: "AI",
             enabled: true,
+            mode: "allow",
             usernames: "all",
             kinds: ["topic"],
-            keywords: ["AI"],
-            createdAt: "2026-06-28T00:00:00.000Z",
-            updatedAt: "2026-06-28T00:00:00.000Z"
-          }
+            patterns: ["AI"]
+          })
         ],
         laoFindsStartedAt: "2026-06-28T00:00:00.000Z",
         laoFindsItems: {
@@ -86,16 +85,15 @@ describe("config transfer", () => {
         }
       },
       dredgeRules: [
-        {
+        currentRule({
           id: "rule-ai",
           name: "AI",
           enabled: true,
+          mode: "allow",
           usernames: "all",
           kinds: ["topic"],
-          keywords: ["ai"],
-          createdAt: "2026-06-28T00:00:00.000Z",
-          updatedAt: "2026-06-28T00:00:00.000Z"
-        }
+          patterns: ["AI"]
+        })
       ],
       requestStats: {
         total: 6,
@@ -113,7 +111,9 @@ describe("config transfer", () => {
         openActivityLinksInPage: false,
         refreshIntervalMinutes: 120,
         timedActivityRefreshScopeMode: "all",
-        timedActivityRefreshIntervalMinutes: 240
+        timedActivityRefreshIntervalMinutes: 240,
+        telegramBotToken: undefined,
+        telegramChatId: undefined
       }
     });
     expect(file).not.toHaveProperty("currentAccount");
@@ -147,12 +147,14 @@ describe("config transfer", () => {
         },
         dredgeRules: [
           {
+            schemaVersion: 2,
             id: "rule-1",
             name: " AI ",
             enabled: true,
+            mode: "allow",
             usernames: ["@Neo", "neo"],
             kinds: ["reply", "bad", "topic"],
-            keywords: [" AI  工具 "],
+            patterns: [" AI  工具 "],
             createdAt: "2026-06-28T00:00:00.000Z",
             updatedAt: "2026-06-28T00:00:00.000Z"
           }
@@ -184,7 +186,7 @@ describe("config transfer", () => {
     );
 
     expect(file.friends.neo).toMatchObject({ username: "neo", groups: ["ops"], pinned: true, activityKinds: ["reply", "reaction"] });
-    expect(file.dredgeRules[0]).toMatchObject({ id: "rule-1", name: "AI", usernames: ["neo"], kinds: ["topic", "reply"], keywords: ["ai 工具"] });
+    expect(file.dredgeRules[0]).toMatchObject({ schemaVersion: 2, id: "rule-1", name: "AI", mode: "allow", usernames: ["neo"], kinds: ["topic", "reply"], patterns: ["AI  工具"] });
     expect(file).not.toHaveProperty("laoFindsStartedAt");
     expect(file.settings).toEqual({
       openActivityLinksInPage: true,
@@ -206,6 +208,44 @@ describe("config transfer", () => {
         }
       }
     });
+  });
+
+  it("drops legacy keyword-only and invalid current dredge rules during import normalization", () => {
+    const file = parseConfigImportJson(
+      JSON.stringify({
+        schemaVersion: 1,
+        source: "linuxdo-friends",
+        exportedAt: "2026-06-28T00:00:00.000Z",
+        friends: {
+          neo: {
+            username: "neo",
+            groups: [],
+            activityKinds: ["topic"],
+            upgradedAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:00.000Z"
+          }
+        },
+        dredgeRules: [
+          {
+            id: "legacy",
+            name: "Legacy",
+            enabled: true,
+            usernames: "all",
+            kinds: ["topic"],
+            keywords: ["AI"],
+            createdAt: "2026-06-28T00:00:00.000Z",
+            updatedAt: "2026-06-28T00:00:00.000Z"
+          },
+          currentRule({ id: "invalid", patterns: ["["] }),
+          currentRule({ id: "valid", patterns: ["AI|LLM"] })
+        ],
+        settings: {
+          refreshIntervalMinutes: 60
+        }
+      })
+    );
+
+    expect(file.dredgeRules.map((rule) => rule.id)).toEqual(["valid"]);
   });
 
   it("defaults legacy imported friends to all activity kinds and preserves explicit empty scope", () => {
@@ -322,16 +362,15 @@ describe("config transfer", () => {
           }
         },
         dredgeRules: [
-          {
+          currentRule({
             id: "rule-1",
             name: "AI",
             enabled: true,
+            mode: "allow",
             usernames: "all",
             kinds: ["topic"],
-            keywords: ["AI"],
-            createdAt: "2026-06-28T00:00:00.000Z",
-            updatedAt: "2026-06-28T00:00:00.000Z"
-          }
+            patterns: ["AI"]
+          })
         ],
         laoFindsStartedAt: "2026-06-28T00:00:00.000Z",
         requestStats: {
@@ -389,16 +428,15 @@ describe("config transfer", () => {
         }
       },
       dredgeRules: [
-        {
+        currentRule({
           id: "rule-ai",
           name: "AI",
           enabled: true,
+          mode: "allow",
           usernames: ["neo"],
           kinds: ["topic"],
-          keywords: ["AI"],
-          createdAt: "2026-06-28T00:00:00.000Z",
-          updatedAt: "2026-06-28T00:00:00.000Z"
-        }
+          patterns: ["AI"]
+        })
       ],
       laoFindsStartedAt: "2026-06-28T00:00:00.000Z",
       settings: {
@@ -439,7 +477,7 @@ describe("config transfer", () => {
     };
     const changedRule = {
       ...base,
-      dredgeRules: [{ ...base.dredgeRules[0], keywords: ["LLM"] }]
+      dredgeRules: [{ ...base.dredgeRules[0], patterns: ["LLM"] }]
     };
     const changedSettings = {
       ...base,
@@ -503,3 +541,19 @@ describe("config transfer", () => {
     expect(fingerprint).not.toContain("{");
   });
 });
+
+function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
+  return {
+    schemaVersion: 2,
+    id: "rule",
+    name: "Rule",
+    enabled: true,
+    mode: "allow",
+    usernames: "all",
+    kinds: ["topic", "reply", "boost", "reaction"],
+    patterns: [],
+    createdAt: "2026-06-28T00:00:00.000Z",
+    updatedAt: "2026-06-28T00:00:00.000Z",
+    ...patch
+  };
+}

@@ -72,11 +72,14 @@ function isDredgeRulePatch(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
     isOptionalString(value.id) &&
+    (value.schemaVersion === undefined || value.schemaVersion === 2) &&
     isOptionalString(value.name) &&
     (value.enabled === undefined || typeof value.enabled === "boolean") &&
+    (value.mode === undefined || value.mode === "allow" || value.mode === "block") &&
     (value.usernames === undefined || value.usernames === "all" || isUsernameList(value.usernames)) &&
     (value.kinds === undefined || isActivityRefreshKindList(value.kinds)) &&
-    (value.keywords === undefined || isStringList(value.keywords)) &&
+    value.keywords === undefined &&
+    (value.patterns === undefined || isStringList(value.patterns)) &&
     isOptionalString(value.createdAt) &&
     isOptionalString(value.updatedAt)
   );

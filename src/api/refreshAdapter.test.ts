@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshAdapter } from "./refreshAdapter";
 import { defaultAppState } from "../domain/defaultState";
-import type { AppState } from "../shared/types";
+import type { AppState, DredgeRule } from "../shared/types";
 import { addFriendFromProfile, updateFriend, upsertFollowedUser } from "../domain/friends";
 
 describe("refresh adapter", () => {
@@ -232,16 +232,13 @@ describe("refresh adapter", () => {
       ...addFriendFromProfile(defaultAppState, { username: "neil", refreshedAt: "2026-06-28T00:00:00.000Z" }),
       laoFindsStartedAt: "2026-06-26T00:00:00.000Z",
       dredgeRules: [
-        {
+        currentRule({
           id: "rule-topic",
           name: "topic",
-          enabled: true,
           usernames: ["neil"],
           kinds: ["topic"],
-          keywords: ["topic"],
-          createdAt: "2026-06-28T00:00:00.000Z",
-          updatedAt: "2026-06-28T00:00:00.000Z"
-        }
+          patterns: ["topic"]
+        })
       ]
     };
     const fetchImpl = vi
@@ -536,6 +533,22 @@ describe("refresh adapter", () => {
   });
 
 });
+
+function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
+  return {
+    schemaVersion: 2,
+    id: "rule",
+    name: "Rule",
+    enabled: true,
+    mode: "allow",
+    usernames: "all",
+    kinds: ["topic", "reply", "boost", "reaction"],
+    patterns: [],
+    createdAt: "2026-06-28T00:00:00.000Z",
+    updatedAt: "2026-06-28T00:00:00.000Z",
+    ...patch
+  };
+}
 
 function jsonResponse(value: unknown): Response {
   return new Response(JSON.stringify(value), { status: 200 });
