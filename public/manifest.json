@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "佬朋友 - LinuxDo Friends",
   "short_name": "佬朋友",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "本地管理 linux.do 佬朋友，主动刷新状态和公开动态。",
   "action": {
     "default_title": "佬朋友"
