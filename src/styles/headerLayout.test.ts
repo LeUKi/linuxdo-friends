@@ -57,6 +57,36 @@ describe("header layout styles", () => {
     expect(cssBlock(".finds-rules-button", findsCss)).toContain("margin-left: auto;");
   });
 
+  it("keeps the Lao Finds rule modal content-sized instead of stretching controls", () => {
+    const modalBlock = cssBlock(".dredge-rule-modal", findsCss);
+    expect(modalBlock).toContain("height: auto;");
+    expect(modalBlock).toContain("max-height: min(calc(100dvh - 24px), 640px);");
+
+    const draftBlock = cssBlock(".dredge-rule-draft", findsCss);
+    expect(draftBlock).toContain("align-content: start;");
+
+    const choiceBlock = cssBlock(".dredge-choice-row", findsCss);
+    expect(choiceBlock).toContain("align-items: center;");
+
+    const actionsBlock = cssBlock(".dredge-rule-row-actions,\n.dredge-rule-draft-actions", findsCss);
+    expect(actionsBlock).toContain("align-items: center;");
+  });
+
+  it("keeps the Telegram config modal compact and content-sized", () => {
+    const modalBlock = cssBlock(".telegram-config-modal");
+    expect(modalBlock).toContain("width: min(420px, 100%);");
+    expect(modalBlock).toContain("height: auto;");
+    expect(modalBlock).toContain("max-height: min(calc(100dvh - 24px), 520px);");
+
+    expect(cssBlock(".telegram-config-modal .modal-head")).toContain("align-items: flex-start;");
+
+    const formBlock = cssBlock(".telegram-config-form");
+    expect(formBlock).toContain("align-content: start;");
+    expect(formBlock).toContain("flex: 0 1 auto;");
+
+    expect(cssBlock(".telegram-modal-actions")).toContain("align-items: center;");
+  });
+
   it("keeps the timed dredging dropdown enable item as a two-line option and settings icon-free", () => {
     expect(cssBlock(".refresh-menu-option-with-note")).toContain("min-height: 64px;");
     expect(cssBlock(".refresh-menu-option-with-note")).toContain("grid-template-columns: minmax(0, 1fr) 20px;");

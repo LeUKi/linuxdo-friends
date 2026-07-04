@@ -231,6 +231,7 @@
   display: inline-flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 6px;
 }
@@ -242,8 +243,15 @@
   font-size: 12px;
 }
 
+.dredge-rule-modal {
+  height: auto;
+  max-height: min(calc(100vh - 24px), 640px);
+  max-height: min(calc(100dvh - 24px), 640px);
+}
+
 .dredge-rule-draft {
   display: grid;
+  align-content: start;
   gap: 10px;
 }
 
@@ -273,6 +281,7 @@
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
 

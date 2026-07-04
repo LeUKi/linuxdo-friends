@@ -114,9 +114,10 @@ describe("extension manifest safety", () => {
     expect(appCss).toContain("flex: 1 1 auto;\n  overflow: hidden;");
     expect(appCss).toContain(".modal > .maintenance-actions {\n  flex: 0 0 auto;");
     expect(appCss).toContain(".modal > .dredge-rule-draft {\n  flex: 1 1 auto;");
-    expect(appCss).toContain(".telegram-config-modal {\n  height: auto;");
+    expect(appCss).toContain(".telegram-config-modal {\n  width: min(420px, 100%);\n  height: auto;");
     expect(appCss).toContain("max-height: min(calc(100dvh - 24px), 520px);");
-    expect(appCss).toContain(".telegram-config-form {\n  display: grid;\n  min-height: 0;\n  flex: 1 1 auto;");
+    expect(appCss).toContain(".telegram-config-form {\n  display: grid;\n  align-content: start;\n  min-height: 0;\n  flex: 0 1 auto;");
+    expect(appCss).toContain(".telegram-config-modal .modal-head {\n  align-items: flex-start;");
     expect(appCss).toContain(".modal-section.telegram-config-form {\n  overflow: auto;\n  overscroll-behavior: contain;");
     expect(appCss.indexOf(".modal-section.telegram-config-form {")).toBeGreaterThan(appCss.indexOf(".modal-section {"));
     expect(appCss).toContain(".telegram-modal-actions {\n  flex: 0 0 auto;");

@@ -1451,15 +1451,21 @@
 }
 
 .telegram-config-modal {
+  width: min(420px, 100%);
   height: auto;
   max-height: min(calc(100vh - 24px), 520px);
   max-height: min(calc(100dvh - 24px), 520px);
 }
 
+.telegram-config-modal .modal-head {
+  align-items: flex-start;
+}
+
 .telegram-config-form {
   display: grid;
+  align-content: start;
   min-height: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   gap: 12px;
   overflow: auto;
   overscroll-behavior: contain;
@@ -1475,6 +1481,7 @@
 
 .telegram-modal-actions {
   flex: 0 0 auto;
+  align-items: center;
   margin-top: 12px;
 }
 

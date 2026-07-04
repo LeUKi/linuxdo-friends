@@ -211,9 +211,17 @@ export function dredgeRuleMatches(rule: DredgeRule, item: ActivityItem): boolean
   if (!rule.enabled || !isCollectableKind(item.kind)) return false;
   if (!rule.kinds.includes(item.kind)) return false;
   if (!ruleUsernamesMatch(rule.usernames, item)) return false;
-  if (rule.patterns.length === 0) return true;
+  if (rule.patterns.length === 0 || !isDredgeRuleTextPatternKind(item.kind)) return true;
   const text = searchableTextForActivity(item);
   return rule.patterns.some((pattern) => regexMatches(pattern, text));
+}
+
+export function hasDredgeRuleTextPatternKind(kinds: readonly ActivityRefreshKind[]): boolean {
+  return kinds.some(isDredgeRuleTextPatternKind);
+}
+
+export function isDredgeRuleTextPatternKind(kind: ActivityRefreshKind): boolean {
+  return kind === "topic" || kind === "reply" || kind === "boost";
 }
 
 export function searchableTextForActivity(item: ActivityItem): string {

@@ -47,6 +47,46 @@ describe("lao finds collection", () => {
     expect(result.state.laoFindsItems.hit).toMatchObject({ matchedRuleIds: ["rule-ai"], collectedAt: "2026-06-30T00:00:00.000Z" });
   });
 
+  it("applies patterns only to topic, reply, and boost rule matches", () => {
+    const state = withRules([rule({ id: "rule-ai", patterns: ["AI"] })], "2026-06-29T00:00:00.000Z");
+
+    const result = collectLaoFindsItems(
+      state,
+      [
+        activity({ id: "topic-hit", kind: "topic", title: "AI 工具" }),
+        activity({ id: "topic-miss", kind: "topic", title: "闲聊" }),
+        activity({ id: "boost-hit", kind: "boost", title: "转发", boostText: "AI 观点" }),
+        activity({ id: "reply-miss", kind: "reply", title: "普通回复" }),
+        activity({ id: "reaction-hit", kind: "reaction", title: "普通回应" }),
+        activity({ id: "like-hit", kind: "like", title: "普通点赞" })
+      ],
+      "2026-06-30T00:00:00.000Z"
+    );
+
+    expect(Object.keys(result.state.laoFindsItems)).toEqual(["topic-hit", "boost-hit", "reaction-hit", "like-hit"]);
+    expect(result.state.laoFindsItems["reaction-hit"].matchedRuleIds).toEqual(["rule-ai"]);
+    expect(result.state.laoFindsItems["like-hit"].matchedRuleIds).toEqual(["rule-ai"]);
+  });
+
+  it("uses new reaction and like pattern semantics for existing stored rules", () => {
+    const state = withRules(
+      [
+        rule({ id: "old-reaction", kinds: ["reaction"], patterns: ["AI"] }),
+        rule({ id: "old-like", kinds: ["like"], patterns: ["AI"] })
+      ],
+      "2026-06-29T00:00:00.000Z"
+    );
+
+    const result = collectLaoFindsItems(
+      state,
+      [activity({ id: "reaction", kind: "reaction", title: "普通回应" }), activity({ id: "like", kind: "like", title: "普通点赞" })],
+      "2026-06-30T00:00:00.000Z"
+    );
+
+    expect(result.state.laoFindsItems.reaction.matchedRuleIds).toEqual(["old-reaction"]);
+    expect(result.state.laoFindsItems.like.matchedRuleIds).toEqual(["old-like"]);
+  });
+
   it("lets a block rule globally veto an allow match", () => {
     const state = withRules(
       [

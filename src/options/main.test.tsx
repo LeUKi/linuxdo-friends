@@ -779,7 +779,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(chatInput.value).toBe("98765");
   });
 
-  it("discards unsaved Telegram modal drafts on cancel, backdrop, and Escape", async () => {
+  it("discards unsaved Telegram modal drafts on cancel and Escape while keeping backdrop clicks inert", async () => {
     setupChrome();
     const { container } = await renderOptionsApp("#notifications");
     const telegramCard = getTelegramCard(container);
@@ -819,13 +819,10 @@ describe("OptionsApp update diagnostics", () => {
       getTelegramBackdrop(container)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
-    await act(async () => {
-      getButton(telegramCard, "配置").click();
-      await Promise.resolve();
-    });
     inputs = getTelegramInputs(container);
-    expect(inputs.tokenInput.value).toBe("");
-    expect(inputs.chatInput.value).toBe("");
+    expect(getTelegramDialog(container)).not.toBeNull();
+    expect(inputs.tokenInput.value).toBe("backdrop-token");
+    expect(inputs.chatInput.value).toBe("222");
 
     await act(async () => {
       setInputValue(inputs.tokenInput, "escape-token");
@@ -1182,6 +1179,8 @@ describe("OptionsApp update diagnostics", () => {
     expect(getRuleDialog(container).textContent).not.toContain("关闭弹窗会丢弃");
     expect(container.querySelector(".dredge-rule-list textarea")).toBeFalsy();
     const createTextarea = getRegexTextarea(container);
+    expect(createTextarea.placeholder).toContain("留空：匹配所选用户和类型下的全部内容");
+    expect(createTextarea.placeholder).toContain("一行一条，按正则匹配标题、摘要、用户名等文本");
     await act(async () => {
       setTextareaValue(createTextarea, "AI\nLLM");
       createTextarea.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1258,7 +1257,64 @@ describe("OptionsApp update diagnostics", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "removeDredgeRule", id: "rule-ai" });
   });
 
-  it("discards lao finds rule modal drafts from close, backdrop, and escape", async () => {
+  it("keeps Lao Finds rule type all and keyword visibility semantics aligned", async () => {
+    const chromeMock = setupChrome({
+      state: {
+        ...addFriendFromProfile(defaultAppState, {
+          username: "Neo",
+          name: "Neo",
+          refreshedAt: "2026-06-28T00:00:00.000Z"
+        }),
+        dredgeRules: [currentRule({ id: "old-reaction", name: "旧回应规则", kinds: ["reaction"], patterns: ["legacy-keyword"] })]
+      }
+    });
+    const { container } = await renderOptionsApp("#lao-finds");
+
+    expect(container.textContent).toContain("旧回应规则");
+    expect(container.textContent).toContain("回应");
+    expect(container.textContent).toContain("全部内容");
+    expect(container.textContent).not.toContain("legacy-keyword");
+
+    await act(async () => {
+      getButton(container, "新建").click();
+    });
+    expect(getRuleTypeButtons(container).map((button) => button.textContent)).toEqual(["全部", "话题", "回复", "Boost", "回应", "点赞"]);
+    expect(getRuleTypeButton(container, "全部").classList.contains("active")).toBe(true);
+
+    const textarea = getRegexTextarea(container);
+    await act(async () => {
+      setTextareaValue(textarea, "AI");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await clickRuleTypeButton(container, "话题");
+    await clickRuleTypeButton(container, "回复");
+    await clickRuleTypeButton(container, "Boost");
+    expect(queryRegexTextarea(container)).toBeNull();
+
+    await act(async () => {
+      getRuleTypeButton(container, "全部").click();
+      await Promise.resolve();
+    });
+    expect(getRuleTypeButton(container, "全部").classList.contains("active")).toBe(true);
+    expect(getRegexTextarea(container).value).toBe("AI");
+
+    await clickRuleTypeButton(container, "话题");
+    await clickRuleTypeButton(container, "回复");
+    await clickRuleTypeButton(container, "Boost");
+    expect(queryRegexTextarea(container)).toBeNull();
+
+    await act(async () => {
+      getButton(container, "保存").click();
+      await Promise.resolve();
+    });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "upsertDredgeRule",
+      rule: expect.objectContaining({ schemaVersion: 2, kinds: ["reaction", "like"], patterns: [] })
+    });
+  });
+
+  it("discards lao finds rule modal drafts from close and escape while keeping backdrop clicks inert", async () => {
     const state: AppState = {
       ...addFriendFromProfile(defaultAppState, {
         username: "Neo",
@@ -1293,12 +1349,10 @@ describe("OptionsApp update diagnostics", () => {
       getRuleDialog(container).parentElement?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();
     });
-    expect(container.querySelector("[role='dialog']")).toBeFalsy();
+    expect(getRuleDialog(container)).toBeTruthy();
+    expect(getRegexTextarea(container).value).toBe("discarded-backdrop");
     expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertDredgeRule" }));
 
-    await act(async () => {
-      getButton(container, "编辑").click();
-    });
     const escapeTextarea = getRegexTextarea(container);
     await act(async () => {
       setTextareaValue(escapeTextarea, "discarded-escape");
@@ -1602,15 +1656,38 @@ function setTextareaValue(input: HTMLTextAreaElement, value: string) {
 }
 
 function getRegexTextarea(container: HTMLElement) {
-  const textarea = getRuleDialog(container).querySelector<HTMLTextAreaElement>("textarea");
+  const textarea = queryRegexTextarea(container);
   if (!textarea) throw new Error("Regex textarea not found");
   return textarea;
+}
+
+function queryRegexTextarea(container: HTMLElement) {
+  return getRuleDialog(container).querySelector<HTMLTextAreaElement>("textarea");
 }
 
 function getRuleDialog(container: HTMLElement) {
   const dialog = container.querySelector<HTMLElement>("[role='dialog'][aria-labelledby='dredge-rule-modal-title']");
   if (!dialog) throw new Error("Dredge rule dialog not found");
   return dialog;
+}
+
+function getRuleTypeButtons(container: HTMLElement) {
+  const field = Array.from(getRuleDialog(container).querySelectorAll<HTMLElement>(".dredge-rule-field")).find((candidate) => candidate.querySelector("span")?.textContent === "类型");
+  if (!field) throw new Error("Dredge rule type field not found");
+  return Array.from(field.querySelectorAll<HTMLButtonElement>("button"));
+}
+
+function getRuleTypeButton(container: HTMLElement, text: string) {
+  const button = getRuleTypeButtons(container).find((candidate) => candidate.textContent === text);
+  if (!button) throw new Error(`Dredge rule type button not found: ${text}`);
+  return button;
+}
+
+async function clickRuleTypeButton(container: HTMLElement, text: string) {
+  await act(async () => {
+    getRuleTypeButton(container, text).click();
+    await Promise.resolve();
+  });
 }
 
 function getCloseRuleDialogButton(container: HTMLElement) {

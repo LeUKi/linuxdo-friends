@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ALL_ACTIVITY_KINDS } from "../domain/friends";
-import { validateDredgeRulePattern } from "../domain/laoFinds";
+import { hasDredgeRuleTextPatternKind, validateDredgeRulePattern } from "../domain/laoFinds";
 import type { ActivityRefreshKind, AppState, DredgeRule, DredgeRuleMode, Username } from "../shared/types";
 import { deriveFeedUserOptions, deriveDredgeRuleScopeWarning } from "../popup/selectors";
 import { kindText } from "./activityKinds";
@@ -76,7 +76,7 @@ export function DredgeRuleEditor({
 
   function saveDraft() {
     if (!draft || locked) return;
-    const patterns = patternsFromText(draft.patternText);
+    const patterns = hasDredgeRuleTextPatternKind(draft.kinds) ? patternsFromText(draft.patternText) : [];
     for (const pattern of patterns) {
       const error = validateDredgeRulePattern(pattern);
       if (error) {
@@ -186,7 +186,7 @@ function DredgeRuleRow({
         <div className={classNames("dredge-rule-summary")}>
           <span>{summarizeUsers(rule.usernames)}</span>
           <span>{summarizeKinds(rule.kinds)}</span>
-          <span>{summarizePatterns(rule.patterns)}</span>
+          <span>{summarizePatterns(rule.kinds, rule.patterns)}</span>
         </div>
         {warning ? <p className={classNames("dredge-rule-warning compact")}>{warning}</p> : null}
       </div>
@@ -225,6 +225,8 @@ function DredgeRuleDraftModal({
 }) {
   const selectedUsers = draft.usernames === "all" ? [] : draft.usernames;
   const warning = deriveDredgeRuleScopeWarning(state, draft);
+  const allKindsSelected = hasAllActivityKinds(draft.kinds);
+  const showPatternField = hasDredgeRuleTextPatternKind(draft.kinds);
 
   function patch(next: Partial<DredgeRuleDraft>) {
     onChange({ ...draft, ...next });
@@ -237,6 +239,10 @@ function DredgeRuleDraftModal({
     patch({ kinds: kinds.length ? kinds : ALL_ACTIVITY_KINDS });
   }
 
+  function selectAllKinds() {
+    patch({ kinds: ALL_ACTIVITY_KINDS });
+  }
+
   function toggleUsername(username: Username) {
     if (draft.usernames === "all") {
       patch({ usernames: [username] });
@@ -247,7 +253,7 @@ function DredgeRuleDraftModal({
   }
 
   return (
-    <div className={classNames("modal-backdrop")} role="presentation" onClick={onClose}>
+    <div className={classNames("modal-backdrop")} role="presentation">
       <section className={classNames("modal dredge-rule-modal")} role="dialog" aria-modal="true" aria-labelledby="dredge-rule-modal-title" onClick={(event) => event.stopPropagation()}>
         <div className="modal-head">
           <div>
@@ -283,6 +289,9 @@ function DredgeRuleDraftModal({
           <div className={classNames("dredge-rule-field")}>
             <span>类型</span>
             <div className={classNames("dredge-choice-row")}>
+              <button className={classNames(allKindsSelected && "active")} type="button" onClick={selectAllKinds} disabled={locked}>
+                全部
+              </button>
               {ALL_ACTIVITY_KINDS.map((kind) => (
                 <button className={classNames(draft.kinds.includes(kind) && "active", draft.kinds.includes(kind) && `kind-${kind}`)} key={kind} type="button" onClick={() => toggleKind(kind)} disabled={locked}>
                   {kindText(kind)}
@@ -310,20 +319,23 @@ function DredgeRuleDraftModal({
               ))}
             </div>
           </div>
-          <label className={classNames("dredge-rule-field")}>
-            <span>关键词 / 正则</span>
-            <textarea
-              disabled={locked}
-              value={draft.patternText}
-              onChange={(event) => patch({ patternText: event.target.value })}
-              placeholder={`可选，一行一条
+          {showPatternField ? (
+            <label className={classNames("dredge-rule-field")}>
+              <span>关键词 / 正则</span>
+              <textarea
+                disabled={locked}
+                value={draft.patternText}
+                onChange={(event) => patch({ patternText: event.target.value })}
+                placeholder={`留空：匹配所选用户和类型下的全部内容
+一行一条，按正则匹配标题、摘要、用户名等文本
 关键词：AI
 关键词：机器学习
 正则：AI|LLM
 字面量 C++：C\\+\\+`}
-              rows={3}
-            />
-          </label>
+                rows={3}
+              />
+            </label>
+          ) : null}
           {warning ? <p className={classNames("dredge-rule-warning")}>{warning}</p> : null}
           {message ? <p className={classNames("dredge-rule-warning")} role="alert">{message}</p> : null}
           <div className={classNames("dredge-rule-draft-actions")}>
@@ -376,8 +388,12 @@ function summarizeKinds(kinds: ActivityRefreshKind[]): string {
   return kinds.map(kindText).join("、");
 }
 
-function summarizePatterns(patterns: string[]): string {
-  if (patterns.length === 0) return "全部内容";
+function hasAllActivityKinds(kinds: readonly ActivityRefreshKind[]): boolean {
+  return ALL_ACTIVITY_KINDS.every((kind) => kinds.includes(kind));
+}
+
+function summarizePatterns(kinds: readonly ActivityRefreshKind[], patterns: string[]): string {
+  if (patterns.length === 0 || !hasDredgeRuleTextPatternKind(kinds)) return "全部内容";
   const preview = patterns[0].length > 18 ? `${patterns[0].slice(0, 18)}…` : patterns[0];
   return patterns.length === 1 ? `1 条匹配：${preview}` : `${patterns.length} 条匹配：${preview}`;
 }

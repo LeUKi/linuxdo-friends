@@ -272,7 +272,7 @@ export function NotificationsSettingsSection({
         </div>
         {telegramMessage ? <p className={classNames("settings-meta")}>{telegramMessage}</p> : null}
         {telegramModalOpen ? (
-          <div className={classNames("modal-backdrop")} role="presentation" onClick={(event) => event.target === event.currentTarget && closeTelegramModal()}>
+          <div className={classNames("modal-backdrop")} role="presentation">
             <section className={classNames("modal telegram-config-modal")} role="dialog" aria-modal="true" aria-labelledby="telegram-config-title">
               <div className={classNames("modal-head")}>
                 <div>
