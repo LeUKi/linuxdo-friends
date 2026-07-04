@@ -45,6 +45,7 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "refreshFriendActivity", usernames: ["neil"] })).toBe(true);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neil"] } })).toBe(true);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neil"] }, trigger: "timed", timedRunId: "run-1" })).toBe(true);
+    expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neil"] }, trigger: "manual", timedRunId: "run-1" })).toBe(true);
     expect(
       isBackgroundCommand({
         type: "upsertDredgeRule",
@@ -104,7 +105,7 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "bad", usernames: ["ok"] } })).toBe(false);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "timed" })).toBe(false);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, timedRunId: "run-1" })).toBe(false);
-    expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "manual", timedRunId: "run-1" })).toBe(false);
+    expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "manual", timedRunId: "" })).toBe(false);
     expect(isBackgroundCommand({ type: "refreshFriendActivity", scope: { kind: "boost" }, trigger: "bad", timedRunId: "run-1" })).toBe(false);
     expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { usernames: [""] } })).toBe(false);
     expect(isBackgroundCommand({ type: "upsertDredgeRule", rule: { kinds: ["bad"] } })).toBe(false);
@@ -208,6 +209,7 @@ describe("message contracts", () => {
     const state = laoFindsNotificationState({
       telegramBotToken: "bot-token",
       telegramChatId: "chat-id",
+      laoFindsTelegramNotificationsEnabled: true,
       laoFindsBrowserNotificationsEnabled: true
     });
     const { send, notifications } = await setupWorker({ initialState: state });
@@ -231,11 +233,37 @@ describe("message contracts", () => {
     );
   });
 
+  it("keeps automatic browser notifications when telegram digest delivery is disabled by default", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const state = laoFindsNotificationState({
+      telegramBotToken: "bot-token",
+      telegramChatId: "chat-id",
+      laoFindsBrowserNotificationsEnabled: true
+    });
+    const { send, notifications } = await setupWorker({ initialState: state });
+
+    const response = await send({
+      type: "completeRuleDerivedLaoFindsDredge",
+      startedAt: "2026-06-28T00:00:00.000Z",
+      scopes: [{ kind: "topic", usernames: ["neo"] }],
+      trigger: "timed"
+    });
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+
+    expect(response).toMatchObject({ ok: true, data: { laoFindsStartedAt: "2026-06-28T00:00:00.000Z" } });
+    expect(notifications.create).toHaveBeenCalledWith(
+      expect.stringMatching(/^linuxdoFriends\.laoFinds\./),
+      expect.objectContaining({ message: "自动捞料新增 1 条，点击查看佬有料。" })
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("sends Lao Finds notifications when a completed all-scope timed run covers rule-derived scopes", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
     const state = laoFindsNotificationState({
       telegramBotToken: "bot-token",
       telegramChatId: "chat-id",
+      laoFindsTelegramNotificationsEnabled: true,
       laoFindsBrowserNotificationsEnabled: true
     });
     const { send, notifications } = await setupWorker({ initialState: state });
@@ -263,6 +291,7 @@ describe("message contracts", () => {
     const state = laoFindsNotificationState({
       telegramBotToken: "bot-token",
       telegramChatId: "chat-id",
+      laoFindsTelegramNotificationsEnabled: true,
       laoFindsBrowserNotificationsEnabled: true
     });
     const { send, notifications } = await setupWorker({
@@ -333,7 +362,11 @@ describe("message contracts", () => {
 
   it("still sends Telegram when the browser notification surface fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
-    const state = laoFindsNotificationState({ telegramBotToken: "bot-token", telegramChatId: "chat-id" });
+    const state = laoFindsNotificationState({
+      telegramBotToken: "bot-token",
+      telegramChatId: "chat-id",
+      laoFindsTelegramNotificationsEnabled: true
+    });
     const { send, notifications } = await setupWorker({ initialState: state });
     notifications.create.mockRejectedValueOnce(new Error("notifications unavailable"));
 
@@ -373,6 +406,7 @@ describe("message contracts", () => {
       initialState: laoFindsNotificationState({
         telegramBotToken: "bot-token",
         telegramChatId: "chat-id",
+        laoFindsTelegramNotificationsEnabled: true,
         laoFindsManualNotificationsEnabled: true
       })
     });
@@ -392,6 +426,29 @@ describe("message contracts", () => {
     expect(fetch).toHaveBeenCalledWith(
       "https://api.telegram.org/botbot-token/sendMessage",
       expect.objectContaining({ body: expect.stringContaining("佬有料 手动打捞新增 1 条") })
+    );
+  });
+
+  it("keeps Telegram test sending independent from the digest switch", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const { send } = await setupWorker({
+      initialState: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          laoFindsTelegramNotificationsEnabled: false,
+          telegramBotToken: "bot-token",
+          telegramChatId: "chat-id"
+        }
+      }
+    });
+
+    const response = await send({ type: "testTelegramNotification" });
+
+    expect(response).toEqual({ ok: true, data: "已发送测试消息。" });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.telegram.org/botbot-token/sendMessage",
+      expect.objectContaining({ body: expect.stringContaining("佬朋友测试消息") })
     );
   });
 
@@ -2486,6 +2543,55 @@ describe("message contracts", () => {
     expect(progressResponse).toMatchObject({
       ok: true,
       data: { taskType: "activity", status: "success", completed: 1, total: 1, scope: { kind: "boost", usernames: ["misaka7369"] } }
+    });
+  });
+
+  it("preserves manual rule-derived run ownership in activity progress", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ topics: [] }), { status: 200 })));
+    const state: AppState = {
+      ...addFriendFromProfile(defaultAppState, { username: "neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
+      dredgeRules: [
+        {
+          schemaVersion: 2,
+          id: "rule-topic",
+          name: "Topic",
+          enabled: true,
+          mode: "allow",
+          usernames: ["neo"],
+          kinds: ["topic"],
+          patterns: [],
+          createdAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      ]
+    };
+    const { send, runtime, sessionStorage } = await setupWorker({ initialState: state });
+
+    const response = await send({
+      type: "refreshFriendActivity",
+      scope: { kind: "topic", usernames: ["neo"] },
+      trigger: "manual",
+      timedRunId: "timed-activity:manual-run"
+    });
+
+    expect(response).toMatchObject({ ok: true, data: { lastSync: { ok: true, source: "direct_fetch" } } });
+    expect(runtime.sendMessage).toHaveBeenCalledWith({
+      type: "linuxdoFriends.siteDataProgress",
+      progress: expect.objectContaining({
+        taskType: "activity",
+        status: "running",
+        trigger: "manual",
+        timedRunId: "timed-activity:manual-run"
+      })
+    });
+    expect(sessionStorage.dump()).toMatchObject({
+      [SITE_DATA_PROGRESS_STORAGE_KEY]: expect.objectContaining({
+        taskType: "activity",
+        status: "success",
+        trigger: "manual",
+        timedRunId: "timed-activity:manual-run"
+      })
     });
   });
 

@@ -207,6 +207,7 @@ export interface RefreshSettings {
   requestStatsAutoSyncEnabled: boolean;
   laoFindsBrowserNotificationsEnabled: boolean;
   laoFindsManualNotificationsEnabled: boolean;
+  laoFindsTelegramNotificationsEnabled: boolean;
   telegramBotToken?: string;
   telegramChatId?: string;
 }
@@ -218,6 +219,7 @@ export interface ConfigExportSettings {
   timedActivityRefreshIntervalMinutes: number;
   laoFindsBrowserNotificationsEnabled: boolean;
   laoFindsManualNotificationsEnabled: boolean;
+  laoFindsTelegramNotificationsEnabled: boolean;
   telegramBotToken?: string;
   telegramChatId?: string;
 }

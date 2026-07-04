@@ -67,22 +67,26 @@
 .settings-card-header {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
 .settings-card-title-block {
+  flex: 1 1 180px;
   min-width: 0;
 }
 
 .settings-card-actions {
   display: flex;
   min-width: 0;
-  flex: 0 0 auto;
+  max-width: 100%;
+  flex: 0 1 auto;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+  margin-left: auto;
 }
 
 .settings-card-body {
@@ -90,6 +94,21 @@
   min-width: 0;
   gap: 10px;
   margin-top: 12px;
+}
+
+.settings-count-badge {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .settings-card-unavailable {
@@ -1427,6 +1446,38 @@
   color: var(--accent-text);
 }
 
+.telegram-config-row {
+  align-items: start;
+}
+
+.telegram-config-modal {
+  height: auto;
+  max-height: min(calc(100vh - 24px), 520px);
+  max-height: min(calc(100dvh - 24px), 520px);
+}
+
+.telegram-config-form {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  gap: 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.telegram-config-field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.telegram-modal-actions {
+  flex: 0 0 auto;
+  margin-top: 12px;
+}
+
 .timed-mode-control {
   width: 176px;
 }
@@ -1462,6 +1513,10 @@
   background: var(--surface-muted);
   padding: 3px;
   box-shadow: inset 0 0 0 1px var(--border-muted);
+}
+
+.settings-card-segmented {
+  width: min(260px, 100%);
 }
 
 .segmented-option {

@@ -14,6 +14,7 @@ describe("storage migration", () => {
     expect(defaultAppState.laoFindsStartedAt).toBeUndefined();
     expect(defaultAppState.laoFindsItems).toEqual({});
     expect(defaultAppState.avatarCache).toEqual({});
+    expect(defaultAppState.settings.laoFindsTelegramNotificationsEnabled).toBe(false);
   });
 
   it("backfills old persisted state without friendProfiles", async () => {
@@ -253,7 +254,27 @@ describe("storage migration", () => {
     });
 
     await expect(loadState(storage)).resolves.toMatchObject({
-      settings: { telegramBotToken: "123456:ABC-DEF", telegramChatId: "987654321" }
+      settings: {
+        laoFindsTelegramNotificationsEnabled: false,
+        telegramBotToken: "123456:ABC-DEF",
+        telegramChatId: "987654321"
+      }
+    });
+  });
+
+  it("preserves explicit telegram digest notification enablement", async () => {
+    const storage = createMockStorage({
+      linuxdoFriendsState: {
+        settings: { laoFindsTelegramNotificationsEnabled: true, telegramBotToken: "123456:ABC-DEF", telegramChatId: "987654321" }
+      }
+    });
+
+    await expect(loadState(storage)).resolves.toMatchObject({
+      settings: {
+        laoFindsTelegramNotificationsEnabled: true,
+        telegramBotToken: "123456:ABC-DEF",
+        telegramChatId: "987654321"
+      }
     });
   });
 
@@ -266,7 +287,8 @@ describe("storage migration", () => {
           timedActivityRefreshIntervalMinutes: 5,
           requestStatsAutoSyncEnabled: true,
           laoFindsBrowserNotificationsEnabled: false,
-          laoFindsManualNotificationsEnabled: true
+          laoFindsManualNotificationsEnabled: true,
+          laoFindsTelegramNotificationsEnabled: true
         }
       }
     });
@@ -278,7 +300,8 @@ describe("storage migration", () => {
         timedActivityRefreshIntervalMinutes: 5,
         requestStatsAutoSyncEnabled: true,
         laoFindsBrowserNotificationsEnabled: false,
-        laoFindsManualNotificationsEnabled: true
+        laoFindsManualNotificationsEnabled: true,
+        laoFindsTelegramNotificationsEnabled: true
       }
     });
   });
@@ -292,7 +315,8 @@ describe("storage migration", () => {
           timedActivityRefreshIntervalMinutes: 1,
           requestStatsAutoSyncEnabled: "yes",
           laoFindsBrowserNotificationsEnabled: "yes",
-          laoFindsManualNotificationsEnabled: "yes"
+          laoFindsManualNotificationsEnabled: "yes",
+          laoFindsTelegramNotificationsEnabled: "yes"
         }
       }
     });
@@ -304,7 +328,8 @@ describe("storage migration", () => {
         timedActivityRefreshIntervalMinutes: 20,
         requestStatsAutoSyncEnabled: false,
         laoFindsBrowserNotificationsEnabled: true,
-        laoFindsManualNotificationsEnabled: false
+        laoFindsManualNotificationsEnabled: false,
+        laoFindsTelegramNotificationsEnabled: false
       }
     });
   });

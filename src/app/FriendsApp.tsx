@@ -117,7 +117,7 @@ import type {
   UiSceneState,
   Username
 } from "../shared/types";
-import { deriveDredgeRefreshAvailability, deriveTimedActivityRefreshScopes } from "../domain/activityRefresh";
+import { DREDGE_REFRESH_UNAVAILABLE_MESSAGE, deriveDredgeRefreshAvailability, deriveTimedActivityRefreshScopes } from "../domain/activityRefresh";
 import { deriveRequestStatsView } from "../domain/requestStats";
 import {
   type UserIdentityView,
@@ -197,7 +197,7 @@ function findScrollContainer(target: HTMLElement) {
 export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface }) {
   const [state] = useAtom(appStateAtom);
   const [loading] = useAtom(loadingAtom);
-  const [status] = useAtom(statusMessageAtom);
+  const [status, setStatus] = useAtom(statusMessageAtom);
   const [siteDataProgress] = useAtom(siteDataProgressAtom);
   const [pageScriptStatus] = useAtom(pageScriptStatusAtom);
   const [updateCheck] = useAtom(updateCheckAtom);
@@ -425,6 +425,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
     completeRuleDerivedLaoFindsDredge,
     session: timedActivityRefreshSession,
     state,
+    onManualStatus: setStatus,
     surface,
     autoRunEnabledRef: timedActivityAutoRunEnabledRef,
     surfaceId: surfaceIdRef.current
@@ -1365,6 +1366,7 @@ function useTimedActivityRefresh({
   completeRuleDerivedLaoFindsDredge,
   session,
   state,
+  onManualStatus,
   surface,
   autoRunEnabledRef,
   surfaceId
@@ -1378,6 +1380,7 @@ function useTimedActivityRefresh({
   completeRuleDerivedLaoFindsDredge: (startedAt: string, scopes: ActivityRefreshScope[], trigger: SiteDataTaskTrigger) => Promise<BackgroundResponse<AppState> | void>;
   session: TimedActivityRefreshSession;
   state: AppState;
+  onManualStatus?: (message: string | null) => void;
   surface: AppSurface;
   autoRunEnabledRef: React.MutableRefObject<boolean>;
   surfaceId: string;
@@ -1511,13 +1514,20 @@ function useTimedActivityRefresh({
   ]);
 
   function runNow() {
-    if (surface !== "side-panel") return Promise.resolve();
-    if (refreshInFlightRef.current || latestRef.current.progress?.status === "running") return Promise.resolve();
+    if (surface !== "side-panel") {
+      onManualStatus?.("请打开插件侧栏后再打捞。");
+      return Promise.resolve();
+    }
+    if (refreshInFlightRef.current || latestRef.current.progress?.status === "running") {
+      onManualStatus?.("已有刷新正在进行。");
+      return Promise.resolve();
+    }
     return runTimedActivityRefresh({
       trigger: "manual",
       claimController,
       getState: () => latestRef.current.state,
       onAggregateProgress: updateAggregateProgress,
+      onManualStatus,
       patchSession,
       refresh,
       completeRuleDerivedLaoFindsDredge,
@@ -1548,6 +1558,7 @@ async function runTimedActivityRefresh({
   claimController,
   getState,
   onAggregateProgress,
+  onManualStatus,
   patchSession,
   refresh,
   completeRuleDerivedLaoFindsDredge,
@@ -1560,6 +1571,7 @@ async function runTimedActivityRefresh({
   claimController: (surfaceId: string) => Promise<TimedActivityRefreshSession>;
   getState: () => AppState;
   onAggregateProgress?: TimedActivityAggregateProgressUpdater;
+  onManualStatus?: (message: string | null) => void;
   patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>;
   refresh: (scope: ActivityRefreshScope, timedRunId: string, trigger: SiteDataTaskTrigger) => Promise<BackgroundResponse<AppState> | void>;
   completeRuleDerivedLaoFindsDredge: (startedAt: string, scopes: ActivityRefreshScope[], trigger: SiteDataTaskTrigger) => Promise<BackgroundResponse<AppState> | void>;
@@ -1568,9 +1580,30 @@ async function runTimedActivityRefresh({
   surfaceId: string;
 }) {
   const localRefreshInFlightRef = refreshInFlightRef ?? { current: false };
-  if (localRefreshInFlightRef.current) return;
+  const reportManualStatus = (message: string | null) => {
+    if (trigger === "manual") onManualStatus?.(message);
+  };
+  if (localRefreshInFlightRef.current) {
+    reportManualStatus("已有刷新正在进行。");
+    return;
+  }
   if (shouldRun && !shouldRun()) return;
   localRefreshInFlightRef.current = true;
+  reportManualStatus(null);
+  let manualPauseSnapshot: Pick<TimedActivityRefreshSession, "pausedReason" | "pausedMessage" | "lastFailureAt"> | undefined;
+  if (trigger === "manual") {
+    const currentSession = await patchSession({});
+    manualPauseSnapshot = {
+      pausedReason: currentSession.pausedReason,
+      pausedMessage: currentSession.pausedMessage,
+      lastFailureAt: currentSession.lastFailureAt
+    };
+    await patchSession({
+      pausedReason: undefined,
+      pausedMessage: undefined,
+      lastFailureAt: undefined
+    });
+  }
   const claimed = await claimController(surfaceId);
   if (shouldRun && !shouldRun()) {
     await clearTimedActivityControllerLease(patchSession);
@@ -1578,6 +1611,8 @@ async function runTimedActivityRefresh({
     return;
   }
   if (claimed.controllerSurfaceId !== surfaceId || !claimed.controllerHeartbeatAt) {
+    if (manualPauseSnapshot) await patchSession(manualPauseSnapshot);
+    reportManualStatus(manualDredgeClaimFailureMessage(claimed, surfaceId));
     localRefreshInFlightRef.current = false;
     return;
   }
@@ -1591,6 +1626,7 @@ async function runTimedActivityRefresh({
   const now = new Date();
   const runStartedAt = now.toISOString();
   if (scopes.length === 0) {
+    reportManualStatus(DREDGE_REFRESH_UNAVAILABLE_MESSAGE);
     const nextDueAt = new Date(now.getTime() + state.settings.timedActivityRefreshIntervalMinutes * 60_000).toISOString();
     await patchSession({
       activeRunId: undefined,
@@ -1608,7 +1644,7 @@ async function runTimedActivityRefresh({
   }
 
   const runId = `timed-activity:${now.getTime()}:${Math.random().toString(36).slice(2)}`;
-  const aggregateRun = createTimedActivityAggregateRun(state, scopes, runId, runStartedAt);
+  const aggregateRun = createTimedActivityAggregateRun(state, scopes, runId, runStartedAt, trigger);
   await patchSession({
     activeRunId: runId,
     enabledAt: claimed.enabledAt ?? runStartedAt,
@@ -1625,6 +1661,7 @@ async function runTimedActivityRefresh({
       const response = await refresh(scope, runId, trigger);
       if (!(await timedRunStillActive(patchSession, runId))) return;
       if (response && !response.ok) {
+        reportManualStatus(response.error);
         if (isBusyRefreshError(response.error)) {
           await patchTimedActivityBusy(patchSession);
           return;
@@ -1635,10 +1672,12 @@ async function runTimedActivityRefresh({
       }
       const lastSync = response?.ok ? response.data.lastSync : undefined;
       if (lastSync && !lastSync.ok && isBusyRefreshError(lastSync.message)) {
+        reportManualStatus(lastSync.message);
         await patchTimedActivityBusy(patchSession);
         return;
       }
       if (lastSync && !lastSync.ok && isTimedActivityPauseReason(lastSync.reason)) {
+        reportManualStatus(lastSync.message);
         await patchTimedActivityFailure(patchSession, lastSync.message, lastSync.reason);
         return;
       }
@@ -1650,6 +1689,7 @@ async function runTimedActivityRefresh({
     if (deriveTimedActivityRefreshScopes(state, "rules").length > 0) {
       const advanceResponse = await completeRuleDerivedLaoFindsDredge(runStartedAt, scopes, trigger);
       if (advanceResponse && !advanceResponse.ok) {
+        reportManualStatus(advanceResponse.error);
         await patchTimedActivityFailure(patchSession, advanceResponse.error, "unavailable");
         return;
       }
@@ -1664,10 +1704,18 @@ async function runTimedActivityRefresh({
       pausedMessage: undefined,
       noTargetMessage: undefined
     });
+    reportManualStatus(null);
   } finally {
     onAggregateProgress?.(null);
     localRefreshInFlightRef.current = false;
   }
+}
+
+function manualDredgeClaimFailureMessage(session: TimedActivityRefreshSession, surfaceId: string) {
+  if (!session.visibleSurfaces[surfaceId]) return "插件侧栏还没准备好，请稍后再试。";
+  if (session.controllerSurfaceId && session.controllerSurfaceId !== surfaceId) return "另一个插件侧栏正在打捞，请稍后再试。";
+  if (session.pausedMessage) return session.pausedMessage;
+  return "暂时无法开始打捞，请稍后再试。";
 }
 
 async function clearTimedActivityControllerLease(patchSession: (patch: Partial<TimedActivityRefreshSession>) => Promise<TimedActivityRefreshSession>) {

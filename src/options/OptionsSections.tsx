@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type React from "react";
 import { DredgeRuleEditor } from "../app/DredgeRuleEditor";
 import { FriendCandidateList } from "../app/FriendManagement";
@@ -13,8 +14,8 @@ import {
   cloudArchiveStatusTitle,
   cloudBindingMetaText,
   cloudStatusText,
+  dailyBackupStatusText,
   formatLaoFindsStartedAt,
-  requestStatsSyncText
 } from "./optionsHelpers";
 
 const LDC_SPONSOR_20_URL = "https://credit.linux.do/paying/online?token=3b78efe60d34a77c55d52e84d60e33270b5cc69f7aa8979bbab4d1b41b6f95b7";
@@ -60,25 +61,30 @@ export function BasicSettingsSection({
           <p className={classNames("settings-meta")}>打开已登录的 linux.do 页面后可探测当前账号。</p>
         )}
       </SettingsCard>
-      <SettingsCard title="动态跳转" subtitle="选择打开动态详情的位置。">
-        <div className={classNames("segmented-control")} role="radiogroup" aria-label="动态跳转">
-          <button
-            className={classNames("segmented-option", state.settings.openActivityLinksInPage && "active")}
-            type="button"
-            aria-pressed={state.settings.openActivityLinksInPage}
-            onClick={() => void updateSettings({ openActivityLinksInPage: true })}
-          >
-            页内跳转
-          </button>
-          <button
-            className={classNames("segmented-option", !state.settings.openActivityLinksInPage && "active")}
-            type="button"
-            aria-pressed={!state.settings.openActivityLinksInPage}
-            onClick={() => void updateSettings({ openActivityLinksInPage: false })}
-          >
-            新标签页
-          </button>
-        </div>
+      <SettingsCard
+        title="动态跳转"
+        subtitle="选择打开动态详情的位置。"
+        headerAside={
+          <div className={classNames("segmented-control settings-card-segmented")} role="radiogroup" aria-label="动态跳转">
+            <button
+              className={classNames("segmented-option", state.settings.openActivityLinksInPage && "active")}
+              type="button"
+              aria-pressed={state.settings.openActivityLinksInPage}
+              onClick={() => void updateSettings({ openActivityLinksInPage: true })}
+            >
+              页内跳转
+            </button>
+            <button
+              className={classNames("segmented-option", !state.settings.openActivityLinksInPage && "active")}
+              type="button"
+              aria-pressed={!state.settings.openActivityLinksInPage}
+              onClick={() => void updateSettings({ openActivityLinksInPage: false })}
+            >
+              新标签页
+            </button>
+          </div>
+        }
+      >
         <p className={classNames("settings-meta")}>页内跳转会优先使用当前 linux.do 标签页；不可用时仍打开新标签。</p>
       </SettingsCard>
     </div>
@@ -119,7 +125,11 @@ export function ScopeSettingsSection({
           </button>
         }
       />
-      <SettingsCard title="范围管理" subtitle="管理会被打捞和展示动态的已关注用户。">
+      <SettingsCard
+        title="范围管理"
+        subtitle="管理会被打捞和展示动态的已关注用户。"
+        headerAside={friends.length > 0 ? <span className={classNames("settings-count-badge")}>共 {friends.length} 位佬朋友</span> : null}
+      >
         <input
           className={classNames("modal-search-input settings-search-input")}
           value={friendsQuery}
@@ -137,7 +147,6 @@ export function ScopeSettingsSection({
           onUpdateScope={onUpdateScope}
           query={friendsQuery}
         />
-        {friends.length > 0 ? <p className={classNames("friend-count-footer")}>共 {friends.length} 位佬朋友</p> : null}
       </SettingsCard>
     </div>
   );
@@ -146,34 +155,60 @@ export function ScopeSettingsSection({
 export function NotificationsSettingsSection({
   onSaveTelegram,
   onTestTelegram,
-  setTelegramChatId,
-  setTelegramToken,
   state,
   telegramBusy,
-  telegramChatId,
   telegramMessage,
-  telegramToken,
   updateSettings
 }: {
-  onSaveTelegram: () => void;
-  onTestTelegram: () => void;
-  setTelegramChatId: (value: string) => void;
-  setTelegramToken: (value: string) => void;
+  onSaveTelegram: (token: string, chatId: string) => Promise<boolean>;
+  onTestTelegram: () => Promise<boolean>;
   state: AppState;
   telegramBusy: "save" | "test" | null;
-  telegramChatId: string;
   telegramMessage: string | null;
-  telegramToken: string;
   updateSettings: UpdateSettings;
 }) {
+  const [telegramModalOpen, setTelegramModalOpen] = useState(false);
+  const [telegramDraftToken, setTelegramDraftToken] = useState("");
+  const [telegramDraftChatId, setTelegramDraftChatId] = useState("");
+  const telegramConfigured = Boolean(state.settings.telegramBotToken && state.settings.telegramChatId);
+  const savedTelegramToken = state.settings.telegramBotToken ?? "";
+  const savedTelegramChatId = state.settings.telegramChatId ?? "";
+
+  function resetTelegramDraft() {
+    setTelegramDraftToken(savedTelegramToken);
+    setTelegramDraftChatId(savedTelegramChatId);
+  }
+
+  function openTelegramModal() {
+    resetTelegramDraft();
+    setTelegramModalOpen(true);
+  }
+
+  function closeTelegramModal() {
+    resetTelegramDraft();
+    setTelegramModalOpen(false);
+  }
+
+  async function saveTelegramFromModal() {
+    const saved = await onSaveTelegram(telegramDraftToken, telegramDraftChatId);
+    if (saved) setTelegramModalOpen(false);
+  }
+
+  useEffect(() => {
+    if (!telegramModalOpen) return undefined;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeTelegramModal();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [savedTelegramChatId, savedTelegramToken, telegramModalOpen]);
+
   return (
     <div className={classNames("settings-card-list")}>
-      <SettingsCard title="佬有料通知" subtitle="自动捞料有新收录会提醒；手动打捞默认不提醒。">
-        <div className={classNames("settings-setting-row timed-setting-row")}>
-          <div>
-            <strong>浏览器本地通知</strong>
-            <span>只显示来源和新增数量，点击后打开佬有料。</span>
-          </div>
+      <SettingsCard
+        title="浏览器本地通知"
+        subtitle="自动捞料有新增时提醒。"
+        actions={
           <button
             className={classNames("switch-button", state.settings.laoFindsBrowserNotificationsEnabled && "active")}
             type="button"
@@ -182,15 +217,17 @@ export function NotificationsSettingsSection({
           >
             {state.settings.laoFindsBrowserNotificationsEnabled ? "已启用" : "未启用"}
           </button>
-        </div>
+        }
+      >
         <div className={classNames("settings-setting-row timed-setting-row")}>
           <div>
             <strong>手动打捞通知</strong>
-            <span>开启后，点击立即打捞并有新收录时也会提醒。</span>
+            <span>立即打捞有新增时提醒。</span>
           </div>
           <button
             className={classNames("switch-button", state.settings.laoFindsManualNotificationsEnabled && "active")}
             type="button"
+            disabled={!state.settings.laoFindsBrowserNotificationsEnabled}
             aria-pressed={state.settings.laoFindsManualNotificationsEnabled}
             onClick={() => void updateSettings({ laoFindsManualNotificationsEnabled: !state.settings.laoFindsManualNotificationsEnabled })}
           >
@@ -198,48 +235,91 @@ export function NotificationsSettingsSection({
           </button>
         </div>
       </SettingsCard>
-      <SettingsCard title="Telegram" subtitle="佬有料有新收录时发送 digest 提醒。">
-        <div>
-          <label className={classNames("settings-meta")} htmlFor="tg-bot-token" style={{ display: "block", marginBottom: 4 }}>
-            Bot Token
-          </label>
-          <input
-            id="tg-bot-token"
-            type="password"
-            placeholder="123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
-            value={telegramToken}
-            onChange={(event) => setTelegramToken(event.currentTarget.value)}
-            autoComplete="off"
-          />
-        </div>
-        <div>
-          <label className={classNames("settings-meta")} htmlFor="tg-chat-id" style={{ display: "block", marginBottom: 4 }}>
-            Chat ID
-          </label>
-          <input
-            id="tg-chat-id"
-            type="text"
-            placeholder="123456789"
-            value={telegramChatId}
-            onChange={(event) => setTelegramChatId(event.currentTarget.value)}
-            autoComplete="off"
-          />
-        </div>
-        <div className={classNames("maintenance-actions")}>
-          <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={onSaveTelegram}>
-            {telegramBusy === "save" ? "保存中" : "保存"}
-          </button>
-          <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={onTestTelegram}>
-            {telegramBusy === "test" ? "发送中" : "发送测试消息"}
+      <SettingsCard
+        title="Telegram"
+        subtitle="发送到 Telegram。"
+        actions={
+          <>
+            <button
+              className={classNames("switch-button", state.settings.laoFindsTelegramNotificationsEnabled && "active")}
+              type="button"
+              aria-pressed={state.settings.laoFindsTelegramNotificationsEnabled}
+              onClick={() => void updateSettings({ laoFindsTelegramNotificationsEnabled: !state.settings.laoFindsTelegramNotificationsEnabled })}
+            >
+              {state.settings.laoFindsTelegramNotificationsEnabled ? "已启用" : "未启用"}
+            </button>
+            <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={() => void onTestTelegram()}>
+              {telegramBusy === "test" ? "发送中" : "发送测试"}
+            </button>
+          </>
+        }
+      >
+        <div className={classNames("settings-setting-row timed-setting-row telegram-config-row")}>
+          <div>
+            <strong>配置状态</strong>
+            <span>{telegramConfigured ? "已配置 Bot Token 和 Chat ID。" : "未配置 Bot Token 和 Chat ID。"}</span>
+          </div>
+          <button className={classNames("small-action")} type="button" onClick={openTelegramModal}>
+            配置
           </button>
         </div>
         {telegramMessage ? <p className={classNames("settings-meta")}>{telegramMessage}</p> : null}
-        <p className={classNames("settings-meta")}>先在 Telegram 创建 Bot，再填入自己的 Chat ID。</p>
+        {telegramModalOpen ? (
+          <div className={classNames("modal-backdrop")} role="presentation" onClick={(event) => event.target === event.currentTarget && closeTelegramModal()}>
+            <section className={classNames("modal telegram-config-modal")} role="dialog" aria-modal="true" aria-labelledby="telegram-config-title">
+              <div className={classNames("modal-head")}>
+                <div>
+                  <h2 id="telegram-config-title">Telegram 配置</h2>
+                  <p className={classNames("settings-meta")}>保存 Bot Token 和 Chat ID 后可发送通知。</p>
+                </div>
+                <button className={classNames("icon-button")} type="button" aria-label="关闭 Telegram 配置" onClick={closeTelegramModal}>
+                  ×
+                </button>
+              </div>
+              <div className={classNames("modal-section telegram-config-form")}>
+                <label className={classNames("telegram-config-field")} htmlFor="tg-bot-token">
+                  <span>Bot Token</span>
+                  <input
+                    id="tg-bot-token"
+                    type="password"
+                    placeholder="123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+                    value={telegramDraftToken}
+                    onChange={(event) => setTelegramDraftToken(event.currentTarget.value)}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className={classNames("telegram-config-field")} htmlFor="tg-chat-id">
+                  <span>Chat ID</span>
+                  <input
+                    id="tg-chat-id"
+                    type="text"
+                    placeholder="123456789"
+                    value={telegramDraftChatId}
+                    onChange={(event) => setTelegramDraftChatId(event.currentTarget.value)}
+                    autoComplete="off"
+                  />
+                </label>
+                {telegramMessage ? <p className={classNames("settings-meta")}>{telegramMessage}</p> : null}
+              </div>
+              <div className={classNames("maintenance-actions telegram-modal-actions")}>
+                <button className={classNames("small-action primary-action")} type="button" disabled={telegramBusy != null} onClick={() => void saveTelegramFromModal()}>
+                  {telegramBusy === "save" ? "保存中" : "保存"}
+                </button>
+                <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={() => void onTestTelegram()}>
+                  {telegramBusy === "test" ? "发送中" : "发送测试消息"}
+                </button>
+                <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={closeTelegramModal}>
+                  取消
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
       </SettingsCard>
       <SettingsCard
         variant="unavailable"
-        title="Webhook 通知"
-        subtitle="以后可把提醒发送到你自己的地址。"
+        title="Webhook"
+        subtitle="发送到自定义地址。"
         actions={<span className={classNames("settings-unavailable-badge")}>暂未开放</span>}
       />
     </div>
@@ -267,12 +347,10 @@ export function LaoFindsSettingsSection({
 }) {
   return (
     <div className={classNames("settings-card-list")}>
-      <SettingsCard title="自动捞料" subtitle="保持插件界面打开，命中规则的新动态会自动打捞。">
-        <div className={classNames("settings-setting-row timed-setting-row")}>
-          <div>
-            <strong>运行状态</strong>
-            <span>{state.settings.timedActivityRefreshEnabled ? "已开启自动捞料。" : "开启后会按规则定时打捞。"}</span>
-          </div>
+      <SettingsCard
+        title="自动捞料"
+        subtitle="需保持插件界面前台显示。"
+        headerAside={
           <button
             className={classNames("switch-button", state.settings.timedActivityRefreshEnabled && "active")}
             type="button"
@@ -281,14 +359,14 @@ export function LaoFindsSettingsSection({
           >
             {state.settings.timedActivityRefreshEnabled ? "已启用" : "未启用"}
           </button>
-        </div>
-      </SettingsCard>
-      <SettingsCard title="打捞设置" subtitle="控制自动捞料的请求范围、间隔和起点。">
+        }
+      />
+      <SettingsCard title="打捞设置">
         <div className={classNames("timed-settings-grid")}>
           <div className={classNames("settings-setting-row timed-setting-row")}>
             <div>
               <strong>打捞请求范围</strong>
-              <span>按规则只请求命中规则需要的范围；全量会按每位用户的视奸范围刷新。</span>
+              <span>选择自动打捞范围。</span>
             </div>
             <div className={classNames("segmented-control timed-mode-control")} role="radiogroup" aria-label="打捞请求范围">
               <button
@@ -312,7 +390,7 @@ export function LaoFindsSettingsSection({
           <div className={classNames("settings-setting-row timed-setting-row")}>
             <div>
               <strong>打捞间隔</strong>
-              <span>范围 5 到 720 分钟。</span>
+              <span>5 到 720 分钟。</span>
             </div>
             <input
               className={classNames("timed-interval-input")}
@@ -395,6 +473,7 @@ export function DataSettingsSection({
   state: AppState;
   updateSettings: UpdateSettings;
 }) {
+  const dailyBackupEnabled = state.settings.requestStatsAutoSyncEnabled;
   return (
     <div className={classNames("settings-card-list")}>
       <SettingsCard
@@ -457,29 +536,22 @@ export function DataSettingsSection({
         </div>
         <p className={classNames("settings-meta cloud-backup-remote")}>{cloudStatusText(cloudState?.status)}</p>
         {cloudBinding ? <p className={classNames("settings-meta cloud-backup-meta")}>{cloudBindingMetaText(cloudBinding)}</p> : null}
-        {cloudMessage ? <p className={classNames("settings-meta")}>{cloudMessage}</p> : null}
-      </SettingsCard>
-
-      <SettingsCard title="请求统计每日自动同步" subtitle={cloudBound ? "开启后每天最多自动上传一次请求统计。" : "绑定云存档后可开启，本地统计不会丢失。"}>
         <div className={classNames("settings-setting-row timed-setting-row cloud-stats-sync-row")}>
           <div>
-            <strong>同步状态</strong>
-            <span>
-              {cloudBound
-                ? "只自动上传，不会自动从云端恢复；多设备以后上传的统计会覆盖云端。"
-                : "绑定云存档后可开启；本地统计不会因为未绑定而丢失。"}
-            </span>
+            <strong>每日自动备份</strong>
+            <span>{dailyBackupStatusText(cloudBinding)}</span>
           </div>
           <button
-            className={classNames("switch-button", state.settings.requestStatsAutoSyncEnabled && cloudBound && "active")}
+            className={classNames("switch-button", dailyBackupEnabled && cloudBound && "active")}
             type="button"
-            disabled={cloudBusy != null || (!cloudBound && !state.settings.requestStatsAutoSyncEnabled)}
-            onClick={() => void updateSettings({ requestStatsAutoSyncEnabled: !state.settings.requestStatsAutoSyncEnabled })}
+            disabled={cloudBusy != null || !cloudBound}
+            aria-pressed={dailyBackupEnabled && cloudBound}
+            onClick={() => void updateSettings({ requestStatsAutoSyncEnabled: !dailyBackupEnabled })}
           >
-            {!cloudBound && !state.settings.requestStatsAutoSyncEnabled ? "未绑定" : state.settings.requestStatsAutoSyncEnabled ? "关闭" : "开启"}
+            {!cloudBound ? "未绑定" : dailyBackupEnabled ? "已启用" : "未启用"}
           </button>
         </div>
-        <p className={classNames("settings-meta cloud-backup-meta")}>{requestStatsSyncText(cloudBinding)}</p>
+        {cloudMessage ? <p className={classNames("settings-meta")}>{cloudMessage}</p> : null}
       </SettingsCard>
 
       <SettingsCard

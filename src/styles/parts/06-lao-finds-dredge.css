@@ -44,8 +44,7 @@
   line-height: 1.45;
 }
 
-.finds-card,
-.dredge-rule-card {
+.finds-card {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -111,10 +110,6 @@
   gap: 8px;
 }
 
-.dredge-rule-card {
-  display: grid;
-  gap: 10px;
-}
 
 .dredge-rule-row {
   display: flex;

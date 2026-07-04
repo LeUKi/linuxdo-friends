@@ -111,7 +111,7 @@ function isActivityRefreshScopeList(value: unknown): boolean {
 
 function isSiteDataTaskOwnership(command: Record<string, unknown>): boolean {
   if (command.trigger === undefined && command.timedRunId === undefined) return true;
-  if (command.trigger === "manual") return command.timedRunId === undefined;
+  if (command.trigger === "manual") return command.timedRunId === undefined || isNonEmptyString(command.timedRunId);
   return command.trigger === "timed" && isNonEmptyString(command.timedRunId);
 }
 
@@ -157,6 +157,7 @@ function isSettingsPatch(value: unknown): boolean {
     (value.requestStatsAutoSyncEnabled === undefined || typeof value.requestStatsAutoSyncEnabled === "boolean") &&
     (value.laoFindsBrowserNotificationsEnabled === undefined || typeof value.laoFindsBrowserNotificationsEnabled === "boolean") &&
     (value.laoFindsManualNotificationsEnabled === undefined || typeof value.laoFindsManualNotificationsEnabled === "boolean") &&
+    (value.laoFindsTelegramNotificationsEnabled === undefined || typeof value.laoFindsTelegramNotificationsEnabled === "boolean") &&
     (value.telegramBotToken === undefined || typeof value.telegramBotToken === "string") &&
     (value.telegramChatId === undefined || typeof value.telegramChatId === "string")
   );

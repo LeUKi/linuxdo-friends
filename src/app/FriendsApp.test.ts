@@ -11,7 +11,12 @@ import { SITE_DATA_PROGRESS_STORAGE_KEY } from "../storage/siteDataProgressStora
 import { uiSceneStorageKeys } from "../storage/uiSceneStorage";
 import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
 import { AUTO_REFRESH_SESSION_STORAGE_KEY, loadAutoRefreshSessionState } from "../storage/autoRefreshSessionStorage";
-import { loadTimedActivityRefreshSessionState, TIMED_ACTIVITY_CONTROLLER_STORAGE_KEY, TIMED_ACTIVITY_SESSION_STORAGE_KEY } from "../storage/timedActivityRefreshSessionStorage";
+import {
+  loadTimedActivityRefreshSessionState,
+  TIMED_ACTIVITY_CONTROLLER_STORAGE_KEY,
+  TIMED_ACTIVITY_SESSION_STORAGE_KEY,
+  TIMED_ACTIVITY_SURFACE_STORAGE_PREFIX
+} from "../storage/timedActivityRefreshSessionStorage";
 import { resetRuntimeObserversForTest } from "../state/atoms";
 import { resetAutoRefreshSessionObserverForTest } from "../state/autoRefreshAtoms";
 import { resetTimedActivityRefreshSessionObserverForTest } from "../state/timedActivityRefreshAtoms";
@@ -2112,6 +2117,9 @@ describe("FriendsApp UI scene persistence", () => {
       ],
       trigger: "manual"
     });
+    const commands = activityRefreshCommands(chromeMock);
+    expect(commands[0]).toMatchObject({ trigger: "manual", timedRunId: expect.stringMatching(/^timed-activity:/) });
+    expect(commands[1]?.timedRunId).toBe(commands[0]?.timedRunId);
     expect(activityRefreshMessages(chromeMock)).not.toEqual([{ type: "refreshFriendActivity", scope: { kind: "boost", usernames: ["neo"] } }]);
     expect(await loadTimedActivityRefreshSessionState(session)).toMatchObject({
       lastScopeMode: "rules",
@@ -2179,6 +2187,101 @@ describe("FriendsApp UI scene persistence", () => {
 
     expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "topic", usernames: ["neo"] } }]);
     expect(chromeMock.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "completeRuleDerivedLaoFindsDredge" }));
+    expect(container.textContent).toContain("刷新失败。");
+    vi.useRealTimers();
+  });
+
+  it("lets explicit manual dredging retry after a stale timed pause", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds",
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        pausedReason: "challenge",
+        pausedMessage: "遇到浏览器验证页面，已停止请求。",
+        updatedAt: "2026-06-27T23:00:00.000Z"
+      }
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => {
+      getButton(container, "立即打捞").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([
+      { type: "refreshFriendActivity", scope: { kind: "topic", usernames: ["neo"] } },
+      { type: "refreshFriendActivity", scope: { kind: "reaction", usernames: ["neo"] } }
+    ]);
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession.pausedReason).toBeUndefined();
+    expect(timedSession.pausedMessage).toBeUndefined();
+    expect(timedSession).toMatchObject({ lastFinishedAt: "2026-06-28T00:00:00.000Z" });
+    vi.useRealTimers();
+  });
+
+  it("preserves a stale timed pause when manual retry cannot claim the controller", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:00:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds",
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        pausedReason: "challenge",
+        pausedMessage: "遇到浏览器验证页面，已停止请求。",
+        lastFailureAt: "2026-06-27T23:00:00.000Z",
+        updatedAt: "2026-06-27T23:00:00.000Z"
+      }
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: timedActivityState({
+        timedActivityRefreshEnabled: false,
+        timedActivityRefreshScopeMode: "rules",
+        timedActivityRefreshIntervalMinutes: 120
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await session.set({
+      [`${TIMED_ACTIVITY_SURFACE_STORAGE_PREFIX}other-panel`]: {
+        surface: "side-panel",
+        heartbeatAt: "2026-06-28T00:00:00.000Z"
+      },
+      [TIMED_ACTIVITY_CONTROLLER_STORAGE_KEY]: {
+        surfaceId: "other-panel",
+        claimedAt: "2026-06-28T00:00:00.000Z",
+        heartbeatAt: "2026-06-28T00:00:00.000Z"
+      }
+    });
+
+    await act(async () => {
+      getButton(container, "立即打捞").click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(activityRefreshMessages(chromeMock)).toEqual([]);
+    expect(container.textContent).toContain("另一个插件侧栏正在打捞，请稍后再试。");
+    const timedSession = await loadTimedActivityRefreshSessionState(session);
+    expect(timedSession).toMatchObject({
+      pausedReason: "challenge",
+      pausedMessage: "遇到浏览器验证页面，已停止请求。",
+      lastFailureAt: "2026-06-27T23:00:00.000Z"
+    });
     vi.useRealTimers();
   });
 

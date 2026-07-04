@@ -112,33 +112,36 @@ export function DredgeRuleEditor({
 
   return (
     <section className={classNames("panel settings-card dredge-rule-panel")}>
-      <div className={classNames("finds-section-head")}>
-        <div>
+      <div className={classNames("settings-card-header")}>
+        <div className={classNames("settings-card-title-block")}>
           <h2>打捞规则</h2>
-          <p>允许规则负责收集，屏蔽规则全局拦截；修改需要显式保存。</p>
         </div>
-        <button className={classNames("small-action")} type="button" onClick={beginCreate} disabled={locked || Boolean(draft)}>
-          新建
-        </button>
+        <div className={classNames("settings-card-actions")}>
+          <button className={classNames("small-action")} type="button" onClick={beginCreate} disabled={locked || Boolean(draft)}>
+            新建
+          </button>
+        </div>
       </div>
-      {locked && lockReason ? <p className="dredge-rule-lock">{lockReason}</p> : null}
-      {rules.length === 0 ? (
-        <p className={classNames("empty finds-empty")}>当前没有打捞规则；新建规则后再开始打捞。</p>
-      ) : (
-        <div className={classNames("dredge-rule-list")}>
-          {rules.map((rule) => (
-            <DredgeRuleRow
-              deleteDisabled={Boolean(draft)}
-              key={rule.id}
-              locked={locked}
-              rule={rule}
-              state={state}
-              onEdit={() => beginEdit(rule)}
-              onRemoveRule={onRemoveRule}
-            />
-          ))}
-        </div>
-      )}
+      <div className={classNames("settings-card-body")}>
+        {locked && lockReason ? <p className="dredge-rule-lock">{lockReason}</p> : null}
+        {rules.length === 0 ? (
+          <p className={classNames("empty finds-empty")}>当前没有打捞规则。</p>
+        ) : (
+          <div className={classNames("dredge-rule-list")}>
+            {rules.map((rule) => (
+              <DredgeRuleRow
+                deleteDisabled={Boolean(draft)}
+                key={rule.id}
+                locked={locked}
+                rule={rule}
+                state={state}
+                onEdit={() => beginEdit(rule)}
+                onRemoveRule={onRemoveRule}
+              />
+            ))}
+          </div>
+        )}
+      </div>
       {draft ? (
         <DredgeRuleDraftModal
           draft={draft}
@@ -249,7 +252,6 @@ function DredgeRuleDraftModal({
         <div className="modal-head">
           <div>
             <h2 id="dredge-rule-modal-title">{draft.kind === "create" ? "新建打捞规则" : "编辑打捞规则"}</h2>
-            <p>保存后才会更新规则；关闭弹窗会丢弃未保存改动。</p>
           </div>
           <button className={classNames("icon-button")} type="button" onClick={onClose} aria-label="关闭规则弹窗">
             ×
@@ -276,7 +278,7 @@ function DredgeRuleDraftModal({
           </div>
           <label className={classNames("dredge-rule-field")}>
             <span>名称</span>
-            <input  disabled={locked} value={draft.name} onChange={(event) => patch({ name: event.target.value })} />
+            <input disabled={locked} value={draft.name} onChange={(event) => patch({ name: event.target.value })} />
           </label>
           <div className={classNames("dredge-rule-field")}>
             <span>类型</span>
@@ -309,13 +311,16 @@ function DredgeRuleDraftModal({
             </div>
           </div>
           <label className={classNames("dredge-rule-field")}>
-            <span>正则</span>
+            <span>关键词 / 正则</span>
             <textarea
-
               disabled={locked}
               value={draft.patternText}
               onChange={(event) => patch({ patternText: event.target.value })}
-              placeholder="一行一条正则；空白表示打捞所选范围内全部内容"
+              placeholder={`可选，一行一条
+关键词：AI
+关键词：机器学习
+正则：AI|LLM
+字面量 C++：C\\+\\+`}
               rows={3}
             />
           </label>
@@ -374,5 +379,5 @@ function summarizeKinds(kinds: ActivityRefreshKind[]): string {
 function summarizePatterns(patterns: string[]): string {
   if (patterns.length === 0) return "全部内容";
   const preview = patterns[0].length > 18 ? `${patterns[0].slice(0, 18)}…` : patterns[0];
-  return patterns.length === 1 ? `1 条正则：${preview}` : `${patterns.length} 条正则：${preview}`;
+  return patterns.length === 1 ? `1 条匹配：${preview}` : `${patterns.length} 条匹配：${preview}`;
 }

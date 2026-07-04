@@ -1,5 +1,5 @@
 import { planActivityRefreshTargets, scopeLabel } from "../domain/activityRefresh";
-import type { ActivityRefreshScope, ActivityRefreshTaskProgress, AppState, SiteDataTaskProgress } from "../shared/types";
+import type { ActivityRefreshScope, ActivityRefreshTaskProgress, AppState, SiteDataTaskProgress, SiteDataTaskTrigger } from "../shared/types";
 
 export interface TimedActivityAggregateRun {
   runId: string;
@@ -8,6 +8,7 @@ export interface TimedActivityAggregateRun {
   scopes: ActivityRefreshScope[];
   startedAt: string;
   total: number;
+  trigger: SiteDataTaskTrigger;
 }
 
 export interface TimedActivityAggregateProgressState {
@@ -26,7 +27,13 @@ export interface AggregateActivityProgressSnapshot {
   progress: ActivityRefreshTaskProgress;
 }
 
-export function createTimedActivityAggregateRun(state: AppState, scopes: ActivityRefreshScope[], runId: string, startedAt: string): TimedActivityAggregateRun {
+export function createTimedActivityAggregateRun(
+  state: AppState,
+  scopes: ActivityRefreshScope[],
+  runId: string,
+  startedAt: string,
+  trigger: SiteDataTaskTrigger = "timed"
+): TimedActivityAggregateRun {
   const scopeTotals = scopes.map((scope) => planActivityRefreshTargets(state, scope).reduce((sum, target) => sum + target.steps.length, 0));
   const scopeOffsets: number[] = [];
   let offset = 0;
@@ -40,7 +47,8 @@ export function createTimedActivityAggregateRun(state: AppState, scopes: Activit
     scopeTotals,
     scopes,
     startedAt,
-    total: offset
+    total: offset,
+    trigger
   };
 }
 
@@ -82,7 +90,7 @@ export function aggregateProgressSnapshotFromState(
       taskType: "activity",
       scope,
       status: "running",
-      trigger: "timed",
+      trigger: aggregate.run.trigger,
       timedRunId: aggregate.run.runId,
       completed,
       total: aggregate.run.total,

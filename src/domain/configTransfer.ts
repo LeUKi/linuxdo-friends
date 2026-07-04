@@ -152,6 +152,14 @@ function normalizeExportSettings(value: Partial<RefreshSettings> | Record<string
       typeof value.laoFindsManualNotificationsEnabled === "boolean"
         ? value.laoFindsManualNotificationsEnabled
         : defaultAppState.settings.laoFindsManualNotificationsEnabled,
+    laoFindsTelegramNotificationsEnabled:
+      typeof value.laoFindsTelegramNotificationsEnabled === "boolean"
+        ? value.laoFindsTelegramNotificationsEnabled
+        : defaultAppState.settings.laoFindsTelegramNotificationsEnabled,
+    // Telegram credentials are intentionally migratable settings: they are exported,
+    // cloud-archived, and included in the config fingerprint so user-owned backup
+    // restores keep the notification channel complete. Do not add other secret-like
+    // values to ConfigExportSettings without reviewing that same boundary.
     telegramBotToken: typeof value.telegramBotToken === "string" && value.telegramBotToken ? value.telegramBotToken : undefined,
     telegramChatId: typeof value.telegramChatId === "string" && value.telegramChatId ? value.telegramChatId : undefined
   };
@@ -196,6 +204,9 @@ function normalizeImportedSettings(value: Partial<RefreshSettings> | Record<stri
   }
   if (value.laoFindsManualNotificationsEnabled !== undefined && typeof value.laoFindsManualNotificationsEnabled !== "boolean") {
     throw new Error("配置文件的手动打捞通知设置不正确。");
+  }
+  if (value.laoFindsTelegramNotificationsEnabled !== undefined && typeof value.laoFindsTelegramNotificationsEnabled !== "boolean") {
+    throw new Error("配置文件的 Telegram 通知总开关设置不正确。");
   }
   const exportSettings = normalizeExportSettings(value);
   return {

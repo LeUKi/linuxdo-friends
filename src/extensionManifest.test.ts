@@ -102,6 +102,26 @@ describe("extension manifest safety", () => {
     expect(appCss).toContain(".page-script-tab-check {\n  color: var(--accent-text);");
   });
 
+
+  it("keeps shared modals scrollable instead of squeezing overflowing content", () => {
+    expect(appCss).toContain(".modal {\n  position: relative;\n  z-index: 21;\n  display: flex;");
+    expect(appCss).toContain("max-height: calc(100dvh - 24px);");
+    expect(appCss).toContain("min-height: 0;\n  flex-direction: column;\n  overflow: hidden;");
+    expect(appCss).toContain(".modal-head {\n  flex: 0 0 auto;");
+    expect(appCss).toContain(".modal-list {\n  grid-row: 3;");
+    expect(appCss).toContain("overflow: auto;\n  overscroll-behavior: contain;");
+    expect(appCss).toContain(".modal-section {\n  display: grid;");
+    expect(appCss).toContain("flex: 1 1 auto;\n  overflow: hidden;");
+    expect(appCss).toContain(".modal > .maintenance-actions {\n  flex: 0 0 auto;");
+    expect(appCss).toContain(".modal > .dredge-rule-draft {\n  flex: 1 1 auto;");
+    expect(appCss).toContain(".telegram-config-modal {\n  height: auto;");
+    expect(appCss).toContain("max-height: min(calc(100dvh - 24px), 520px);");
+    expect(appCss).toContain(".telegram-config-form {\n  display: grid;\n  min-height: 0;\n  flex: 1 1 auto;");
+    expect(appCss).toContain(".modal-section.telegram-config-form {\n  overflow: auto;\n  overscroll-behavior: contain;");
+    expect(appCss.indexOf(".modal-section.telegram-config-form {")).toBeGreaterThan(appCss.indexOf(".modal-section {"));
+    expect(appCss).toContain(".telegram-modal-actions {\n  flex: 0 0 auto;");
+  });
+
   it("keeps feed filters roomy without reintroducing the old bottom padding", () => {
     expect(appCss).toContain(".tab-bottom-spacer {\n  height: 200px;");
     expect(appCss).not.toContain(".tab-bottom-spacer {\n  height: 300px;");

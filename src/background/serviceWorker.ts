@@ -424,12 +424,14 @@ async function sendLaoFindsNotifications(state: AppState, items: LaoFindsItem[],
   if (state.settings.laoFindsBrowserNotificationsEnabled) {
     await sendLaoFindsBrowserNotification({ count: items.length, source });
   }
-  await sendLaoFindsTelegramNotifications({
-    botToken: state.settings.telegramBotToken,
-    chatId: state.settings.telegramChatId,
-    items,
-    source
-  });
+  if (state.settings.laoFindsTelegramNotificationsEnabled) {
+    await sendLaoFindsTelegramNotifications({
+      botToken: state.settings.telegramBotToken,
+      chatId: state.settings.telegramChatId,
+      items,
+      source
+    });
+  }
 }
 
 async function identifyCurrentAccount(): Promise<AppState> {
@@ -1518,8 +1520,8 @@ function taskCanWriteProgress(taskContext: SiteDataTaskContext | undefined): tas
 }
 
 function siteDataTaskOwnershipFromCommand(command: Extract<BackgroundCommand, { type: "refreshFriendActivity" }>): SiteDataTaskOwnership {
-  if (command.trigger !== "timed") return {};
-  return { trigger: "timed", timedRunId: command.timedRunId };
+  if (!command.trigger) return {};
+  return { trigger: command.trigger, timedRunId: command.timedRunId };
 }
 
 function currentSiteDataProgress(): SiteDataTaskProgress | null {

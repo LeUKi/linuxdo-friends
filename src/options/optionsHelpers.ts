@@ -68,15 +68,15 @@ export function cloudBindingMetaText(binding: Extract<CloudConfigViewState["bind
   return parts.join(" · ");
 }
 
-export function requestStatsSyncText(binding: Extract<CloudConfigViewState["binding"], { bound: true }> | null): string {
-  if (!binding) return "请求统计每日同步需先绑定云存档。";
+export function dailyBackupStatusText(binding: Extract<CloudConfigViewState["binding"], { bound: true }> | null): string {
+  if (!binding) return "绑定云存档后可开启。";
   if (binding.lastRequestStatsAutoSyncError && isRequestStatsAutoSyncErrorNewer(binding)) {
-    return `请求统计上次自动同步失败：${binding.lastRequestStatsAutoSyncError.message ?? "请稍后重试。"}`;
+    return `上次自动备份失败：${binding.lastRequestStatsAutoSyncError.message ?? "请稍后重试。"}`;
   }
   if (binding.lastRequestStatsSyncedAt) {
-    return `请求统计同步于 ${new Date(binding.lastRequestStatsSyncedAt).toLocaleString()} · 总计 ${binding.lastRequestStatsTotal ?? 0} 次`;
+    return `上次自动备份：${new Date(binding.lastRequestStatsSyncedAt).toLocaleString()}`;
   }
-  return "请求统计尚未自动同步。";
+  return "尚未自动备份。";
 }
 
 function isRequestStatsAutoSyncErrorNewer(binding: Extract<CloudConfigViewState["binding"], { bound: true }>): boolean {

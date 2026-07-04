@@ -63,7 +63,8 @@ describe("config transfer", () => {
           timedActivityRefreshEnabled: true,
           timedActivityRefreshScopeMode: "all",
           timedActivityRefreshIntervalMinutes: 240,
-          requestStatsAutoSyncEnabled: true
+          requestStatsAutoSyncEnabled: true,
+          laoFindsTelegramNotificationsEnabled: true
         }
       },
       "2026-06-28T00:00:00.000Z"
@@ -114,6 +115,7 @@ describe("config transfer", () => {
         timedActivityRefreshIntervalMinutes: 240,
         laoFindsBrowserNotificationsEnabled: true,
         laoFindsManualNotificationsEnabled: false,
+        laoFindsTelegramNotificationsEnabled: true,
         telegramBotToken: undefined,
         telegramChatId: undefined
       }
@@ -172,7 +174,8 @@ describe("config transfer", () => {
           timedActivityRefreshIntervalMinutes: 5,
           requestStatsAutoSyncEnabled: true,
           laoFindsBrowserNotificationsEnabled: false,
-          laoFindsManualNotificationsEnabled: true
+          laoFindsManualNotificationsEnabled: true,
+          laoFindsTelegramNotificationsEnabled: true
         },
         requestStats: {
           total: 9,
@@ -198,7 +201,8 @@ describe("config transfer", () => {
       timedActivityRefreshScopeMode: "all",
       timedActivityRefreshIntervalMinutes: 5,
       laoFindsBrowserNotificationsEnabled: false,
-      laoFindsManualNotificationsEnabled: true
+      laoFindsManualNotificationsEnabled: true,
+      laoFindsTelegramNotificationsEnabled: true
     });
     expect(file.settings).not.toHaveProperty("timedActivityRefreshEnabled");
     expect(file.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
@@ -287,6 +291,7 @@ describe("config transfer", () => {
     expect(file.settings.timedActivityRefreshIntervalMinutes).toBe(20);
     expect(file.settings.laoFindsBrowserNotificationsEnabled).toBe(true);
     expect(file.settings.laoFindsManualNotificationsEnabled).toBe(false);
+    expect(file.settings.laoFindsTelegramNotificationsEnabled).toBe(false);
     expect(file.settings).not.toHaveProperty("timedActivityRefreshEnabled");
     expect(file.settings).not.toHaveProperty("requestStatsAutoSyncEnabled");
     expect(file.requestStats).toEqual({ total: 0, byFamily: {}, days: {} });
@@ -367,6 +372,17 @@ describe("config transfer", () => {
           schemaVersion: 1,
           source: "linuxdo-friends",
           exportedAt: "2026-06-28T00:00:00.000Z",
+          friends: {},
+          settings: { refreshIntervalMinutes: 60, laoFindsTelegramNotificationsEnabled: "yes" }
+        })
+      )
+    ).toThrow("配置文件的 Telegram 通知总开关设置不正确。");
+    expect(() =>
+      parseConfigImportJson(
+        JSON.stringify({
+          schemaVersion: 1,
+          source: "linuxdo-friends",
+          exportedAt: "2026-06-28T00:00:00.000Z",
           friends: { neo: { username: "neo", groups: [1] } },
           settings: {}
         })
@@ -440,6 +456,7 @@ describe("config transfer", () => {
     expect(state.settings.requestStatsAutoSyncEnabled).toBe(false);
     expect(state.settings.laoFindsBrowserNotificationsEnabled).toBe(true);
     expect(state.settings.laoFindsManualNotificationsEnabled).toBe(false);
+    expect(state.settings.laoFindsTelegramNotificationsEnabled).toBe(false);
     expect(state.activity).toEqual({});
     expect(state.currentAccount).toBeUndefined();
     expect(state.lastSync?.message).toBe("已导入 1 位佬朋友配置。");
@@ -539,6 +556,10 @@ describe("config transfer", () => {
       ...base,
       settings: { ...base.settings, laoFindsManualNotificationsEnabled: !base.settings.laoFindsManualNotificationsEnabled }
     };
+    const changedTelegramNotifications = {
+      ...base,
+      settings: { ...base.settings, laoFindsTelegramNotificationsEnabled: !base.settings.laoFindsTelegramNotificationsEnabled }
+    };
     const changedStartedAt = {
       ...base,
       laoFindsStartedAt: "2026-06-28T00:01:00.000Z"
@@ -570,6 +591,7 @@ describe("config transfer", () => {
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedTimedRefreshInterval));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedBrowserNotifications));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedManualNotifications));
+    expect(fingerprint).not.toBe(await createConfigFingerprint(changedTelegramNotifications));
     expect(fingerprint).toBe(await createConfigFingerprint(changedTimedRefreshEnabled));
     expect(fingerprint).toBe(await createConfigFingerprint(changedRequestStatsAutoSync));
     expect(fingerprint).toBe(await createConfigFingerprint(changedStartedAt));

@@ -108,8 +108,6 @@ export function OptionsApp() {
   const [friendsQuery, setFriendsQuery] = useState("");
   const [syncBusy, setSyncBusy] = useState(false);
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
-  const [telegramToken, setTelegramToken] = useState("");
-  const [telegramChatId, setTelegramChatId] = useState("");
   const [telegramMessage, setTelegramMessage] = useState<string | null>(null);
   const [telegramBusy, setTelegramBusy] = useState<"save" | "test" | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -144,11 +142,6 @@ export function OptionsApp() {
       window.clearInterval(interval);
     };
   }, [checkForUpdates, loadSiteDataProgress, loadState, loadUpdateCheck, observeAppState, observeSiteDataProgress, observeUpdateCheck]);
-
-  useEffect(() => {
-    setTelegramToken(state.settings.telegramBotToken ?? "");
-    setTelegramChatId(state.settings.telegramChatId ?? "");
-  }, [state.settings.telegramBotToken, state.settings.telegramChatId]);
 
   useEffect(() => {
     function applyCurrentHash() {
@@ -200,6 +193,7 @@ export function OptionsApp() {
     state.settings.timedActivityRefreshIntervalMinutes,
     state.settings.laoFindsBrowserNotificationsEnabled,
     state.settings.laoFindsManualNotificationsEnabled,
+    state.settings.laoFindsTelegramNotificationsEnabled,
     state.settings.telegramBotToken,
     state.settings.telegramChatId
   ]);
@@ -238,31 +232,36 @@ export function OptionsApp() {
     setActiveHash(hash);
   }
 
-  async function handleSaveTelegram() {
+  async function handleSaveTelegram(token: string, chatId: string): Promise<boolean> {
     setTelegramBusy("save");
     setTelegramMessage(null);
     try {
+      const nextToken = token.trim();
+      const nextChatId = chatId.trim();
       const response = await sendCommand<typeof state>({
         type: "updateSettings",
-        settings: { telegramBotToken: telegramToken.trim(), telegramChatId: telegramChatId.trim() }
+        settings: { telegramBotToken: nextToken, telegramChatId: nextChatId }
       });
       if (response.ok) {
         setState(response.data);
-        setTelegramMessage(telegramToken.trim() ? "Telegram 配置已保存。" : "已清除 Telegram 配置。");
+        setTelegramMessage(nextToken ? "Telegram 配置已保存。" : "已清除 Telegram 配置。");
+        return true;
       } else {
         setTelegramMessage(response.error);
+        return false;
       }
     } finally {
       setTelegramBusy(null);
     }
   }
 
-  async function handleTestTelegram() {
+  async function handleTestTelegram(): Promise<boolean> {
     setTelegramBusy("test");
     setTelegramMessage(null);
     try {
       const response = await sendCommand<unknown>({ type: "testTelegramNotification" });
       setTelegramMessage(response.ok ? "测试消息已发送，请检查 Telegram。" : response.error);
+      return response.ok;
     } finally {
       setTelegramBusy(null);
     }
@@ -439,15 +438,11 @@ export function OptionsApp() {
 
           {activeSection === "notifications" ? (
             <NotificationsSettingsSection
-              onSaveTelegram={() => void handleSaveTelegram()}
-              onTestTelegram={() => void handleTestTelegram()}
-              setTelegramChatId={setTelegramChatId}
-              setTelegramToken={setTelegramToken}
+              onSaveTelegram={handleSaveTelegram}
+              onTestTelegram={handleTestTelegram}
               state={state}
               telegramBusy={telegramBusy}
-              telegramChatId={telegramChatId}
               telegramMessage={telegramMessage}
-              telegramToken={telegramToken}
               updateSettings={updateSettings}
             />
           ) : null}

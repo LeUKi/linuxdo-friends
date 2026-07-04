@@ -100,6 +100,10 @@ function mergeSettings(stored?: Partial<RefreshSettings>): RefreshSettings {
       typeof stored?.laoFindsManualNotificationsEnabled === "boolean"
         ? stored.laoFindsManualNotificationsEnabled
         : defaultAppState.settings.laoFindsManualNotificationsEnabled,
+    laoFindsTelegramNotificationsEnabled:
+      typeof stored?.laoFindsTelegramNotificationsEnabled === "boolean"
+        ? stored.laoFindsTelegramNotificationsEnabled
+        : defaultAppState.settings.laoFindsTelegramNotificationsEnabled,
     openActivityLinksInPage:
       typeof stored?.openActivityLinksInPage === "boolean" ? stored.openActivityLinksInPage : defaultAppState.settings.openActivityLinksInPage,
     allowAutoRefresh: false,

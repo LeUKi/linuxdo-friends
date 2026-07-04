@@ -12,7 +12,8 @@ export const defaultSettings: RefreshSettings = {
   timedActivityRefreshIntervalMinutes: DEFAULT_TIMED_ACTIVITY_REFRESH_INTERVAL_MINUTES,
   requestStatsAutoSyncEnabled: false,
   laoFindsBrowserNotificationsEnabled: true,
-  laoFindsManualNotificationsEnabled: false
+  laoFindsManualNotificationsEnabled: false,
+  laoFindsTelegramNotificationsEnabled: false
 };
 
 export const defaultAppState: AppState = {

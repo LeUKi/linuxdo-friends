@@ -62,8 +62,33 @@ describe("dredge aggregate progress", () => {
       taskId: "aggregate:timed-run-1",
       completed: 2,
       total: 2,
+      trigger: "timed",
       currentLabel: "回应 @neo",
       timedRunId: "timed-run-1"
+    });
+  });
+
+  it("preserves manual trigger semantics in aggregate progress snapshots", () => {
+    const run = createTimedActivityAggregateRun(
+      stateWithDredgeTarget(),
+      [{ kind: "topic", usernames: ["neo"] }],
+      "manual-run-1",
+      "2026-06-28T00:00:00.000Z",
+      "manual"
+    );
+
+    const snapshot = aggregateProgressSnapshotFromState({
+      run,
+      scopeIndex: 0,
+      completedWithinScope: 0,
+      currentLabel: "@neo 话题",
+      updatedAt: "2026-06-28T00:00:00.000Z"
+    });
+
+    expect(snapshot.progress).toMatchObject({
+      trigger: "manual",
+      timedRunId: "manual-run-1",
+      currentLabel: "@neo 话题"
     });
   });
 });

@@ -169,6 +169,8 @@ describe("OptionsApp update diagnostics", () => {
     expect(getButton(container, "基础").classList.contains("active")).toBe(true);
     expect(container.textContent).toContain("本地账号探测");
     expect(container.textContent).toContain("动态跳转");
+    const activityLinkCard = headingByText(container, "动态跳转").closest<HTMLElement>(".settings-card");
+    expect(activityLinkCard?.querySelector(".settings-card-actions .segmented-control")?.textContent).toContain("页内跳转");
   });
 
   it("canonicalizes unknown hashes back to the basic section", async () => {
@@ -345,7 +347,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).not.toContain("secret-token");
   });
 
-  it("shows request stats daily sync separately from the main cloud archive state", async () => {
+  it("shows daily automatic backup inside the cloud archive card", async () => {
     const state = { ...defaultAppState, settings: { ...defaultAppState.settings, requestStatsAutoSyncEnabled: false } };
     const chromeMock = setupChrome({
       state,
@@ -360,12 +362,13 @@ describe("OptionsApp update diagnostics", () => {
     });
     const { container } = await renderOptionsApp("#data");
 
-    expect(container.textContent).toContain("请求统计每日自动同步");
-    expect(container.textContent).toContain("请求统计同步于");
-    expect(container.textContent).toContain("总计 23 次");
-    expect(container.querySelector(".cloud-backup-status")?.textContent).toContain("已备份");
+    const cloudCard = headingByText(container, "云存档").closest<HTMLElement>(".settings-card");
+    expect(container.textContent).not.toContain("请求统计每日自动同步");
+    expect(cloudCard?.textContent).toContain("每日自动备份");
+    expect(cloudCard?.textContent).toContain("上次自动备份");
+    expect(cloudCard?.querySelector(".cloud-backup-status")?.textContent).toContain("已备份");
 
-    const toggle = container.querySelector<HTMLButtonElement>(".cloud-stats-sync-row .switch-button");
+    const toggle = cloudCard?.querySelector<HTMLButtonElement>(".cloud-stats-sync-row .switch-button");
     await act(async () => {
       toggle?.click();
     });
@@ -373,16 +376,21 @@ describe("OptionsApp update diagnostics", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "updateSettings", settings: { requestStatsAutoSyncEnabled: true } });
   });
 
-  it("explains request stats daily sync is unavailable while cloud is unbound", async () => {
+  it("keeps daily automatic backup visible but disabled while cloud is unbound", async () => {
+    const state = { ...defaultAppState, settings: { ...defaultAppState.settings, requestStatsAutoSyncEnabled: true } };
     setupChrome({
+      state,
       cloudState: { binding: { bound: false }, status: { state: "unchecked" }, message: "尚未绑定 linuxdo-cloud-save。" },
       cloudArchiveState: { binding: { bound: false }, archiveState: "unbound" }
     });
     const { container } = await renderOptionsApp("#data");
 
-    expect(container.textContent).toContain("绑定云存档后可开启");
-    expect(container.textContent).toContain("请求统计每日同步需先绑定云存档。");
-    expect(container.querySelector<HTMLButtonElement>(".cloud-stats-sync-row .switch-button")?.disabled).toBe(true);
+    expect(container.textContent).toContain("每日自动备份");
+    expect(container.textContent).toContain("绑定云存档后可开启。");
+    const dailyBackupButton = container.querySelector<HTMLButtonElement>(".cloud-stats-sync-row .switch-button");
+    expect(dailyBackupButton?.disabled).toBe(true);
+    expect(dailyBackupButton?.textContent).toBe("未绑定");
+    expect(dailyBackupButton?.classList.contains("active")).toBe(false);
   });
 
   it("refreshes cloud binding state when OAuth completion updates cloud auth storage", async () => {
@@ -538,20 +546,38 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).not.toContain("本版本只保留入口");
   });
 
-  it("keeps Telegram notification settings on a dedicated notification channel page", async () => {
+  it("keeps notification settings grouped by channel cards", async () => {
     const chromeMock = setupChrome();
     const { container } = await renderOptionsApp("#notifications");
+    const browserCard = getBrowserNotificationCard(container);
+    const telegramCard = getTelegramCard(container);
+    const telegramActions = getSettingsCardActions(telegramCard);
 
     expect(getButton(container, "通知渠道").classList.contains("active")).toBe(true);
     expect(container.textContent).toContain("通知渠道");
-    expect(container.textContent).toContain("Telegram");
-    expect(container.textContent).toContain("Webhook 通知");
+    expect(queryHeadingByText(container, "佬有料通知")).toBeNull();
+    expect(headingByText(container, "浏览器本地通知")).toBeTruthy();
+    expect(headingByText(container, "Telegram")).toBeTruthy();
+    expect(headingByText(container, "Webhook")).toBeTruthy();
     expect(container.textContent).toContain("暂未开放");
+    expect(container.textContent).not.toContain("digest");
     expect(container.textContent).not.toContain("正在施工");
     expect(container.textContent).not.toContain("WIP");
     expect(container.textContent).not.toContain("开发中");
     expect(allSettingHeadings(container).every((heading) => heading.querySelector("svg") == null)).toBe(true);
+    expect(getSettingsCardActions(browserCard).textContent).toContain("已启用");
+    expect(browserCard.querySelector(".settings-card-body")?.textContent).toContain("手动打捞通知");
+    expect(telegramActions.textContent).toContain("未启用");
+    expect(telegramActions.textContent).toContain("发送测试");
+    expect(telegramCard.querySelector(".settings-card-body .switch-button")).toBeNull();
+    expect(telegramCard.textContent).toContain("未配置 Bot Token 和 Chat ID");
+    expect(telegramCard.querySelector("#tg-bot-token")).toBeNull();
+    expect(telegramCard.querySelector("#tg-chat-id")).toBeNull();
 
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
     const { tokenInput, chatInput } = getTelegramInputs(container);
     await act(async () => {
       setInputValue(tokenInput!, "bot-token");
@@ -568,34 +594,228 @@ describe("OptionsApp update diagnostics", () => {
       type: "updateSettings",
       settings: { telegramBotToken: "bot-token", telegramChatId: "12345" }
     });
+    expect(getTelegramDialog(container)).toBeNull();
+    expect(telegramCard.textContent).toContain("Telegram 配置已保存。");
   });
 
-  it("toggles Lao Finds notification settings from the notification channel page", async () => {
+  it("keeps Telegram test sending outside the modal and independent from the channel switch", async () => {
+    const chromeMock = setupChrome({
+      state: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          telegramBotToken: "bot-token",
+          telegramChatId: "12345"
+        }
+      }
+    });
+    const { container } = await renderOptionsApp("#notifications");
+    const telegramCard = getTelegramCard(container);
+
+    await act(async () => {
+      getButton(telegramCard, "发送测试").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "testTelegramNotification" });
+    expect(telegramCard.textContent).toContain("测试消息已发送，请检查 Telegram。");
+  });
+
+  it("preserves saved Telegram credentials when the channel switch is toggled off", async () => {
+    const chromeMock = setupChrome({
+      state: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          laoFindsTelegramNotificationsEnabled: true,
+          telegramBotToken: "saved-token",
+          telegramChatId: "98765"
+        }
+      }
+    });
+    const { container } = await renderOptionsApp("#notifications");
+    const telegramCard = getTelegramCard(container);
+
+    await act(async () => {
+      getButton(telegramCard, "已启用").click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    const { tokenInput, chatInput } = getTelegramInputs(container);
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { laoFindsTelegramNotificationsEnabled: false }
+    });
+    expect(tokenInput.value).toBe("saved-token");
+    expect(chatInput.value).toBe("98765");
+  });
+
+  it("discards unsaved Telegram modal drafts on cancel, backdrop, and Escape", async () => {
+    setupChrome();
+    const { container } = await renderOptionsApp("#notifications");
+    const telegramCard = getTelegramCard(container);
+
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    let inputs = getTelegramInputs(container);
+    await act(async () => {
+      setInputValue(inputs.tokenInput, "cancel-token");
+      inputs.tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInputValue(inputs.chatInput, "111");
+      inputs.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "取消").click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    inputs = getTelegramInputs(container);
+    expect(inputs.tokenInput.value).toBe("");
+    expect(inputs.chatInput.value).toBe("");
+
+    await act(async () => {
+      setInputValue(inputs.tokenInput, "backdrop-token");
+      inputs.tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInputValue(inputs.chatInput, "222");
+      inputs.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getTelegramBackdrop(container)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    inputs = getTelegramInputs(container);
+    expect(inputs.tokenInput.value).toBe("");
+    expect(inputs.chatInput.value).toBe("");
+
+    await act(async () => {
+      setInputValue(inputs.tokenInput, "escape-token");
+      inputs.tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInputValue(inputs.chatInput, "333");
+      inputs.chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    inputs = getTelegramInputs(container);
+    expect(inputs.tokenInput.value).toBe("");
+    expect(inputs.chatInput.value).toBe("");
+  });
+
+  it("keeps Telegram modal drafts when save or test fails", async () => {
+    const chromeMock = setupChrome({
+      updateSettingsError: "保存失败",
+      telegramTestResponse: { ok: false, error: "测试失败" }
+    });
+    const { container } = await renderOptionsApp("#notifications");
+    const telegramCard = getTelegramCard(container);
+
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    const { tokenInput, chatInput } = getTelegramInputs(container);
+    await act(async () => {
+      setInputValue(tokenInput, "draft-token");
+      tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInputValue(chatInput, "draft-chat");
+      chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(container, "保存").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { telegramBotToken: "draft-token", telegramChatId: "draft-chat" }
+    });
+    expect(getTelegramDialog(container)).not.toBeNull();
+    expect(container.textContent).toContain("保存失败");
+    expect(tokenInput.value).toBe("draft-token");
+    expect(chatInput.value).toBe("draft-chat");
+
+    await act(async () => {
+      getButton(container, "发送测试消息").click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("测试失败");
+    expect(tokenInput.value).toBe("draft-token");
+    expect(chatInput.value).toBe("draft-chat");
+  });
+
+  it("toggles browser notification settings from the notification channel page", async () => {
     const chromeMock = setupChrome();
     const { container } = await renderOptionsApp("#notifications");
-    const card = headingByText(container, "佬有料通知").closest(".settings-card");
-    expect(card?.textContent).toContain("浏览器本地通知");
-    expect(card?.textContent).toContain("手动打捞通知");
-    const buttons = Array.from(card?.querySelectorAll("button") ?? []);
-    const browserButton = buttons.find((button) => button.textContent === "已启用");
-    const manualButton = buttons.find((button) => button.textContent === "未启用");
+    const card = getBrowserNotificationCard(container);
+    expect(card.textContent).toContain("手动打捞通知");
+    const browserButton = getButton(getSettingsCardActions(card), "已启用");
+    const manualButton = getButton(card, "未启用");
 
     await act(async () => {
-      browserButton?.click();
+      manualButton.click();
       await Promise.resolve();
     });
     await act(async () => {
-      manualButton?.click();
+      browserButton.click();
       await Promise.resolve();
     });
 
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { laoFindsManualNotificationsEnabled: true }
+    });
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({
       type: "updateSettings",
       settings: { laoFindsBrowserNotificationsEnabled: false }
     });
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+  });
+
+  it("keeps manual browser notifications visible but disabled when the browser channel is off", async () => {
+    const chromeMock = setupChrome({
+      state: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          laoFindsBrowserNotificationsEnabled: false,
+          laoFindsManualNotificationsEnabled: true
+        }
+      }
+    });
+    const { container } = await renderOptionsApp("#notifications");
+    const card = getBrowserNotificationCard(container);
+    const manualButton = getButton(card, "已启用");
+
+    expect(card.textContent).toContain("手动打捞通知");
+    expect(manualButton.disabled).toBe(true);
+
+    chromeMock.sendMessage.mockClear();
+    await act(async () => {
+      manualButton.click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({
       type: "updateSettings",
-      settings: { laoFindsManualNotificationsEnabled: true }
+      settings: { laoFindsManualNotificationsEnabled: false }
     });
   });
 
@@ -603,13 +823,14 @@ describe("OptionsApp update diagnostics", () => {
     const { container } = await renderOptionsApp("#data");
     const migrationHeading = headingByText(container, "配置迁移");
     const cloudHeading = headingByText(container, "云存档");
-    const statsHeading = headingByText(container, "请求统计每日自动同步");
     const maintenanceHeading = headingByText(container, "数据维护");
+    const cloudCard = cloudHeading.closest<HTMLElement>(".settings-card");
 
-    expect(container.querySelectorAll(".options-content .settings-card")).toHaveLength(4);
+    expect(container.querySelectorAll(".options-content .settings-card")).toHaveLength(3);
     expect(migrationHeading.closest(".settings-card")).not.toBe(cloudHeading.closest(".settings-card"));
-    expect(cloudHeading.closest(".settings-card")).not.toBe(statsHeading.closest(".settings-card"));
-    expect(statsHeading.closest(".settings-card")).not.toBe(maintenanceHeading.closest(".settings-card"));
+    expect(cloudHeading.closest(".settings-card")).not.toBe(maintenanceHeading.closest(".settings-card"));
+    expect(cloudCard?.textContent).toContain("每日自动备份");
+    expect(container.textContent).not.toContain("请求统计每日自动同步");
     expect(container.querySelector(".settings-section-divider")).toBeFalsy();
     expect(container.textContent).toContain("数据维护");
     expect(getButton(container, "数据管理").classList.contains("active")).toBe(true);
@@ -723,6 +944,8 @@ describe("OptionsApp update diagnostics", () => {
 
     expect(headingByText(container, "关注同步").closest(".settings-card")).not.toBe(headingByText(container, "范围管理").closest(".settings-card"));
     expect(container.querySelectorAll(".options-content .settings-card")).toHaveLength(2);
+    const scopeCard = headingByText(container, "范围管理").closest<HTMLElement>(".settings-card");
+    expect(scopeCard?.querySelector(".friend-count-footer")).toBeFalsy();
 
     await act(async () => {
       getButton(container, "获取我的关注列表").click();
@@ -753,6 +976,7 @@ describe("OptionsApp update diagnostics", () => {
       user: expect.objectContaining({ username: "trinity" }),
       profile: expect.objectContaining({ username: "trinity" })
     });
+    expect(scopeCard?.querySelector(".settings-card-actions")?.textContent).toContain("共 1 位佬朋友");
   });
 
   it("creates, edits, validates, cancels, and deletes lao finds rules from the lao-finds section", async () => {
@@ -780,8 +1004,8 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).toContain("自动捞料");
     expect(container.textContent).toContain("打捞请求范围");
     expect(container.textContent).toContain("打捞间隔");
-    expect(container.textContent).toContain("范围 5 到 720 分钟。");
-    expect(container.textContent).toContain("保持插件界面打开，命中规则的新动态会自动打捞。");
+    expect(container.textContent).toContain("5 到 720 分钟。");
+    expect(container.textContent).toContain("需保持插件界面前台显示。");
     expect(container.textContent).toContain("打捞起点");
     expect(container.textContent).toContain("打捞规则");
     expect(container.textContent).toContain("允许");
@@ -789,8 +1013,21 @@ describe("OptionsApp update diagnostics", () => {
     expect(headingByText(container, "自动捞料").closest(".settings-card")).not.toBe(headingByText(container, "打捞设置").closest(".settings-card"));
     expect(headingByText(container, "打捞设置").closest(".settings-card")).not.toBe(headingByText(container, "打捞规则").closest(".settings-card"));
     expect(headingByText(container, "打捞规则").tagName).toBe("H2");
+    const rulesCard = headingByText(container, "打捞规则").closest<HTMLElement>(".settings-card");
+    const autoDredgeCard = headingByText(container, "自动捞料").closest<HTMLElement>(".settings-card");
+    expect(autoDredgeCard?.querySelector(".settings-card-actions .switch-button")?.textContent).toBe("未启用");
+    expect(autoDredgeCard?.textContent).not.toContain("运行状态");
+    expect(rulesCard?.querySelector(".settings-card-actions")?.textContent).toContain("新建");
     expect(headingByText(container, "自动捞料").querySelector("svg")).toBeFalsy();
     expect(headingByText(container, "打捞规则").querySelector("svg")).toBeFalsy();
+    expect(container.textContent).not.toContain("控制自动捞料");
+    expect(container.textContent).not.toContain("按规则只请求");
+    expect(container.textContent).not.toContain("全量会按每位用户");
+    expect(container.textContent).not.toContain("允许规则负责收集");
+    expect(container.textContent).not.toContain("屏蔽规则全局拦截");
+    expect(container.textContent).not.toContain("显式保存");
+    expect(container.textContent).not.toContain("保存后才会更新规则");
+    expect(container.textContent).not.toContain("关闭弹窗会丢弃");
     expect(container.querySelectorAll(".options-content .settings-card")).toHaveLength(3);
     expect(container.textContent).not.toContain("启用定时刷新");
     expect(container.textContent).not.toContain("刷新范围");
@@ -809,6 +1046,8 @@ describe("OptionsApp update diagnostics", () => {
       getButton(container, "新建").click();
     });
     expect(getRuleDialog(container).textContent).toContain("新建打捞规则");
+    expect(getRuleDialog(container).textContent).not.toContain("保存后才会更新规则");
+    expect(getRuleDialog(container).textContent).not.toContain("关闭弹窗会丢弃");
     expect(container.querySelector(".dredge-rule-list textarea")).toBeFalsy();
     const createTextarea = getRegexTextarea(container);
     await act(async () => {
@@ -1113,6 +1352,10 @@ describe("OptionsApp update diagnostics", () => {
       getButton(container, "通知渠道").click();
     });
 
+    await act(async () => {
+      getButton(getTelegramCard(container), "配置").click();
+      await Promise.resolve();
+    });
     const { tokenInput, chatInput } = getTelegramInputs(container);
     await act(async () => {
       setInputValue(tokenInput!, "unsaved-token");
@@ -1130,8 +1373,20 @@ describe("OptionsApp update diagnostics", () => {
       await Promise.resolve();
     });
 
-    expect(tokenInput?.value).toBe("external-token");
-    expect(chatInput?.value).toBe("98765");
+    expect(tokenInput?.value).toBe("unsaved-token");
+    expect(chatInput?.value).toBe("unsaved-chat");
+
+    await act(async () => {
+      getButton(container, "取消").click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      getButton(getTelegramCard(container), "配置").click();
+      await Promise.resolve();
+    });
+    const syncedTelegramInputs = getTelegramInputs(container);
+    expect(syncedTelegramInputs.tokenInput.value).toBe("external-token");
+    expect(syncedTelegramInputs.chatInput.value).toBe("98765");
 
     await act(async () => {
       getButton(container, "佬有料").click();
@@ -1142,7 +1397,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.querySelector<HTMLInputElement>(".timed-interval-input")?.value).toBe("60");
     expect(container.textContent).toContain("关闭自动捞料后可修改规则。");
     expect(container.textContent).toContain("AI");
-    expect(container.textContent).toContain("1 条正则：LLM");
+    expect(container.textContent).toContain("1 条匹配：LLM");
     expect(container.textContent).toContain("@neo");
     expect(getButton(container, "新建").disabled).toBe(true);
     expect(getButton(container, "编辑").disabled).toBe(true);
@@ -1152,7 +1407,7 @@ describe("OptionsApp update diagnostics", () => {
     const chromeMock = setupChrome();
     const { container } = await renderOptionsApp("#lao-finds");
 
-    expect(container.textContent).toContain("当前没有打捞规则；新建规则后再开始打捞。");
+    expect(container.textContent).toContain("当前没有打捞规则。");
     expect(container.textContent).not.toContain("旧关键词规则");
     expect(container.textContent).not.toContain("黑白规则模型");
 
@@ -1215,9 +1470,7 @@ function setTextareaValue(input: HTMLTextAreaElement, value: string) {
 }
 
 function getRegexTextarea(container: HTMLElement) {
-  const textarea = Array.from(container.querySelectorAll<HTMLTextAreaElement>("textarea")).find((input) =>
-    input.placeholder.includes("一行一条正则")
-  );
+  const textarea = getRuleDialog(container).querySelector<HTMLTextAreaElement>("textarea");
   if (!textarea) throw new Error("Regex textarea not found");
   return textarea;
 }
@@ -1250,6 +1503,32 @@ function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
   };
 }
 
+function getBrowserNotificationCard(container: HTMLElement) {
+  const card = headingByText(container, "浏览器本地通知").closest<HTMLElement>(".settings-card");
+  if (!card) throw new Error("Browser notification card not found");
+  return card;
+}
+
+function getTelegramCard(container: HTMLElement) {
+  const card = headingByText(container, "Telegram").closest<HTMLElement>(".settings-card");
+  if (!card) throw new Error("Telegram card not found");
+  return card;
+}
+
+function getSettingsCardActions(card: HTMLElement) {
+  const actions = card.querySelector<HTMLElement>(".settings-card-actions");
+  if (!actions) throw new Error("Settings card actions not found");
+  return actions;
+}
+
+function getTelegramDialog(container: HTMLElement) {
+  return container.querySelector<HTMLElement>(".telegram-config-modal[role='dialog']");
+}
+
+function getTelegramBackdrop(container: HTMLElement) {
+  return container.querySelector<HTMLElement>(".modal-backdrop");
+}
+
 function getTelegramInputs(container: HTMLElement) {
   const inputs = Array.from(container.querySelectorAll<HTMLInputElement>("input"));
   const tokenInput = inputs.find((input) => input.type === "password" && input.placeholder.startsWith("123456789:"));
@@ -1270,7 +1549,9 @@ function setupChrome({
   },
   cloudState = { binding: { bound: false as const }, status: { state: "unchecked" as const }, message: "尚未绑定 linuxdo-cloud-save。" },
   cloudArchiveState = differentCloudArchiveState(),
-  identifyResponse
+  identifyResponse,
+  telegramTestResponse = { ok: true, data: "已发送测试消息。" },
+  updateSettingsError = null
 }: {
   state?: AppState;
   updateCheck?: {
@@ -1285,6 +1566,8 @@ function setupChrome({
   cloudState?: Record<string, unknown>;
   cloudArchiveState?: CloudArchiveLocalStateResult;
   identifyResponse?: Promise<unknown>;
+  telegramTestResponse?: { ok: true; data: unknown } | { ok: false; error: string };
+  updateSettingsError?: string | null;
 } = {}) {
   let currentState = state;
   let currentCloudState = cloudState;
@@ -1367,9 +1650,11 @@ function setupChrome({
       return { ok: true, data: currentState };
     }
     if (message.type === "updateSettings") {
+      if (updateSettingsError) return { ok: false, error: updateSettingsError };
       currentState = { ...currentState, settings: { ...currentState.settings, ...message.settings } };
       return { ok: true, data: currentState };
     }
+    if (message.type === "testTelegramNotification") return telegramTestResponse;
     if (message.type === "exportConfig") {
       return {
         ok: true,
@@ -1488,9 +1773,13 @@ function setupChrome({
 }
 
 function headingByText(container: HTMLElement, text: string): HTMLHeadingElement {
-  const heading = Array.from(container.querySelectorAll<HTMLHeadingElement>("h2, h3")).find((candidate) => candidate.textContent === text);
+  const heading = queryHeadingByText(container, text);
   if (!heading) throw new Error(`heading not found: ${text}`);
   return heading;
+}
+
+function queryHeadingByText(container: HTMLElement, text: string): HTMLHeadingElement | null {
+  return Array.from(container.querySelectorAll<HTMLHeadingElement>("h2, h3")).find((candidate) => candidate.textContent === text) ?? null;
 }
 
 function allSettingHeadings(container: HTMLElement): HTMLHeadingElement[] {
