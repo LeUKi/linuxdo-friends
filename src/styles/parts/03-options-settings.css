@@ -712,6 +712,9 @@
   flex: 1;
   border-color: transparent;
   background: transparent;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .tabs button.active {
@@ -839,6 +842,12 @@
   margin: 8px 0 12px;
 }
 
+.feed-action-row {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
 .refresh-button {
   display: inline-flex;
   align-items: center;
@@ -851,12 +860,23 @@
 }
 
 .manage-button {
+  display: inline-grid;
   flex: 0 1 auto;
   min-width: 0;
   min-height: 40px;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
   overflow: hidden;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.manage-button-line {
+  display: block;
 }
 
 .refresh-button-with-meta {
@@ -871,6 +891,16 @@
 
 .feed-refresh-button {
   max-width: min(154px, 100%);
+}
+
+.feed-clear-filter-button {
+  min-height: 50px;
+  flex: 0 0 auto;
+  padding-inline: 10px;
+}
+
+.feed-clear-filter-button svg {
+  flex: 0 0 auto;
 }
 
 .split-refresh {

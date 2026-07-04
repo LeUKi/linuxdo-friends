@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { readdir, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -7,12 +8,16 @@ export default defineConfig({
     react(),
     {
       name: "drop-content-css-asset",
+      enforce: "post",
       generateBundle(_options, bundle) {
         for (const fileName of Object.keys(bundle)) {
           if (fileName.endsWith(".css")) {
             delete bundle[fileName];
           }
         }
+      },
+      async closeBundle() {
+        await removeEmittedContentCssAssets();
       }
     }
   ],
@@ -53,3 +58,25 @@ export default defineConfig({
     }
   }
 });
+
+async function removeEmittedContentCssAssets() {
+  const assetsDir = resolve(__dirname, "dist/assets");
+  let entries: string[];
+  try {
+    entries = await readdir(assetsDir);
+  } catch (error) {
+    if (!isMissingDirectoryError(error)) {
+      throw error;
+    }
+    return;
+  }
+  await Promise.all(
+    entries
+      .filter((fileName) => fileName.startsWith("linuxdo-friends-") && (fileName.endsWith(".css") || fileName.endsWith(".css.map")))
+      .map((fileName) => rm(join(assetsDir, fileName), { force: true }))
+  );
+}
+
+function isMissingDirectoryError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}

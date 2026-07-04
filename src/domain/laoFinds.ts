@@ -43,7 +43,7 @@ export function normalizeDredgeRule(value: Partial<DredgeRule> & { id?: string }
   if (!patterns.valid) return null;
   const id = typeof value.id === "string" && value.id.trim() ? value.id.trim() : createDredgeRuleId(timestamp);
   const createdAt = typeof value.createdAt === "string" && value.createdAt.trim() ? value.createdAt : timestamp;
-  const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : "未命名打捞规则";
+  const name = typeof value.name === "string" && value.name.trim() ? value.name.trim() : createDredgeRuleDefaultName();
   return {
     schemaVersion: 2,
     id,
@@ -61,6 +61,16 @@ export function normalizeDredgeRule(value: Partial<DredgeRule> & { id?: string }
 export function createDredgeRuleId(timestamp: string = nowIso()): string {
   const random = Math.random().toString(36).slice(2, 8);
   return `dredge-rule:${Date.parse(timestamp) || Date.now()}:${random}`;
+}
+
+export function createDredgeRuleDefaultName(random: () => number = Math.random): string {
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let suffix = "";
+  for (let index = 0; index < 3; index += 1) {
+    const letterIndex = Math.min(letters.length - 1, Math.floor(random() * letters.length));
+    suffix += letters[letterIndex];
+  }
+  return `打捞规则${suffix}`;
 }
 
 export function upsertDredgeRule(state: AppState, input: Partial<DredgeRule> & { id?: string }): AppState {

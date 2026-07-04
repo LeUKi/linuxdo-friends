@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defaultAppState } from "./defaultState";
 import {
   archiveLaoFindsItem,
@@ -45,6 +45,19 @@ describe("lao finds collection", () => {
 
     expect(Object.keys(result.state.laoFindsItems)).toEqual(["hit"]);
     expect(result.state.laoFindsItems.hit).toMatchObject({ matchedRuleIds: ["rule-ai"], collectedAt: "2026-06-30T00:00:00.000Z" });
+  });
+
+  it("keeps historical activity names searchable for rule matching", () => {
+    const state = withRules([rule({ id: "rule-old-name", usernames: ["neo"], kinds: ["topic"], patterns: ["旧名字"] })], "2026-06-29T00:00:00.000Z");
+
+    const result = collectLaoFindsItems(
+      state,
+      [activity({ id: "old-name-hit", username: "neo", actorUsername: "neo", actorName: "旧名字", title: "普通标题" })],
+      "2026-06-30T00:00:00.000Z"
+    );
+
+    expect(Object.keys(result.state.laoFindsItems)).toEqual(["old-name-hit"]);
+    expect(result.state.laoFindsItems["old-name-hit"].matchedRuleIds).toEqual(["rule-old-name"]);
   });
 
   it("applies patterns only to topic, reply, and boost rule matches", () => {
@@ -214,6 +227,26 @@ describe("lao finds collection", () => {
       kinds: ["topic", "reply"],
       patterns: ["AI  工具"]
     });
+  });
+
+  it("uses a random uppercase default name when a current rule name is blank", () => {
+    const random = vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(1 / 26)
+      .mockReturnValueOnce(2 / 26);
+
+    const state = upsertDredgeRule(defaultAppState, {
+      schemaVersion: 2,
+      id: "rule-blank-name",
+      name: "   ",
+      mode: "allow",
+      usernames: "all",
+      kinds: ["topic"],
+      patterns: []
+    });
+
+    expect(state.dredgeRules[0].name).toBe("打捞规则ABC");
+    random.mockRestore();
   });
 
   it("preserves current all-except-like rule scopes", () => {

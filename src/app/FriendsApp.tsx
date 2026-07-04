@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   LoaderCircle,
+  PanelRightOpen,
   RefreshCw,
   Sparkles,
   Telescope,
@@ -492,10 +493,20 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
     }
   }
 
-  function openDredgeRules() {
+  function clearFeedFilters() {
+    void updateUiScene({
+      feedKindFilter: "all",
+      feedUserFilter: "all",
+      activityKindPopover: { open: false, query: "" },
+      feedUserPopover: { open: false, query: "" }
+    });
+    clearStatus();
+  }
+
+  function openScopeSettings() {
     void updateUiScene({ addFriendModalOpen: false });
     clearStatus();
-    void openOptionsPage("#lao-finds");
+    void openOptionsPage("#scope");
   }
 
   async function handleManualIdentifyCurrentAccount() {
@@ -624,6 +635,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
           kindFilter={kindFilter}
           now={relativeNow}
           onRefresh={() => void refreshVisibleFeedActivity(activityRefreshScope)}
+          onClearFilters={clearFeedFilters}
           onKindFilterChange={(value) => void updateUiScene({ feedKindFilter: value })}
           onOpenActivityLink={handleActivityLinkClick}
           onUserFilterChange={(value) => void updateUiScene({ feedUserFilter: value })}
@@ -675,7 +687,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
           onQueryChange={(query) => void updateUiScene({ addFriendQuery: query })}
           onLookup={(target) => lookupFriendProfile(target)}
           onOpenLinuxDoHome={() => void openLinuxDoHome()}
-          onOpenDredgeRules={openDredgeRules}
+          onOpenScopeSettings={openScopeSettings}
           onRepairPageScript={() => void repairLinuxDoPageScript()}
           onRemove={(target) => void removeFriend(target)}
           onSync={() => void syncFollows()}
@@ -734,7 +746,8 @@ function FriendListTab({
           warning="自动刷新会按间隔请求所有佬相好状态；遇到验证、限流或正在刷新会跳过。"
         />
         <button className="manage-button" onClick={onOpenModal} disabled={loading} type="button">
-          管理
+          <span className="manage-button-line">佬友</span>
+          <span className="manage-button-line">管理</span>
         </button>
       </div>
       {friends.length === 0 ? (
@@ -782,6 +795,7 @@ function FeedTab({
   kindFilter,
   now,
   onRefresh,
+  onClearFilters,
   onActivityKindPopoverChange,
   onFeedUserPopoverChange,
   onKindFilterChange,
@@ -804,6 +818,7 @@ function FeedTab({
   kindFilter: ActivityKindFilter;
   now: number;
   onRefresh: () => void;
+  onClearFilters: () => void;
   onActivityKindPopoverChange: (scene: { open?: boolean; query?: string }) => void;
   onFeedUserPopoverChange: (scene: { open?: boolean; query?: string }) => void;
   onKindFilterChange: (value: ActivityKindFilter) => void;
@@ -820,6 +835,7 @@ function FeedTab({
 }) {
   const activityProgress = progress?.taskType === "activity" ? progress : null;
   const selectedIdentity = userFilter === "all" ? undefined : identityForUsername(state, userFilter);
+  const filtersActive = kindFilter !== "all" || userFilter !== "all";
   const userFilterOptions = useMemo<Array<FilterOption<"all" | Username>>>(
     () => [
       { value: "all", label: "全部", meta: userOptions.length, searchText: "全部 全部佬朋友" },
@@ -848,7 +864,7 @@ function FeedTab({
 
   return (
     <section ref={feedTopRef}>
-      <div className="tab-action-row">
+      <div className="tab-action-row feed-action-row">
         <button className="refresh-button refresh-button-with-meta feed-refresh-button" onClick={onRefresh} disabled={refreshDisabled} type="button">
           <RefreshButtonContent
             idleLabel="刷新动态"
@@ -859,6 +875,12 @@ function FeedTab({
             freshness={activityFreshness}
           />
         </button>
+        {filtersActive ? (
+          <button className="small-action feed-clear-filter-button" type="button" onClick={onClearFilters}>
+            <X size={13} aria-hidden="true" />
+            清除筛选
+          </button>
+        ) : null}
       </div>
       <div className="filters">
         <FilterPopover
@@ -957,63 +979,60 @@ function LaoFindsTab({
   };
   return (
     <section ref={feedTopRef}>
-      <div className="finds-layout">
-        <section className="finds-section">
-          <div className="tab-action-row finds-action-row">
-            {isSidePanel ? (
-              <button className="refresh-button refresh-button-with-meta finds-dredge-button" type="button" onClick={onManualRefresh} disabled={manualRefreshDisabled} title={manualRefreshTitle}>
-                <DredgeRefreshButtonContent idleLabel={manualRefreshLabel} idleMeta={manualRefreshMeta} progress={dredgeProgress} />
-              </button>
-            ) : (
-              <button className="small-action finds-open-panel-button" type="button" onClick={onManualRefresh} title={manualRefreshTitle}>
-                <span className="finds-open-panel-main">{manualRefreshLabel}</span>
-                <span className="finds-open-panel-meta">更多操作</span>
-              </button>
-            )}
-            <button className="small-action finds-clear-button" type="button" onClick={handleClearAll} disabled={items.length === 0}>
-              <span className="finds-clear-main">清空全部</span>
-              <span className="finds-clear-meta">共 {items.length} 条</span>
-            </button>
-            <button className="small-action finds-rules-button" type="button" onClick={onOpenRules}>
-              规则配置
-            </button>
-          </div>
-          {!dredgeRefreshAvailable && dredgeRefreshUnavailableMessage ? <p className="finds-action-hint">{dredgeRefreshUnavailableMessage}</p> : null}
-          {items.length === 0 ? (
-            <p className="empty finds-empty">
-              暂时没有佬料。先到设置页新建打捞规则，然后手动刷新佬友圈或开启自动捞料。
-            </p>
-          ) : (
-            <div className="list">
-              {items.map(({ item, identity, matchedRules }) => {
-                const activityTime = item.activity.occurredAt ?? item.collectedAt;
-                const ruleLabel = matchedRules.length ? `命中 ${matchedRules.map((rule) => rule.name).join("、")}` : "规则已删除";
-                return (
-                  <article className="finds-card" key={item.id}>
-                    <div className="finds-card-head">
-                      <UserIdentityRow identity={identity} compact />
-                      <div className="finds-card-meta">
-                        <time dateTime={activityTime}>{formatRelativeTime(activityTime, now)}</time>
-                      </div>
-                    </div>
-                    <ActivityCardBody item={item.activity} onOpenActivityLink={onOpenActivityLink} />
-                    <div className="finds-card-foot">
-                      <span title={matchedRules.map((rule) => rule.name).join("、")}>
-                        {ruleLabel} · {formatRelativeTime(item.collectedAt, now)}打捞
-                      </span>
-                      <div className="finds-card-actions">
-                        <button type="button" onClick={() => onDelete(item.id)}>
-                          删除
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
+      <div className="tab-action-row finds-action-row">
+        {isSidePanel ? (
+          <button className="refresh-button refresh-button-with-meta finds-dredge-button" type="button" onClick={onManualRefresh} disabled={manualRefreshDisabled} title={manualRefreshTitle}>
+            <DredgeRefreshButtonContent idleLabel={manualRefreshLabel} idleMeta={manualRefreshMeta} progress={dredgeProgress} />
+          </button>
+        ) : (
+          <button className="small-action finds-open-panel-button" type="button" onClick={onManualRefresh} title={manualRefreshTitle}>
+            <PanelRightOpen size={15} aria-hidden="true" />
+            {manualRefreshLabel}
+          </button>
+        )}
+        <button className="small-action finds-clear-button" type="button" onClick={handleClearAll} disabled={items.length === 0}>
+          <span className="finds-clear-main">清空全部</span>
+          <span className="finds-clear-meta">共 {items.length} 条</span>
+        </button>
+        <button className="small-action finds-rules-button" type="button" onClick={onOpenRules}>
+          <span className="finds-rules-line">规则</span>
+          <span className="finds-rules-line">配置</span>
+        </button>
       </div>
+      {!dredgeRefreshAvailable && dredgeRefreshUnavailableMessage ? <p className="finds-action-hint">{dredgeRefreshUnavailableMessage}</p> : null}
+      {items.length === 0 ? (
+        <p className="empty finds-empty">
+          暂时没有佬料。先到设置页新建打捞规则，然后手动刷新佬友圈或开启自动捞料。
+        </p>
+      ) : (
+        <div className="list">
+          {items.map(({ item, identity, matchedRules }) => {
+            const activityTime = item.activity.occurredAt ?? item.collectedAt;
+            const ruleLabel = matchedRules.length ? `命中 ${matchedRules.map((rule) => rule.name).join("、")}` : "规则已删除";
+            return (
+              <article className="finds-card" key={item.id}>
+                <div className="finds-card-head">
+                  <UserIdentityRow identity={identity} compact />
+                  <div className="finds-card-meta">
+                    <time dateTime={activityTime}>{formatRelativeTime(activityTime, now)}</time>
+                  </div>
+                </div>
+                <ActivityCardBody item={item.activity} onOpenActivityLink={onOpenActivityLink} />
+                <div className="finds-card-foot">
+                  <span title={matchedRules.map((rule) => rule.name).join("、")}>
+                    {ruleLabel} · {formatRelativeTime(item.collectedAt, now)}打捞
+                  </span>
+                  <div className="finds-card-actions">
+                    <button type="button" onClick={() => onDelete(item.id)}>
+                      删除
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
       <div className="tab-bottom-spacer" aria-hidden="true" />
     </section>
   );
@@ -1939,7 +1958,7 @@ function AddFriendModal({
   onQueryChange,
   onLookup,
   onOpenLinuxDoHome,
-  onOpenDredgeRules,
+  onOpenScopeSettings,
   onRepairPageScript,
   onRemove,
   onSync,
@@ -1955,7 +1974,7 @@ function AddFriendModal({
   onQueryChange: (query: string) => void;
   onLookup: (username: Username) => Promise<BackgroundResponse<FriendProfileSummary>>;
   onOpenLinuxDoHome: () => void;
-  onOpenDredgeRules: () => void;
+  onOpenScopeSettings: () => void;
   onRepairPageScript: () => void;
   onRemove: (username: Username) => void;
   onSync: () => void;
@@ -2008,7 +2027,7 @@ function AddFriendModal({
             <div>
               <h3>快速添加</h3>
             </div>
-            <button className="small-action" type="button" onClick={onOpenDredgeRules}>
+            <button className="small-action" type="button" onClick={onOpenScopeSettings}>
               更多设置
             </button>
           </div>

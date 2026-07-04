@@ -173,6 +173,8 @@ describe("FriendsApp UI scene persistence", () => {
     setupChrome({ session });
     const { container } = await renderFriendsApp();
 
+    expect(Array.from(container.querySelectorAll(".manage-button-line")).map((line) => line.textContent)).toEqual(["佬友", "管理"]);
+
     await act(async () => {
       getButton(container, "管理").click();
     });
@@ -948,16 +950,21 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.textContent).toContain("手动刷新佬友圈或开启自动捞料");
     expect(container.textContent).toContain("立即打捞");
     expect(container.textContent).toContain("规则配置");
-    expect(container.querySelector(".finds-section h2")).toBeFalsy();
+    expect(container.querySelector(".finds-section")).toBeFalsy();
+    expect(container.querySelector(".finds-layout")).toBeFalsy();
     const findsActionRow = container.querySelector(".finds-action-row");
     expect(findsActionRow?.textContent).not.toContain("佬有料");
-    expect(container.querySelector(".finds-clear-button")?.textContent).toContain("共 0 条");
+    expect(container.querySelector(".finds-clear-button")?.textContent).toContain("清空全部");
+    expect(container.querySelector(".finds-clear-meta")?.textContent).toBe("共 0 条");
     expect(getButton(container, "清空全部").disabled).toBe(true);
     const actionChildren = Array.from(findsActionRow?.children ?? []);
     expect(actionChildren[0]?.classList.contains("finds-dredge-button")).toBe(true);
     expect(actionChildren[1]?.classList.contains("finds-clear-button")).toBe(true);
     expect(actionChildren[2]?.classList.contains("finds-rules-button")).toBe(true);
     expect(getButton(container, "立即打捞").querySelector(".lucide-telescope")).toBeTruthy();
+    expect(getButton(container, "清空全部").querySelector("svg")).toBeFalsy();
+    expect(getButton(container, "规则配置").querySelector("svg")).toBeFalsy();
+    expect(Array.from(container.querySelectorAll(".finds-rules-line")).map((line) => line.textContent)).toEqual(["规则", "配置"]);
     expect(container.querySelector(".finds-dredge-button .refresh-button-meta")?.textContent).toBe("尚未打捞");
     expect(container.querySelector(".dredge-rule-panel")).toBeFalsy();
   });
@@ -1068,7 +1075,7 @@ describe("FriendsApp UI scene persistence", () => {
     expect(activityRefreshMessages(chromeMock)).toEqual([]);
   });
 
-  it("opens lao finds rules in the options page from the lightweight management modal", async () => {
+  it("opens scope settings in the options page from the lightweight management modal", async () => {
     const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
     const chromeMock = setupChrome({ session, state: activityFeedState() });
     const { container } = await renderFriendsApp("side-panel");
@@ -1084,7 +1091,7 @@ describe("FriendsApp UI scene persistence", () => {
       await Promise.resolve();
     });
 
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#lao-finds" });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#scope" });
     expect(container.textContent).not.toContain("打捞规则");
     expect(container.querySelector(".modal")).toBeFalsy();
     expect(session.dump()).toMatchObject({
@@ -1148,7 +1155,8 @@ describe("FriendsApp UI scene persistence", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "clearLaoFindsItems" });
     expect(container.textContent).not.toContain("AI 新话题");
     expect(container.textContent).not.toContain("AI 第二条");
-    expect(container.querySelector(".finds-clear-button")?.textContent).toContain("共 0 条");
+    expect(container.querySelector(".finds-clear-button")?.textContent).toContain("清空全部");
+    expect(container.querySelector(".finds-clear-meta")?.textContent).toBe("共 0 条");
   });
 
   it("renders collected lao finds items with separated times and sends delete command", async () => {
@@ -1269,9 +1277,10 @@ describe("FriendsApp UI scene persistence", () => {
     const { container } = await renderFriendsApp("in-page");
 
     expect(container.textContent).toContain("打开侧栏");
-    expect(container.querySelector(".finds-open-panel-meta")?.textContent).toBe("更多操作");
+    expect(container.textContent).not.toContain("更多操作");
     expect(container.textContent).not.toContain("请打开插件侧栏后再打捞。");
     expect(getButton(container, "打开侧栏").classList.contains("finds-open-panel-button")).toBe(true);
+    expect(getButton(container, "打开侧栏").querySelector(".lucide-panel-right-open")).toBeTruthy();
     expect(container.querySelector(".finds-dredge-button")).toBeFalsy();
 
     await act(async () => {
@@ -1924,6 +1933,7 @@ describe("FriendsApp UI scene persistence", () => {
     const { container } = await renderFriendsApp("side-panel");
 
     expect(container.querySelector(".feed-refresh-button")).toBeTruthy();
+    expect(container.querySelector(".feed-clear-filter-button")).toBeFalsy();
     expect(container.querySelector(".split-refresh-toggle")).toBeFalsy();
     expect(container.querySelector(".refresh-menu-feed")).toBeFalsy();
     expect(container.textContent).not.toContain("去设置");
@@ -1935,6 +1945,39 @@ describe("FriendsApp UI scene persistence", () => {
 
     expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#lao-finds" });
     expect(activityRefreshMessages(chromeMock)).toEqual([{ type: "refreshFriendActivity", scope: { kind: "all" } }]);
+  });
+
+  it("shows a clear-filter action next to feed refresh when feed filters are active", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "feed",
+      [uiSceneStorageKeys.feedKindFilter]: "boost",
+      [uiSceneStorageKeys.feedUserFilter]: "neo",
+      [uiSceneStorageKeys.activityKindPopoverOpen]: true,
+      [uiSceneStorageKeys.activityKindPopoverQuery]: "bo",
+      [uiSceneStorageKeys.feedUserPopoverOpen]: true,
+      [uiSceneStorageKeys.feedUserPopoverQuery]: "ne"
+    });
+    setupChrome({ session, state: activityFeedState() });
+    const { container } = await renderFriendsApp("side-panel");
+
+    const clearButton = getButton(container, "清除筛选");
+    expect(clearButton.classList.contains("feed-clear-filter-button")).toBe(true);
+
+    await act(async () => {
+      clearButton.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector(".feed-clear-filter-button")).toBeFalsy();
+    expect(session.dump()).toMatchObject({
+      [uiSceneStorageKeys.feedKindFilter]: "all",
+      [uiSceneStorageKeys.feedUserFilter]: "all",
+      [uiSceneStorageKeys.activityKindPopoverOpen]: false,
+      [uiSceneStorageKeys.activityKindPopoverQuery]: "",
+      [uiSceneStorageKeys.feedUserPopoverOpen]: false,
+      [uiSceneStorageKeys.feedUserPopoverQuery]: ""
+    });
   });
 
   it("shows a side-panel header automatic dredging capsule in the operation row", async () => {

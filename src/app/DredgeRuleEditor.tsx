@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ALL_ACTIVITY_KINDS } from "../domain/friends";
-import { hasDredgeRuleTextPatternKind, validateDredgeRulePattern } from "../domain/laoFinds";
+import { createDredgeRuleDefaultName, hasDredgeRuleTextPatternKind, validateDredgeRulePattern } from "../domain/laoFinds";
 import type { ActivityRefreshKind, AppState, DredgeRule, DredgeRuleMode, Username } from "../shared/types";
 import { deriveFeedUserOptions, deriveDredgeRuleScopeWarning } from "../popup/selectors";
 import { kindText } from "./activityKinds";
@@ -15,6 +15,7 @@ interface DredgeRuleDraft {
   kind: DraftKind;
   id?: string;
   name: string;
+  fallbackName: string;
   enabled: boolean;
   mode: DredgeRuleMode;
   usernames: "all" | Username[];
@@ -49,7 +50,8 @@ export function DredgeRuleEditor({
     }
     setDraft({
       kind: "create",
-      name: "新打捞规则",
+      name: "",
+      fallbackName: createDredgeRuleDefaultName(),
       enabled: true,
       mode: "allow",
       usernames: "all",
@@ -87,7 +89,7 @@ export function DredgeRuleEditor({
     onUpsertRule({
       schemaVersion: 2,
       id: draft.id,
-      name: draft.name,
+      name: draft.name.trim() ? draft.name : draft.fallbackName,
       enabled: draft.enabled,
       mode: draft.mode,
       usernames: draft.usernames,
@@ -284,7 +286,7 @@ function DredgeRuleDraftModal({
           </div>
           <label className={classNames("dredge-rule-field")}>
             <span>名称</span>
-            <input disabled={locked} value={draft.name} onChange={(event) => patch({ name: event.target.value })} />
+            <input disabled={locked} value={draft.name} placeholder={draft.fallbackName} onChange={(event) => patch({ name: event.target.value })} />
           </label>
           <div className={classNames("dredge-rule-field")}>
             <span>类型</span>
@@ -357,6 +359,7 @@ function draftFromRule(rule: DredgeRule): DredgeRuleDraft {
     kind: "edit",
     id: rule.id,
     name: rule.name,
+    fallbackName: rule.name,
     enabled: rule.enabled,
     mode: rule.mode,
     usernames: rule.usernames,

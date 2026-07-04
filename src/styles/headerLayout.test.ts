@@ -40,21 +40,44 @@ describe("header layout styles", () => {
     expect(updateLinkBlock).not.toContain("flex-wrap: wrap;");
   });
 
-  it("keeps Lao Finds actions ordered as dredge, clear-all, then right-aligned settings", () => {
+  it("pins tab and secondary action typography instead of inheriting the host page size", () => {
+    const tabButtonBlock = cssBlock(".tabs button");
+    expect(tabButtonBlock).toContain("font-size: 16px;");
+    expect(tabButtonBlock).toContain("font-weight: 600;");
+    expect(tabButtonBlock).toContain("line-height: 1.2;");
+
+    const manageButtonBlock = cssBlock(".manage-button");
+    expect(manageButtonBlock).toContain("display: inline-grid;");
+    expect(manageButtonBlock).toContain("align-content: center;");
+    expect(manageButtonBlock).toContain("justify-items: center;");
+    expect(manageButtonBlock).toContain("gap: 2px;");
+    expect(manageButtonBlock).toContain("font-size: 12px;");
+    expect(manageButtonBlock).toContain("font-weight: 400;");
+    expect(manageButtonBlock).toContain("line-height: 1.15;");
+    expect(cssBlock(".manage-button-line")).toContain("display: block;");
+
+    expect(findsCss).toContain(
+      ".finds-rules-button {\n  display: inline-grid;\n  align-content: center;\n  justify-items: center;\n  gap: 2px;\n  font-size: 12px;\n  font-weight: 400;\n  line-height: 1.15;\n  margin-left: auto;\n}"
+    );
+  });
+
+  it("keeps Lao Finds actions ordered as a unified button row", () => {
     expect(cssBlock(".finds-action-row", findsCss)).toContain("justify-content: flex-start;");
     expect(cssBlock(".finds-action-row", findsCss)).toContain("flex-wrap: wrap;");
     expect(cssBlock(".finds-action-row", findsCss)).toContain("overflow: visible;");
-    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("width: 132px;");
-    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("max-width: min(132px, 52%);");
-    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("flex: 0 1 132px;");
-    expect(cssBlock(".finds-open-panel-button", findsCss)).toContain("display: inline-grid;");
-    expect(cssBlock(".finds-open-panel-button", findsCss)).toContain("min-height: 40px;");
-    expect(cssBlock(".finds-open-panel-button", findsCss)).toContain("padding-inline: 10px;");
-    expect(cssBlock(".finds-open-panel-meta", findsCss)).toContain("color: var(--text-muted);");
+    expect(cssBlock(".finds-action-row", findsCss)).not.toContain("margin-top:");
+    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("width: 154px;");
+    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("max-width: min(154px, 52%);");
+    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("flex: 0 1 154px;");
+    const secondaryBlock = cssBlock(".finds-open-panel-button,\n.finds-rules-button", findsCss);
+    expect(secondaryBlock).toContain("min-height: 50px;");
+    expect(secondaryBlock).toContain("flex: 0 0 auto;");
+    expect(secondaryBlock).toContain("padding-inline: 10px;");
     expect(cssBlock(".finds-clear-button", findsCss)).toContain("display: inline-grid;");
-    expect(cssBlock(".finds-clear-button", findsCss)).toContain("flex: 0 0 auto;");
+    expect(cssBlock(".finds-clear-button", findsCss)).toContain("min-height: 50px;");
+    expect(cssBlock(".finds-clear-button", findsCss)).toContain("justify-items: center;");
     expect(cssBlock(".finds-clear-meta", findsCss)).toContain("color: var(--text-muted);");
-    expect(cssBlock(".finds-rules-button", findsCss)).toContain("margin-left: auto;");
+    expect(findsCss).toContain("margin-left: auto;");
   });
 
   it("keeps the Lao Finds rule modal content-sized instead of stretching controls", () => {

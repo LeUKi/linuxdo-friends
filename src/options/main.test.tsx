@@ -1171,6 +1171,11 @@ describe("OptionsApp update diagnostics", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "resetLaoFindsStartedAt" });
 
     chromeMock.sendMessage.mockClear();
+    const ruleNameRandom = vi.spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(1 / 26)
+      .mockReturnValueOnce(2 / 26)
+      .mockReturnValue(0);
     await act(async () => {
       getButton(container, "新建").click();
     });
@@ -1178,6 +1183,8 @@ describe("OptionsApp update diagnostics", () => {
     expect(getRuleDialog(container).textContent).not.toContain("保存后才会更新规则");
     expect(getRuleDialog(container).textContent).not.toContain("关闭弹窗会丢弃");
     expect(container.querySelector(".dredge-rule-list textarea")).toBeFalsy();
+    const createNameInput = Array.from(getRuleDialog(container).querySelectorAll<HTMLInputElement>("input")).find((input) => input.placeholder === "打捞规则ABC");
+    expect(createNameInput?.value).toBe("");
     const createTextarea = getRegexTextarea(container);
     expect(createTextarea.placeholder).toContain("留空：匹配所选用户和类型下的全部内容");
     expect(createTextarea.placeholder).toContain("一行一条，按正则匹配标题、摘要、用户名等文本");
@@ -1193,8 +1200,9 @@ describe("OptionsApp update diagnostics", () => {
     });
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({
       type: "upsertDredgeRule",
-      rule: expect.objectContaining({ schemaVersion: 2, name: "新打捞规则", mode: "allow", usernames: "all", patterns: ["AI", "LLM"] })
+      rule: expect.objectContaining({ schemaVersion: 2, name: "打捞规则ABC", mode: "allow", usernames: "all", patterns: ["AI", "LLM"] })
     });
+    ruleNameRandom.mockRestore();
     expect(container.querySelector("[role='dialog']")).toBeFalsy();
 
     chromeMock.sendMessage.mockClear();

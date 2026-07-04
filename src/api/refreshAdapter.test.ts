@@ -279,7 +279,15 @@ describe("refresh adapter", () => {
       .mockResolvedValueOnce(
         jsonResponse({
           user_actions: [
-            { action_type: 1, topic_id: 1, post_id: 5, created_at: "2026-06-26T23:59:59.000Z", acting_username: "Neil", title: "like" }
+            {
+              action_type: 1,
+              topic_id: 1,
+              post_id: 5,
+              created_at: "2026-06-26T23:59:59.000Z",
+              username: "PostAuthor",
+              name: "Poster",
+              title: "like"
+            }
           ]
         })
       ) as unknown as typeof fetch;
@@ -315,6 +323,12 @@ describe("refresh adapter", () => {
       expect.any(Object)
     );
     expect(result.state.activity.neil.items.map((item) => item.kind)).toEqual(["topic", "reply", "boost", "reaction", "like"]);
+    expect(result.state.activity.neil.items.find((item) => item.kind === "like")).toMatchObject({
+      username: "neil",
+      actorUsername: "neil",
+      targetUsername: "postauthor",
+      targetName: "Poster"
+    });
     expect(Object.keys(result.state.laoFindsItems)).toEqual(["user_action:neil:4:1:1"]);
     expect(result.state.laoFindsItems["user_action:neil:4:1:1"].matchedRuleIds).toEqual(["rule-topic"]);
     expect(Object.keys(result.state.activityRefreshLedger).sort()).toEqual(["neil:boost", "neil:like", "neil:reaction", "neil:reply", "neil:topic"]);

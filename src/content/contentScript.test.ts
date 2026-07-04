@@ -1366,7 +1366,8 @@ describe("content script friend markers", () => {
                   created_at: "2026-06-26T23:59:59.000Z",
                   topic_id: 99,
                   post_id: 45,
-                  acting_username: "Misaka7369"
+                  username: "PostAuthor",
+                  name: "Poster"
                 }
               ]
             }),
@@ -1396,7 +1397,15 @@ describe("content script friend markers", () => {
           },
           { id: "boost:43", kind: "boost", title: "一个 boost" },
           { id: "reaction:44", kind: "reaction", reactionValue: "hugs" },
-          { id: "user_action:misaka7369:1:99:45", kind: "like", title: "一个 like" }
+          {
+            id: "user_action:misaka7369:1:99:45",
+            username: "misaka7369",
+            actorUsername: "misaka7369",
+            targetUsername: "postauthor",
+            targetName: "Poster",
+            kind: "like",
+            title: "一个 like"
+          }
         ]
       }
     });

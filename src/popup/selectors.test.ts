@@ -72,10 +72,11 @@ describe("popup selectors", () => {
     });
   });
 
-  it("prefers activity actor fields before cached profile identity", () => {
+  it("prefers cached profile identity before activity actor fields", () => {
     const state = addFriendFromProfile(defaultAppState, {
       username: "Neil",
       name: "Profile Name",
+      avatarUrl: "https://linux.do/profile.png",
       refreshedAt: "2026-06-28T00:00:00.000Z"
     });
 
@@ -91,9 +92,35 @@ describe("popup selectors", () => {
       })
     ).toEqual({
       username: "neil",
-      primary: "Actor Name",
+      primary: "Profile Name",
       secondary: "@neil",
-      avatarUrl: "https://linux.do/actor.png"
+      avatarUrl: "https://linux.do/profile.png"
+    });
+  });
+
+  it("prefers cached followed identity before activity actor fields when no profile is cached", () => {
+    const state = upsertFollowedUser(defaultAppState, {
+      username: "Neil",
+      name: "Follow Name",
+      avatarUrl: "https://linux.do/follow.png",
+      source: "manual"
+    });
+
+    expect(
+      identityForActivityItem(state, {
+        id: "reply:1",
+        username: "neil",
+        actorUsername: "neil",
+        actorName: "Actor Name",
+        actorAvatarUrl: "https://linux.do/actor.png",
+        kind: "reply",
+        title: "reply"
+      })
+    ).toEqual({
+      username: "neil",
+      primary: "Follow Name",
+      secondary: "@neil",
+      avatarUrl: "https://linux.do/follow.png"
     });
   });
 

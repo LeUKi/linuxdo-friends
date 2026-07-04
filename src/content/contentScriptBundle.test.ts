@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -13,5 +13,11 @@ describe("content script build output", () => {
       const bundle = readFileSync(bundlePath, "utf8");
       expect(bundle).not.toMatch(/^import\b|^export\b|import\(|import\{/m);
     }
+  });
+
+  it("does not leave a separate content-script CSS asset after build", () => {
+    const assetsPath = resolve(__dirname, "../../dist/assets");
+    if (!existsSync(assetsPath)) return;
+    expect(readdirSync(assetsPath).filter((fileName) => /^linuxdo-friends-.*\.css(?:\.map)?$/.test(fileName))).toEqual([]);
   });
 });

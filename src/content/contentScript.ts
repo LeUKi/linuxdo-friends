@@ -2096,9 +2096,14 @@ function normalizeStepItems(username: Username, kind: ActivityRefreshRequestKind
 
 function normalizeUserAction(usernameInput: Username, action: RawUserAction): ActivityItem | undefined {
   const requestedUsername = normalizeUsername(usernameInput);
-  const actorUsername = normalizeOptionalUsername(action.acting_username ?? action.username) ?? requestedUsername;
   const kind = activityKindFromUserActionType(action.action_type);
   if (!kind) return undefined;
+  const actorUsername = actorUsernameForUserAction(kind, requestedUsername, action);
+  const actorName = actorNameForUserAction(kind, action);
+  const actorAvatarUrl = actorAvatarUrlForUserAction(kind, action);
+  const targetUsername = targetUsernameForUserAction(kind, action);
+  const targetName = targetNameForUserAction(kind, action);
+  const targetAvatarUrl = targetAvatarUrlForUserAction(kind, action);
   const topicId = readNumber(action.topic_id);
   const postId = readNumber(action.post_id);
   const postNumber = readNumber(action.post_number);
@@ -2116,10 +2121,11 @@ function normalizeUserAction(usernameInput: Username, action: RawUserAction): Ac
     excerpt: plainTextFromHtmlish(action.excerpt),
     source: "user_actions",
     actorUsername,
-    actorName: readStringValue(action.acting_name) ?? readStringValue(action.name),
-    actorAvatarUrl: avatarUrlFromTemplate(action.acting_avatar_template ?? action.avatar_template),
-    targetUsername: normalizeOptionalUsername(action.target_username),
-    targetName: readStringValue(action.target_name),
+    actorName,
+    actorAvatarUrl,
+    targetUsername,
+    targetName,
+    targetAvatarUrl,
     topicId,
     topicTitle: title,
     postId,
@@ -2132,6 +2138,34 @@ function normalizeUserAction(usernameInput: Username, action: RawUserAction): Ac
     closed: action.closed === true,
     archived: action.archived === true
   };
+}
+
+function actorUsernameForUserAction(kind: ActivityItem["kind"], requestedUsername: Username, action: RawUserAction): Username {
+  if (kind === "like") return normalizeOptionalUsername(action.acting_username) ?? requestedUsername;
+  return normalizeOptionalUsername(action.acting_username ?? action.username) ?? requestedUsername;
+}
+
+function actorNameForUserAction(kind: ActivityItem["kind"], action: RawUserAction): string | undefined {
+  if (kind === "like") return readStringValue(action.acting_name);
+  return readStringValue(action.acting_name) ?? readStringValue(action.name);
+}
+
+function actorAvatarUrlForUserAction(kind: ActivityItem["kind"], action: RawUserAction): string | undefined {
+  if (kind === "like") return avatarUrlFromTemplate(action.acting_avatar_template);
+  return avatarUrlFromTemplate(action.acting_avatar_template ?? action.avatar_template);
+}
+
+function targetUsernameForUserAction(kind: ActivityItem["kind"], action: RawUserAction): Username | undefined {
+  return normalizeOptionalUsername(action.target_username ?? (kind === "like" ? action.username : undefined));
+}
+
+function targetNameForUserAction(kind: ActivityItem["kind"], action: RawUserAction): string | undefined {
+  return readStringValue(action.target_name) ?? (kind === "like" ? readStringValue(action.name) : undefined);
+}
+
+function targetAvatarUrlForUserAction(kind: ActivityItem["kind"], action: RawUserAction): string | undefined {
+  if (kind !== "like") return undefined;
+  return avatarUrlFromTemplate(action.avatar_template);
 }
 
 function activityKindFromUserActionType(actionType: number | undefined): ActivityItem["kind"] | undefined {

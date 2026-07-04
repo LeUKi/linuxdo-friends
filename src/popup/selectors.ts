@@ -294,8 +294,8 @@ export function identityForUsername(
   const followed = state.followedUsers[username];
   return identityForRecord({
     username,
-    name: activityFallback?.name?.trim() || profile?.name || followed?.name,
-    avatarUrl: state.avatarCache[username]?.dataUrl || activityFallback?.avatarUrl || profile?.avatarUrl || followed?.avatarUrl
+    name: profile?.name || followed?.name || activityFallback?.name?.trim(),
+    avatarUrl: state.avatarCache[username]?.dataUrl || profile?.avatarUrl || followed?.avatarUrl || activityFallback?.avatarUrl
   });
 }
 

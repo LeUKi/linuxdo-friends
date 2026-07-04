@@ -106,6 +106,31 @@ describe("activity normalization", () => {
     expect(normalizeUserAction("shark55ovo", { action_type: 999, title: "unknown" })).toBeUndefined();
   });
 
+  it("keeps like ownership on the requested user when the payload username is the liked post author", () => {
+    const like = normalizeUserAction("Shark55OvO", {
+      action_type: 1,
+      created_at: "2026-07-04T02:33:28.511Z",
+      topic_id: 2088508,
+      post_id: 17370515,
+      username: "LaFish",
+      name: "帖子作者",
+      avatar_template: "/user_avatar/linux.do/lafish/{size}/1.png",
+      title: "佬们有没有买了一次后相见恨晚的东西"
+    });
+
+    expect(like).toMatchObject({
+      id: "user_action:shark55ovo:1:2088508:17370515",
+      kind: "like",
+      username: "shark55ovo",
+      actorUsername: "shark55ovo",
+      targetUsername: "lafish",
+      targetName: "帖子作者",
+      targetAvatarUrl: "https://linux.do/user_avatar/linux.do/lafish/48/1.png"
+    });
+    expect(like?.actorName).toBeUndefined();
+    expect(like?.actorAvatarUrl).toBeUndefined();
+  });
+
   it("normalizes boosts with actor and target post metadata", () => {
     const item = normalizeBoost({
       id: 391850,
