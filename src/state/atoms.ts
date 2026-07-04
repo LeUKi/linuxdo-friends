@@ -298,6 +298,11 @@ export const deleteLaoFindsItemAtom = atom(null, async (_get, set, id: string) =
   applyStateResponse(set, response, response.ok ? null : undefined);
 });
 
+export const clearLaoFindsItemsAtom = atom(null, async (_get, set) => {
+  const response = await sendCommand<AppState>({ type: "clearLaoFindsItems" });
+  applyStateResponse(set, response, response.ok ? null : undefined);
+});
+
 export const updateSettingsAtom = atom(null, async (_get, set, settings: Partial<RefreshSettings>) => {
   const response = await sendLoadingStateCommand(set, { type: "updateSettings", settings });
   applyStateResponse(set, response, response.ok ? null : undefined);

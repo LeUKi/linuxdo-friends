@@ -40,10 +40,20 @@ describe("header layout styles", () => {
     expect(updateLinkBlock).not.toContain("flex-wrap: wrap;");
   });
 
-  it("keeps Lao Finds actions ordered as button, count, then right-aligned settings", () => {
+  it("keeps Lao Finds actions ordered as dredge, clear-all, then right-aligned settings", () => {
     expect(cssBlock(".finds-action-row", findsCss)).toContain("justify-content: flex-start;");
-    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("flex: 0 1 154px;");
-    expect(cssBlock(".finds-count", findsCss)).toContain("flex: 0 0 auto;");
+    expect(cssBlock(".finds-action-row", findsCss)).toContain("flex-wrap: wrap;");
+    expect(cssBlock(".finds-action-row", findsCss)).toContain("overflow: visible;");
+    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("width: 132px;");
+    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("max-width: min(132px, 52%);");
+    expect(cssBlock(".finds-dredge-button", findsCss)).toContain("flex: 0 1 132px;");
+    expect(cssBlock(".finds-open-panel-button", findsCss)).toContain("display: inline-grid;");
+    expect(cssBlock(".finds-open-panel-button", findsCss)).toContain("min-height: 40px;");
+    expect(cssBlock(".finds-open-panel-button", findsCss)).toContain("padding-inline: 10px;");
+    expect(cssBlock(".finds-open-panel-meta", findsCss)).toContain("color: var(--text-muted);");
+    expect(cssBlock(".finds-clear-button", findsCss)).toContain("display: inline-grid;");
+    expect(cssBlock(".finds-clear-button", findsCss)).toContain("flex: 0 0 auto;");
+    expect(cssBlock(".finds-clear-meta", findsCss)).toContain("color: var(--text-muted);");
     expect(cssBlock(".finds-rules-button", findsCss)).toContain("margin-left: auto;");
   });
 

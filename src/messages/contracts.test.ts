@@ -13,6 +13,10 @@ describe("message contracts", () => {
     ).toBe(true);
   });
 
+  it("accepts clearing all Lao Finds items as a no-payload command", () => {
+    expect(isBackgroundCommand({ type: "clearLaoFindsItems" })).toBe(true);
+  });
+
   it("accepts telegram digest notification enablement in settings patches", () => {
     expect(
       isBackgroundCommand({

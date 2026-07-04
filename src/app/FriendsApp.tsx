@@ -42,6 +42,7 @@ import {
   completeRuleDerivedLaoFindsDredgeAtom,
   cacheAvatarsAtom,
   checkForUpdatesAtom,
+  clearLaoFindsItemsAtom,
   clearStatusMessageAtom,
   cloudArchiveLocalStateAtom,
   deleteLaoFindsItemAtom,
@@ -244,6 +245,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
   const syncFollows = useSetAtom(syncFollowsAtom);
   const clearStatus = useSetAtom(clearStatusMessageAtom);
   const deleteLaoFindsItem = useSetAtom(deleteLaoFindsItemAtom);
+  const clearLaoFindsItems = useSetAtom(clearLaoFindsItemsAtom);
   const unregisterAutoRefreshSurface = useSetAtom(unregisterAutoRefreshSurfaceAtom);
   const unregisterTimedActivityRefreshSurface = useSetAtom(unregisterTimedActivityRefreshSurfaceAtom);
   const patchTimedActivityRefreshSession = useSetAtom(patchTimedActivityRefreshSessionAtom);
@@ -640,14 +642,23 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
           feedTopRef={feedTopRef}
           items={laoFindsItems}
           now={relativeNow}
+          onClearAll={() => void clearLaoFindsItems()}
           onDelete={(id) => void deleteLaoFindsItem(id)}
-          onManualRefresh={() => void timedActivityRefresh.runNow()}
+          onManualRefresh={() => {
+            if (surface === "side-panel") {
+              void timedActivityRefresh.runNow();
+            } else {
+              void openSidePanel();
+            }
+          }}
           onOpenActivityLink={handleActivityLinkClick}
           onOpenRules={() => void openOptionsPage("#lao-finds")}
           dredgeProgress={dredgeProgressDisplay}
           dredgeRefreshAvailable={dredgeRefreshAvailability.available}
           dredgeRefreshUnavailableMessage={dredgeRefreshAvailability.message}
           refreshDisabled={refreshDisabled}
+          session={timedActivityRefreshSession}
+          surface={surface}
         />
       )}
 
@@ -898,6 +909,7 @@ function LaoFindsTab({
   feedTopRef,
   items,
   now,
+  onClearAll,
   onDelete,
   onManualRefresh,
   onOpenActivityLink,
@@ -905,11 +917,14 @@ function LaoFindsTab({
   dredgeProgress,
   dredgeRefreshAvailable,
   dredgeRefreshUnavailableMessage,
-  refreshDisabled
+  refreshDisabled,
+  session,
+  surface
 }: {
   feedTopRef: React.RefObject<HTMLElement | null>;
   items: ReturnType<typeof deriveLaoFindsItems>;
   now: number;
+  onClearAll: () => void;
   onDelete: (id: string) => void;
   onManualRefresh: () => void;
   onOpenActivityLink: (event: React.MouseEvent<HTMLAnchorElement>, href: string) => void;
@@ -918,20 +933,48 @@ function LaoFindsTab({
   dredgeRefreshAvailable: boolean;
   dredgeRefreshUnavailableMessage?: string;
   refreshDisabled: boolean;
+  session: TimedActivityRefreshSession;
+  surface: AppSurface;
 }) {
-  const manualRefreshDisabled = refreshDisabled || !dredgeRefreshAvailable;
-  const manualRefreshTitle = dredgeRefreshAvailable ? "立即按打捞规则刷新并收录佬料" : dredgeRefreshUnavailableMessage;
+  const isSidePanel = surface === "side-panel";
+  const manualRefreshDisabled = isSidePanel ? refreshDisabled || !dredgeRefreshAvailable : false;
+  const manualRefreshLabel = isSidePanel ? "立即打捞" : "打开侧栏";
+  const manualRefreshMeta = isSidePanel
+    ? session.lastFinishedAt
+      ? `上次 ${formatRelativeTime(session.lastFinishedAt, now)}`
+      : "尚未打捞"
+    : undefined;
+  const manualRefreshTitle = isSidePanel
+    ? dredgeRefreshAvailable
+      ? "立即按打捞规则刷新并收录佬料"
+      : dredgeRefreshUnavailableMessage
+    : "打开插件侧栏后打捞";
+  const handleClearAll = () => {
+    if (items.length === 0) return;
+    if (!window.confirm(`确定清空全部 ${items.length} 条佬料吗？`)) return;
+    onClearAll();
+  };
   return (
     <section ref={feedTopRef}>
       <div className="finds-layout">
         <section className="finds-section">
           <div className="tab-action-row finds-action-row">
-            <button className="refresh-button refresh-button-with-meta finds-dredge-button" type="button" onClick={onManualRefresh} disabled={manualRefreshDisabled} title={manualRefreshTitle}>
-              <DredgeRefreshButtonContent progress={dredgeProgress} />
+            {isSidePanel ? (
+              <button className="refresh-button refresh-button-with-meta finds-dredge-button" type="button" onClick={onManualRefresh} disabled={manualRefreshDisabled} title={manualRefreshTitle}>
+                <DredgeRefreshButtonContent idleLabel={manualRefreshLabel} idleMeta={manualRefreshMeta} progress={dredgeProgress} />
+              </button>
+            ) : (
+              <button className="small-action finds-open-panel-button" type="button" onClick={onManualRefresh} title={manualRefreshTitle}>
+                <span className="finds-open-panel-main">{manualRefreshLabel}</span>
+                <span className="finds-open-panel-meta">更多操作</span>
+              </button>
+            )}
+            <button className="small-action finds-clear-button" type="button" onClick={handleClearAll} disabled={items.length === 0}>
+              <span className="finds-clear-main">清空全部</span>
+              <span className="finds-clear-meta">共 {items.length} 条</span>
             </button>
-            <span className="finds-count">共 {items.length} 条</span>
             <button className="small-action finds-rules-button" type="button" onClick={onOpenRules}>
-              配置打捞规则
+              规则配置
             </button>
           </div>
           {!dredgeRefreshAvailable && dredgeRefreshUnavailableMessage ? <p className="finds-action-hint">{dredgeRefreshUnavailableMessage}</p> : null}
@@ -975,17 +1018,32 @@ function LaoFindsTab({
   );
 }
 
-function DredgeRefreshButtonContent({ progress }: { progress: DredgeProgressDisplay }) {
+function DredgeRefreshButtonContent({
+  idleLabel = "立即打捞",
+  idleMeta,
+  progress
+}: {
+  idleLabel?: string;
+  idleMeta?: string;
+  progress: DredgeProgressDisplay;
+}) {
+  const metaText = progress.running ? undefined : idleMeta;
+  const labelText = progress.running ? (progress.localDetail ?? "打捞中") : idleLabel;
   return (
-    <span className={`refresh-button-inner${progress.running ? " is-running" : ""}`}>
+    <span className={`refresh-button-inner${progress.running ? " is-running" : ""}${metaText ? " has-meta" : ""}`}>
       <span className="refresh-icon-pane" aria-hidden="true">
         {progress.icon === "spinner" ? <LoaderCircle className="spin-icon" size={15} aria-hidden="true" /> : <Telescope size={15} aria-hidden="true" />}
       </span>
       <span className="refresh-button-body">
         <span className="refresh-button-main">
-          <span className="refresh-button-label" title={progress.localDetail}>
-            {progress.running ? progress.localDetail : "立即打捞"}
+          <span className="refresh-button-label" title={labelText}>
+            {labelText}
           </span>
+          {metaText ? (
+            <span className="refresh-button-meta" title={metaText}>
+              {metaText}
+            </span>
+          ) : null}
         </span>
       </span>
       {progress.running ? (
@@ -1117,7 +1175,7 @@ function TimedActivityRefreshControl({
                 onOpenSettings();
               }}
             >
-              <span>配置打捞规则</span>
+              <span>规则配置</span>
             </button>
           </div>
         </div>

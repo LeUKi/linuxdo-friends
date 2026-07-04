@@ -58,6 +58,7 @@ describe("message contracts", () => {
     expect(isBackgroundCommand({ type: "markLaoFindsItemRead", id: "item-1", read: true })).toBe(true);
     expect(isBackgroundCommand({ type: "archiveLaoFindsItem", id: "item-1", archived: true })).toBe(true);
     expect(isBackgroundCommand({ type: "deleteLaoFindsItem", id: "item-1" })).toBe(true);
+    expect(isBackgroundCommand({ type: "clearLaoFindsItems" })).toBe(true);
     expect(isBackgroundCommand({ type: "cacheAvatars", usernames: ["neil"] })).toBe(true);
     expect(isBackgroundCommand({ type: "getSiteDataProgress" })).toBe(true);
     expect(isBackgroundCommand({ type: "getPageScriptStatus" })).toBe(true);
@@ -147,6 +148,40 @@ describe("message contracts", () => {
           openActivityLinksInPage: true,
           refreshIntervalMinutes: 60
         }
+      }
+    });
+  });
+
+  it("clears all Lao Finds items through the service-worker command", async () => {
+    const state: AppState = {
+      ...defaultAppState,
+      laoFindsStartedAt: "2026-06-27T00:00:00.000Z",
+      laoFindsItems: {
+        "topic:neo:1": {
+          id: "topic:neo:1",
+          activityId: "topic:neo:1",
+          collectedAt: "2026-06-28T00:05:00.000Z",
+          matchedRuleIds: ["rule-ai"],
+          activity: {
+            id: "topic:neo:1",
+            username: "neo",
+            kind: "topic",
+            title: "AI 新话题",
+            url: "/t/topic/1",
+            occurredAt: "2026-06-28T00:04:00.000Z"
+          }
+        }
+      }
+    };
+    const { send } = await setupWorker({ initialState: state });
+
+    const response = await send({ type: "clearLaoFindsItems" });
+
+    expect(response).toMatchObject({
+      ok: true,
+      data: {
+        laoFindsItems: {},
+        laoFindsStartedAt: "2026-06-27T00:00:00.000Z"
       }
     });
   });

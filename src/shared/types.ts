@@ -452,6 +452,7 @@ export type BackgroundCommand =
   | { type: "markLaoFindsItemRead"; id: string; read: boolean }
   | { type: "archiveLaoFindsItem"; id: string; archived: boolean }
   | { type: "deleteLaoFindsItem"; id: string }
+  | { type: "clearLaoFindsItems" }
   | { type: "cacheAvatars"; usernames?: Username[] }
   | { type: "getSiteDataProgress" }
   | { type: "getPageScriptStatus" }

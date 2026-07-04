@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addFriendFromProfile, removeFriend, updateFriend } from "../domain/friends";
-import { deleteLaoFindsItem, resetLaoFindsStartedAt } from "../domain/laoFinds";
+import { clearLaoFindsItems, deleteLaoFindsItem, resetLaoFindsStartedAt } from "../domain/laoFinds";
 import { defaultAppState } from "../domain/defaultState";
 import { recordRequestAttempts } from "../domain/requestStats";
 import { createMockStorage } from "../test/mockStorage";
@@ -947,17 +947,37 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.textContent).toContain("暂时没有佬料");
     expect(container.textContent).toContain("手动刷新佬友圈或开启自动捞料");
     expect(container.textContent).toContain("立即打捞");
-    expect(container.textContent).toContain("配置打捞规则");
+    expect(container.textContent).toContain("规则配置");
     expect(container.querySelector(".finds-section h2")).toBeFalsy();
     const findsActionRow = container.querySelector(".finds-action-row");
     expect(findsActionRow?.textContent).not.toContain("佬有料");
-    expect(container.querySelector(".finds-count")?.textContent).toBe("共 0 条");
+    expect(container.querySelector(".finds-clear-button")?.textContent).toContain("共 0 条");
+    expect(getButton(container, "清空全部").disabled).toBe(true);
     const actionChildren = Array.from(findsActionRow?.children ?? []);
     expect(actionChildren[0]?.classList.contains("finds-dredge-button")).toBe(true);
-    expect(actionChildren[1]?.classList.contains("finds-count")).toBe(true);
+    expect(actionChildren[1]?.classList.contains("finds-clear-button")).toBe(true);
     expect(actionChildren[2]?.classList.contains("finds-rules-button")).toBe(true);
     expect(getButton(container, "立即打捞").querySelector(".lucide-telescope")).toBeTruthy();
+    expect(container.querySelector(".finds-dredge-button .refresh-button-meta")?.textContent).toBe("尚未打捞");
     expect(container.querySelector(".dredge-rule-panel")).toBeFalsy();
+  });
+
+  it("shows the last dredge relative time in the side-panel Lao Finds action button", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T00:34:00.000Z"));
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds",
+      [TIMED_ACTIVITY_SESSION_STORAGE_KEY]: {
+        lastFinishedAt: "2026-06-28T00:20:00.000Z",
+        updatedAt: "2026-06-28T00:20:00.000Z"
+      }
+    });
+    setupChrome({ session, state: timedActivityState({ timedActivityRefreshEnabled: false }) });
+    const { container } = await renderFriendsApp("side-panel");
+
+    expect(container.querySelector(".finds-dredge-button .refresh-button-meta")?.textContent).toBe("上次 14 分钟前");
+    vi.useRealTimers();
   });
 
   it("shows Lao Finds manual dredge progress in the large action button", async () => {
@@ -1072,6 +1092,65 @@ describe("FriendsApp UI scene persistence", () => {
     });
   });
 
+  it("clears all collected lao finds items from the two-line clear button", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    const state: AppState = {
+      ...activityFeedState(),
+      dredgeRules: [currentRule({ id: "rule-ai", name: "AI", usernames: "all", kinds: ["topic"], patterns: ["AI"] })],
+      laoFindsItems: {
+        "topic:neo:1": {
+          id: "topic:neo:1",
+          activityId: "topic:neo:1",
+          activity: {
+            id: "topic:neo:1",
+            username: "neo",
+            kind: "topic",
+            title: "AI 新话题",
+            url: "/t/topic/1",
+            occurredAt: "2026-06-28T00:04:00.000Z"
+          },
+          collectedAt: "2026-06-28T00:05:00.000Z",
+          matchedRuleIds: ["rule-ai"]
+        },
+        "topic:neo:2": {
+          id: "topic:neo:2",
+          activityId: "topic:neo:2",
+          activity: {
+            id: "topic:neo:2",
+            username: "neo",
+            kind: "topic",
+            title: "AI 第二条",
+            url: "/t/topic/2",
+            occurredAt: "2026-06-28T00:06:00.000Z"
+          },
+          collectedAt: "2026-06-28T00:07:00.000Z",
+          matchedRuleIds: ["rule-ai"]
+        }
+      }
+    };
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    const chromeMock = setupChrome({ session, state });
+    const { container } = await renderFriendsApp("side-panel");
+
+    const clearButton = getButton(container, "清空全部");
+    expect(clearButton.disabled).toBe(false);
+    expect(clearButton.querySelector(".finds-clear-meta")?.textContent).toBe("共 2 条");
+
+    await act(async () => {
+      clearButton.click();
+      await Promise.resolve();
+    });
+
+    expect(confirm).toHaveBeenCalledWith("确定清空全部 2 条佬料吗？");
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "clearLaoFindsItems" });
+    expect(container.textContent).not.toContain("AI 新话题");
+    expect(container.textContent).not.toContain("AI 第二条");
+    expect(container.querySelector(".finds-clear-button")?.textContent).toContain("共 0 条");
+  });
+
   it("renders collected lao finds items with separated times and sends delete command", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-28T00:34:00.000Z"));
@@ -1179,6 +1258,29 @@ describe("FriendsApp UI scene persistence", () => {
     });
 
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage" });
+  });
+
+  it("opens the side panel instead of starting dredging from the in-page Lao Finds button", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.tab]: "finds"
+    });
+    const chromeMock = setupChrome({ session, state: timedActivityState({ timedActivityRefreshEnabled: false }) });
+    const { container } = await renderFriendsApp("in-page");
+
+    expect(container.textContent).toContain("打开侧栏");
+    expect(container.querySelector(".finds-open-panel-meta")?.textContent).toBe("更多操作");
+    expect(container.textContent).not.toContain("请打开插件侧栏后再打捞。");
+    expect(getButton(container, "打开侧栏").classList.contains("finds-open-panel-button")).toBe(true);
+    expect(container.querySelector(".finds-dredge-button")).toBeFalsy();
+
+    await act(async () => {
+      getButton(container, "打开侧栏").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openSidePanel" });
+    expect(activityRefreshMessages(chromeMock)).toEqual([]);
   });
 
   it("renders version metadata under the main plugin brand instead of the right status area", async () => {
@@ -1861,11 +1963,11 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.textContent).toContain("启用自动捞料");
     expect(container.textContent).toContain("需保持插件界面前台显示");
     expect(container.textContent).toContain("立即打捞");
-    expect(container.textContent).toContain("配置打捞规则");
+    expect(container.textContent).toContain("规则配置");
     expect(container.querySelector(".timed-refresh-control .lucide-telescope")).toBeTruthy();
     expect(container.querySelector(".timed-refresh-main .lucide-telescope")).toBeTruthy();
     expect(container.querySelector(".timed-refresh-menu .refresh-menu-option-with-note .refresh-menu-label-note")?.textContent).toBe("需保持插件界面前台显示");
-    const settingsOption = Array.from(container.querySelectorAll<HTMLButtonElement>(".timed-refresh-menu .refresh-menu-option")).find((button) => button.textContent?.includes("配置打捞规则"));
+    const settingsOption = Array.from(container.querySelectorAll<HTMLButtonElement>(".timed-refresh-menu .refresh-menu-option")).find((button) => button.textContent?.includes("规则配置"));
     expect(settingsOption?.classList.contains("refresh-menu-option-no-icon")).toBe(true);
     expect(settingsOption?.querySelector("svg")).toBeFalsy();
     expect(container.querySelector(".timed-refresh-menu .refresh-menu-check")).toBeTruthy();
@@ -1956,7 +2058,7 @@ describe("FriendsApp UI scene persistence", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      getButton(container, "配置打捞规则").click();
+      getButton(container, "规则配置").click();
       await Promise.resolve();
     });
 
@@ -3192,6 +3294,10 @@ function setupChrome({
     if (message.type === "archiveLaoFindsItem") return { ok: true, data: state };
     if (message.type === "deleteLaoFindsItem") {
       currentState = deleteLaoFindsItem(currentState, message.id);
+      return { ok: true, data: currentState };
+    }
+    if (message.type === "clearLaoFindsItems") {
+      currentState = clearLaoFindsItems(currentState);
       return { ok: true, data: currentState };
     }
     if (message.type === "completeRuleDerivedLaoFindsDredge") {

@@ -28,6 +28,7 @@ import { applyConfigImport, createConfigExport, createConfigFingerprint, parseCo
 import { addFriendFromKnownUser, addFriendFromProfile, removeFriend, updateFriend, upsertFollowedUser, upsertFriendProfile } from "../domain/friends";
 import {
   archiveLaoFindsItem,
+  clearLaoFindsItems,
   collectLaoFindsItems,
   deleteLaoFindsItem,
   markLaoFindsItemRead,
@@ -286,6 +287,8 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
       return ok(await updateAppState((state) => archiveLaoFindsItem(state, command.id, command.archived)));
     case "deleteLaoFindsItem":
       return ok(await updateAppState((state) => deleteLaoFindsItem(state, command.id)));
+    case "clearLaoFindsItems":
+      return ok(await updateAppState(clearLaoFindsItems));
     case "cacheAvatars":
       return ok(await cacheAvatarsFromExistingTab(command.usernames));
     case "getSiteDataProgress":

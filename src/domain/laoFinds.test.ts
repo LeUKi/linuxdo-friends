@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defaultAppState } from "./defaultState";
 import {
   archiveLaoFindsItem,
+  clearLaoFindsItems,
   collectLaoFindsItems,
   deleteLaoFindsItem,
   markLaoFindsItemRead,
@@ -128,6 +129,18 @@ describe("lao finds collection", () => {
     expect(deleted.laoFindsItems.a1).toBeUndefined();
     expect(unchanged).toBe(deleted);
     expect(deleted.laoFindsStartedAt).toBe(collected.laoFindsStartedAt);
+  });
+
+  it("clears all lao finds items without changing the dredge start point", () => {
+    const state = withRules([rule({ id: "rule-ai", patterns: ["AI"] })], "2026-06-29T00:00:00.000Z");
+    const collected = collectLaoFindsItems(state, [activity({ id: "a1", title: "AI" }), activity({ id: "a2", title: "AI 2" })]).state;
+
+    const cleared = clearLaoFindsItems(collected);
+    const unchanged = clearLaoFindsItems(cleared);
+
+    expect(cleared.laoFindsItems).toEqual({});
+    expect(cleared.laoFindsStartedAt).toBe(collected.laoFindsStartedAt);
+    expect(unchanged).toBe(cleared);
   });
 
   it("merges allow rule matches and removes deleted rule ids from existing items", () => {

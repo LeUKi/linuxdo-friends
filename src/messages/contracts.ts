@@ -69,6 +69,8 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
       return isNonEmptyString(command.id) && typeof command.archived === "boolean";
     case "deleteLaoFindsItem":
       return isNonEmptyString(command.id);
+    case "clearLaoFindsItems":
+      return true;
     case "updateSettings":
       return isSettingsPatch(command.settings);
     default:

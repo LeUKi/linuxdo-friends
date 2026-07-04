@@ -124,6 +124,11 @@ export function deleteLaoFindsItem(state: AppState, id: string): AppState {
   return { ...state, laoFindsItems };
 }
 
+export function clearLaoFindsItems(state: AppState): AppState {
+  if (Object.keys(state.laoFindsItems).length === 0) return state;
+  return { ...state, laoFindsItems: {} };
+}
+
 export function collectLaoFindsItems(
   state: AppState,
   candidates: ActivityItem[],
