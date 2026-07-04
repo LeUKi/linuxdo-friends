@@ -386,8 +386,8 @@ describe("popup selectors", () => {
       { activityKinds: [] }
     );
 
-    expect(deriveActivityRequestCounts(state)).toEqual({ all: 2, topic: 0, reply: 1, boost: 1, reaction: 0 });
-    expect(deriveActivityRequestCounts(state, "ada")).toEqual({ all: 0, topic: 0, reply: 0, boost: 0, reaction: 0 });
+    expect(deriveActivityRequestCounts(state)).toEqual({ all: 2, topic: 0, reply: 1, boost: 1, reaction: 0, like: 0 });
+    expect(deriveActivityRequestCounts(state, "ada")).toEqual({ all: 0, topic: 0, reply: 0, boost: 0, reaction: 0, like: 0 });
   });
 
   it("does not show cached activity for users who are no longer friends", () => {

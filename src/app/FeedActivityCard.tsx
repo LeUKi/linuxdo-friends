@@ -82,6 +82,20 @@ export function ActivityCardBody({
       </div>
     );
   }
+  if (item.kind === "like") {
+    return (
+      <div className="feed-main">
+        {kindCard}
+        <div className="feed-primary-block">
+          <p className="feed-primary">点赞了帖子</p>
+          <a className="feed-context-link" href={href} target="_blank" rel="noreferrer" onClick={(event) => onOpenActivityLink(event, href)}>
+            <ExternalText text={title} />
+          </a>
+          {item.excerpt ? <p className="feed-excerpt">{item.excerpt}</p> : null}
+        </div>
+      </div>
+    );
+  }
   if (item.kind === "reply") {
     return (
       <div className="feed-main">

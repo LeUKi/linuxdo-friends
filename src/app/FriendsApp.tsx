@@ -153,7 +153,8 @@ const activityKindOptions: Array<FilterOption<ActivityKindFilter>> = [
   { value: "topic", label: "话题", icon: kindIcon("topic"), tone: "topic" },
   { value: "reply", label: "回复", icon: kindIcon("reply"), tone: "reply" },
   { value: "boost", label: "Boost", icon: kindIcon("boost"), tone: "boost" },
-  { value: "reaction", label: "回应", icon: kindIcon("reaction"), tone: "reaction" }
+  { value: "reaction", label: "回应", icon: kindIcon("reaction"), tone: "reaction" },
+  { value: "like", label: "点赞", icon: kindIcon("like"), tone: "like" }
 ];
 
 function scrollTargetBelowSticky(target: HTMLElement) {

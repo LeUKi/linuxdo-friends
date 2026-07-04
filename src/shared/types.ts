@@ -39,7 +39,7 @@ export interface AvatarCacheEntry {
   updatedAt: string;
 }
 
-export type ActivityKind = "topic" | "reply" | "boost" | "reaction" | "summary";
+export type ActivityKind = "topic" | "reply" | "boost" | "reaction" | "like" | "summary";
 export type ActivityRefreshKind = Exclude<ActivityKind, "summary">;
 export type ActivityKindFilter = "all" | ActivityRefreshKind;
 export type ActivityRefreshRequestKind = ActivityRefreshKind | "user_actions";

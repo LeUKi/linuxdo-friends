@@ -57,6 +57,9 @@
   --reaction-bg: #ffe4ec;
   --reaction-border: #e28aa4;
   --reaction-text: #9f1239;
+  --like-bg: #ffe1e6;
+  --like-border: #ef6f86;
+  --like-text: #be123c;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -115,6 +118,9 @@
     --reaction-bg: #401522;
     --reaction-border: #b23a5a;
     --reaction-text: #fecddc;
+    --like-bg: #4a111a;
+    --like-border: #f43f5e;
+    --like-text: #fecdd3;
   }
 }
 
@@ -172,6 +178,9 @@
   --reaction-bg: #ffe4ec;
   --reaction-border: #e28aa4;
   --reaction-text: #9f1239;
+  --like-bg: #ffe1e6;
+  --like-border: #ef6f86;
+  --like-text: #be123c;
 }
 
 .linuxdo-friends-menu-root[data-linuxdo-friends-theme="dark"] {
@@ -228,4 +237,7 @@
   --reaction-bg: #401522;
   --reaction-border: #b23a5a;
   --reaction-text: #fecddc;
+  --like-bg: #4a111a;
+  --like-border: #f43f5e;
+  --like-text: #fecdd3;
 }

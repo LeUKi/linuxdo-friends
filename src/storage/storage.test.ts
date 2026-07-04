@@ -146,7 +146,7 @@ describe("storage migration", () => {
       friends: {
         neo: {
           username: "neo",
-          activityKinds: ["topic", "reply", "boost", "reaction"]
+          activityKinds: ["topic", "reply", "boost", "reaction", "like"]
         }
       }
     });

@@ -227,7 +227,7 @@ describe("refresh adapter", () => {
     expect(result.state.activity.ada).toBeUndefined();
   });
 
-  it("refreshes selected friends through all four activity endpoints and normalizes selected usernames", async () => {
+  it("refreshes selected friends through all five activity endpoints and normalizes selected usernames", async () => {
     const state: AppState = {
       ...addFriendFromProfile(defaultAppState, { username: "neil", refreshedAt: "2026-06-28T00:00:00.000Z" }),
       laoFindsStartedAt: "2026-06-26T00:00:00.000Z",
@@ -275,13 +275,20 @@ describe("refresh adapter", () => {
             reaction: { reaction_value: "hugs" }
           }
         ])
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          user_actions: [
+            { action_type: 1, topic_id: 1, post_id: 5, created_at: "2026-06-26T23:59:59.000Z", acting_username: "Neil", title: "like" }
+          ]
+        })
       ) as unknown as typeof fetch;
     const adapter = createRefreshAdapter(fetchImpl);
 
     const result = await adapter.refreshFriendActivity(state, { kind: "all", usernames: ["ghost", "NEIL"] });
 
     expect(result.result).toMatchObject({ ok: true, source: "direct_fetch" });
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
       "https://linux.do/user_actions.json?offset=0&username=neil&filter=4",
@@ -302,12 +309,17 @@ describe("refresh adapter", () => {
       "https://linux.do/discourse-reactions/posts/reactions.json?username=neil",
       expect.any(Object)
     );
-    expect(result.state.activity.neil.items.map((item) => item.kind)).toEqual(["topic", "reply", "boost", "reaction"]);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      5,
+      "https://linux.do/user_actions.json?offset=0&username=neil&filter=1",
+      expect.any(Object)
+    );
+    expect(result.state.activity.neil.items.map((item) => item.kind)).toEqual(["topic", "reply", "boost", "reaction", "like"]);
     expect(Object.keys(result.state.laoFindsItems)).toEqual(["user_action:neil:4:1:1"]);
     expect(result.state.laoFindsItems["user_action:neil:4:1:1"].matchedRuleIds).toEqual(["rule-topic"]);
-    expect(Object.keys(result.state.activityRefreshLedger).sort()).toEqual(["neil:boost", "neil:reaction", "neil:reply", "neil:topic"]);
+    expect(Object.keys(result.state.activityRefreshLedger).sort()).toEqual(["neil:boost", "neil:like", "neil:reaction", "neil:reply", "neil:topic"]);
     expect(vi.mocked(fetchImpl).mock.calls.some(([url]: [RequestInfo | URL, RequestInit?]) => String(url).includes("/u/neil.json"))).toBe(false);
-    expect(Object.keys(result.state.activityWatermarks).sort()).toEqual(["neil:boost", "neil:reaction", "neil:reply", "neil:topic"]);
+    expect(Object.keys(result.state.activityWatermarks).sort()).toEqual(["neil:boost", "neil:like", "neil:reaction", "neil:reply", "neil:topic"]);
     expect(result.state.activity.neil.items.some((item) => item.isNew)).toBe(false);
   });
 
@@ -420,13 +432,14 @@ describe("refresh adapter", () => {
   it.each([
     ["topic", "https://linux.do/user_actions.json?offset=0&username=neil&filter=4"],
     ["reply", "https://linux.do/user_actions.json?offset=0&username=neil&filter=5"],
-    ["reaction", "https://linux.do/discourse-reactions/posts/reactions.json?username=neil"]
+    ["reaction", "https://linux.do/discourse-reactions/posts/reactions.json?username=neil"],
+    ["like", "https://linux.do/user_actions.json?offset=0&username=neil&filter=1"]
   ] as const)("requests only the %s endpoint for scoped activity refresh", async (kind, expectedUrl) => {
     const state = addFriendFromProfile(defaultAppState, { username: "Neil", refreshedAt: "2026-06-28T00:00:00.000Z" });
     const payload =
       kind === "reaction"
         ? [{ id: 1, user: { username: "Neil" }, post: { topic_title: "reaction" }, reaction: { reaction_value: "hugs" } }]
-        : { user_actions: [{ action_type: kind === "topic" ? 4 : 5, topic_id: 1, title: kind, acting_username: "Neil" }] };
+        : { user_actions: [{ action_type: kind === "topic" ? 4 : kind === "like" ? 1 : 5, topic_id: 1, title: kind, acting_username: "Neil" }] };
     const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(payload)) as unknown as typeof fetch;
     const adapter = createRefreshAdapter(fetchImpl);
 
@@ -446,15 +459,16 @@ describe("refresh adapter", () => {
       .mockResolvedValueOnce(jsonResponse({ user_actions: [] }))
       .mockResolvedValueOnce(jsonResponse({ user_actions: [] }))
       .mockResolvedValueOnce(jsonResponse({ boosts: [] }))
-      .mockResolvedValueOnce(jsonResponse([])) as unknown as typeof fetch;
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse({ user_actions: [] })) as unknown as typeof fetch;
     const adapter = createRefreshAdapter(fetchImpl);
     const progress = vi.fn();
 
     const result = await adapter.refreshFriendActivity(state, { kind: "all", usernames: ["Neil"] }, progress);
 
     expect(result.result).toMatchObject({ ok: true });
-    expect(progress).toHaveBeenCalledTimes(4);
-    expect(progress.mock.calls.map(([step]) => step.kind)).toEqual(["topic", "reply", "boost", "reaction"]);
+    expect(progress).toHaveBeenCalledTimes(5);
+    expect(progress.mock.calls.map(([step]) => step.kind)).toEqual(["topic", "reply", "boost", "reaction", "like"]);
   });
 
   it("does not write a partial summary when a later endpoint fails", async () => {
@@ -542,7 +556,7 @@ function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
     enabled: true,
     mode: "allow",
     usernames: "all",
-    kinds: ["topic", "reply", "boost", "reaction"],
+    kinds: ["topic", "reply", "boost", "reaction", "like"],
     patterns: [],
     createdAt: "2026-06-28T00:00:00.000Z",
     updatedAt: "2026-06-28T00:00:00.000Z",

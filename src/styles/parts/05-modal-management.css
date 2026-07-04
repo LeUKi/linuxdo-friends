@@ -110,8 +110,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 34px;
+  width: 78px;
+  height: 38px;
   min-width: 0;
   gap: 3px;
   padding: 3px 4px;
@@ -130,6 +130,31 @@
   align-items: center;
   justify-content: center;
   gap: 2px;
+}
+
+.scope-trigger-card.is-count-5 {
+  width: 52px;
+  grid-template-columns: repeat(6, 7px);
+}
+
+.scope-trigger-card.is-count-5 .scope-trigger-icon:nth-child(1) {
+  grid-column: 2 / span 2;
+}
+
+.scope-trigger-card.is-count-5 .scope-trigger-icon:nth-child(2) {
+  grid-column: 4 / span 2;
+}
+
+.scope-trigger-card.is-count-5 .scope-trigger-icon:nth-child(3) {
+  grid-column: 1 / span 2;
+}
+
+.scope-trigger-card.is-count-5 .scope-trigger-icon:nth-child(4) {
+  grid-column: 3 / span 2;
+}
+
+.scope-trigger-card.is-count-5 .scope-trigger-icon:nth-child(5) {
+  grid-column: 5 / span 2;
 }
 
 .scope-trigger-card.is-empty {
@@ -176,6 +201,12 @@
   border-color: var(--reaction-border);
   background: var(--reaction-bg);
   color: var(--reaction-text);
+}
+
+.scope-trigger-icon.kind-like {
+  border-color: var(--like-border);
+  background: var(--like-bg);
+  color: var(--like-text);
 }
 
 .scope-trigger-empty {

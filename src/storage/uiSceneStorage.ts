@@ -195,7 +195,7 @@ function normalizeTab(value: unknown): UiSceneTab {
 }
 
 function normalizeActivityKindFilter(value: unknown): ActivityKindFilter {
-  return value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "all"
+  return value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "like" || value === "all"
     ? value
     : defaultUiSceneState.feedKindFilter;
 }

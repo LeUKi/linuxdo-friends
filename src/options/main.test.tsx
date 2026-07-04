@@ -1051,6 +1051,8 @@ describe("OptionsApp update diagnostics", () => {
     await act(async () => {
       getButton(container, "全选").click();
     });
+    expect(container.querySelector(".scope-trigger-card")?.classList.contains("is-count-5")).toBe(true);
+    expect(container.querySelectorAll(".scope-trigger-card .scope-trigger-icon")).toHaveLength(5);
     await act(async () => {
       getButton(container, "移除").click();
     });
@@ -1063,7 +1065,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({
       type: "updateFriend",
       username: "neo",
-      patch: { activityKinds: ["topic", "reply", "boost", "reaction"] }
+      patch: { activityKinds: ["topic", "reply", "boost", "reaction", "like"] }
     });
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "removeFriend", username: "neo" });
   });
@@ -1625,7 +1627,7 @@ function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
     enabled: true,
     mode: "allow",
     usernames: "all",
-    kinds: ["topic", "reply", "boost", "reaction"],
+    kinds: ["topic", "reply", "boost", "reaction", "like"],
     patterns: [],
     createdAt: "2026-06-28T00:00:00.000Z",
     updatedAt: "2026-06-28T00:00:00.000Z",
@@ -1855,7 +1857,7 @@ function setupChrome({
                 note: "",
                 groups: [],
                 pinned: false,
-                activityKinds: ["topic", "reply", "boost", "reaction"],
+                activityKinds: ["topic", "reply", "boost", "reaction", "like"],
                 upgradedAt: "2026-06-29T00:00:00.000Z",
                 updatedAt: "2026-06-29T00:00:00.000Z"
               }

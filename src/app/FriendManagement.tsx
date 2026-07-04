@@ -68,7 +68,7 @@ export function ActivityScopeSelect({
         aria-label={triggerLabel}
         title={triggerLabel}
       >
-        <span className={`scope-trigger-card${selectedKinds.length === 0 ? " is-empty" : ""}`} aria-hidden="true">
+        <span className={`scope-trigger-card is-count-${selectedKinds.length}${selectedKinds.length === 0 ? " is-empty" : ""}`} aria-hidden="true">
           {selectedKinds.length === 0 ? (
             <span className="scope-trigger-empty">无</span>
           ) : (

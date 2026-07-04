@@ -110,8 +110,10 @@ describe("friend profile-backed domain operations", () => {
     const state = addFriendFromKnownUser(defaultAppState, { username: "Neil" });
     const repliesOnly = updateFriend(state, "neil", { activityKinds: ["reply"] });
     const noDynamicActivity = updateFriend(repliesOnly, "neil", { activityKinds: [] });
+    const allExceptLike = updateFriend(state, "neil", { activityKinds: ["topic", "reply", "boost", "reaction"] });
 
     expect(repliesOnly.friends.neil.activityKinds).toEqual(["reply"]);
     expect(noDynamicActivity.friends.neil.activityKinds).toEqual([]);
+    expect(allExceptLike.friends.neil.activityKinds).toEqual(["topic", "reply", "boost", "reaction"]);
   });
 });

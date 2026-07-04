@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { defaultAppState } from "./defaultState";
-import { DREDGE_REFRESH_UNAVAILABLE_MESSAGE, deriveDredgeRefreshAvailability, deriveTimedActivityRefreshScopes, normalizeActivityRefreshScope } from "./activityRefresh";
+import {
+  activityKindsForScope,
+  activityRequestStepsForUser,
+  DREDGE_REFRESH_UNAVAILABLE_MESSAGE,
+  deriveDredgeRefreshAvailability,
+  deriveTimedActivityRefreshScopes,
+  kindLabelText,
+  normalizeActivityRefreshScope
+} from "./activityRefresh";
 import { normalizeDredgeRules } from "./laoFinds";
 import type { AppState, FriendUser, DredgeRule } from "../shared/types";
 
@@ -24,7 +32,7 @@ function rule(patch: Partial<DredgeRule>): DredgeRule {
     enabled: patch.enabled ?? true,
     mode: patch.mode ?? "allow",
     usernames: patch.usernames ?? "all",
-    kinds: patch.kinds ?? ["topic", "reply", "boost", "reaction"],
+    kinds: patch.kinds ?? ["topic", "reply", "boost", "reaction", "like"],
     patterns: patch.patterns ?? [],
     createdAt: "2026-06-30T00:00:00.000Z",
     updatedAt: "2026-06-30T00:00:00.000Z"
@@ -76,11 +84,11 @@ describe("timed activity refresh scopes", () => {
       state({
         friends: {
           neo: friend("neo", ["topic"]),
-          trinity: friend("trinity", ["topic", "reply", "boost", "reaction"])
+          trinity: friend("trinity", ["topic", "reply", "boost", "reaction", "like"])
         },
         dredgeRules: [
           rule({ id: "allow-neo", mode: "allow", usernames: ["neo"], kinds: ["topic"] }),
-          rule({ id: "block-all", mode: "block", usernames: "all", kinds: ["topic", "reply", "boost", "reaction"] })
+          rule({ id: "block-all", mode: "block", usernames: "all", kinds: ["topic", "reply", "boost", "reaction", "like"] })
         ]
       }),
       "rules"
@@ -100,6 +108,19 @@ describe("timed activity refresh scopes", () => {
 
   it("preserves existing single-kind manual scope normalization", () => {
     expect(normalizeActivityRefreshScope({ kind: "boost", usernames: ["neo"] })).toEqual({ kind: "boost", usernames: ["neo"] });
+  });
+
+  it("includes like in all refresh scope and maps it to filter=1", () => {
+    expect(activityKindsForScope("all")).toEqual(["topic", "reply", "boost", "reaction", "like"]);
+    expect(activityRequestStepsForUser("Neo", "like")).toEqual([
+      {
+        username: "neo",
+        kind: "like",
+        path: "/user_actions.json?offset=0&username=neo&filter=1",
+        label: "点赞 @neo"
+      }
+    ]);
+    expect(kindLabelText("like")).toBe("点赞");
   });
 });
 

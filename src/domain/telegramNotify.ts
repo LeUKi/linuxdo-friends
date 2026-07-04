@@ -172,6 +172,7 @@ function activityKindLabel(kind: ActivityKind): string {
   if (kind === "reply") return "回复";
   if (kind === "boost") return "Boost";
   if (kind === "reaction") return "回应";
+  if (kind === "like") return "点赞";
   return kind;
 }
 

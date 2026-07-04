@@ -200,11 +200,11 @@ function isUsernameList(value: unknown): boolean {
 }
 
 function isActivityKindFilter(value: unknown): boolean {
-  return value === "all" || value === "topic" || value === "reply" || value === "boost" || value === "reaction";
+  return value === "all" || value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "like";
 }
 
 function isActivityRefreshKindList(value: unknown): boolean {
-  return Array.isArray(value) && value.every((item) => item === "topic" || item === "reply" || item === "boost" || item === "reaction");
+  return Array.isArray(value) && value.every((item) => item === "topic" || item === "reply" || item === "boost" || item === "reaction" || item === "like");
 }
 
 function isStringList(value: unknown): boolean {

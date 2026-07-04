@@ -1355,6 +1355,24 @@ describe("content script friend markers", () => {
             { status: 200 }
           )
         )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              user_actions: [
+                {
+                  id: 45,
+                  action_type: 1,
+                  topic_title: "一个 like",
+                  created_at: "2026-06-26T23:59:59.000Z",
+                  topic_id: 99,
+                  post_id: 45,
+                  acting_username: "Misaka7369"
+                }
+              ]
+            }),
+            { status: 200 }
+          )
+        )
     );
 
     await import("./contentScript");
@@ -1365,7 +1383,7 @@ describe("content script friend markers", () => {
 
     expect(response).toMatchObject({
       ok: true,
-      requestCount: 4,
+      requestCount: 5,
       activity: {
         username: "misaka7369",
         items: [
@@ -1377,11 +1395,12 @@ describe("content script friend markers", () => {
             url: "/t/example/42/1"
           },
           { id: "boost:43", kind: "boost", title: "一个 boost" },
-          { id: "reaction:44", kind: "reaction", reactionValue: "hugs" }
+          { id: "reaction:44", kind: "reaction", reactionValue: "hugs" },
+          { id: "user_action:misaka7369:1:99:45", kind: "like", title: "一个 like" }
         ]
       }
     });
-    expect((response as { requestAttemptedAts?: string[] }).requestAttemptedAts).toHaveLength(4);
+    expect((response as { requestAttemptedAts?: string[] }).requestAttemptedAts).toHaveLength(5);
     expect(fetch).toHaveBeenNthCalledWith(
       1,
       "/user_actions.json?offset=0&username=misaka7369&filter=4",
@@ -1402,13 +1421,19 @@ describe("content script friend markers", () => {
       "/discourse-reactions/posts/reactions.json?username=misaka7369",
       expect.objectContaining({ credentials: "same-origin" })
     );
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      "/user_actions.json?offset=0&username=misaka7369&filter=1",
+      expect.objectContaining({ credentials: "same-origin" })
+    );
   });
 
   it.each([
     ["topic", "/user_actions.json?offset=0&username=misaka7369&filter=4"],
     ["reply", "/user_actions.json?offset=0&username=misaka7369&filter=5"],
     ["boost", "/discourse-boosts/users/misaka7369/boosts-given.json"],
-    ["reaction", "/discourse-reactions/posts/reactions.json?username=misaka7369"]
+    ["reaction", "/discourse-reactions/posts/reactions.json?username=misaka7369"],
+    ["like", "/user_actions.json?offset=0&username=misaka7369&filter=1"]
   ] as const)("extracts only the scoped %s activity endpoint", async (kind, expectedPath) => {
     let listener: ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean) | null = null;
     vi.stubGlobal("chrome", {
@@ -1431,7 +1456,7 @@ describe("content script friend markers", () => {
         ? { boosts: [{ id: 1, user: { username: "Misaka7369" }, post: { topic_title: "boost" } }] }
         : kind === "reaction"
           ? [{ id: 1, user: { username: "Misaka7369" }, post: { topic_title: "reaction" }, reaction: { reaction_value: "hugs" } }]
-          : { user_actions: [{ action_type: kind === "topic" ? 4 : 5, topic_id: 1, title: kind, acting_username: "Misaka7369" }] };
+          : { user_actions: [{ action_type: kind === "topic" ? 4 : kind === "like" ? 1 : 5, topic_id: 1, title: kind, acting_username: "Misaka7369" }] };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 })));
 
     await import("./contentScript");
@@ -1588,6 +1613,7 @@ describe("content script friend markers", () => {
         .mockResolvedValueOnce(new Response(JSON.stringify(userActionsPayload), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify(boostsPayload), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify(reactionsPayload), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ user_actions: [] }), { status: 200 }))
     );
 
     await import("./contentScript");

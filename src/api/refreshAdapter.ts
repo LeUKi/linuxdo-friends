@@ -240,10 +240,10 @@ async function fetchFriendActivityStep(
   const response = await safeFetch(fetchImpl, step.path, "direct_fetch", "activity", onRequestAttempt);
   if (!response.ok) return { ok: false, result: response.result };
   const items = activityKindsForRequestKind(step.kind).flatMap((kind) => {
-    if (kind === "topic" || kind === "reply") {
+    if (kind === "topic" || kind === "reply" || kind === "like") {
       return extractUserActions(response.json)
         .map((action) => normalizeUserAction(step.username, action))
-        .filter((item) => item.kind === kind);
+        .filter((item): item is ActivityItem => item !== undefined && item.kind === kind);
     }
     if (kind === "boost") return extractBoosts(response.json).map(normalizeBoost);
     return extractReactions(response.json).map(normalizeReaction);

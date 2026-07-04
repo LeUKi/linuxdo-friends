@@ -526,6 +526,12 @@
   color: var(--reaction-text);
 }
 
+.kind-like {
+  border-color: var(--like-border);
+  background: var(--like-bg);
+  color: var(--like-text);
+}
+
 .feed-primary-block {
   display: grid;
   min-width: 0;

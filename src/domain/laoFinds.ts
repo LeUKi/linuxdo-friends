@@ -300,7 +300,7 @@ function ruleUsernamesMatch(usernames: "all" | Username[], item: ActivityItem): 
 }
 
 function isCollectableKind(kind: ActivityItem["kind"]): kind is ActivityRefreshKind {
-  return kind === "topic" || kind === "reply" || kind === "boost" || kind === "reaction";
+  return kind === "topic" || kind === "reply" || kind === "boost" || kind === "reaction" || kind === "like";
 }
 
 function mergeRuleIds(existing: string[], incoming: string[]): string[] {

@@ -2474,6 +2474,14 @@ describe("message contracts", () => {
               items: []
             }
           })
+          .mockResolvedValueOnce({
+            ok: true,
+            activity: {
+              username: "misaka7369",
+              refreshedAt: "2026-06-27T00:00:00.000Z",
+              items: []
+            }
+          })
       }
     });
 
@@ -2487,7 +2495,7 @@ describe("message contracts", () => {
         lastSync: { ok: true, source: "existing_tab" }
       }
     });
-    expect(tabs.sendMessage).toHaveBeenCalledTimes(4);
+    expect(tabs.sendMessage).toHaveBeenCalledTimes(5);
     expect(tabs.sendMessage).toHaveBeenCalledWith(456, {
       type: "linuxdoFriends.extractActivity",
       username: "misaka7369",
@@ -2507,6 +2515,11 @@ describe("message contracts", () => {
       type: "linuxdoFriends.extractActivity",
       username: "misaka7369",
       step: { kind: "reaction", path: "/discourse-reactions/posts/reactions.json?username=misaka7369" }
+    });
+    expect(tabs.sendMessage).toHaveBeenCalledWith(456, {
+      type: "linuxdoFriends.extractActivity",
+      username: "misaka7369",
+      step: { kind: "like", path: "/user_actions.json?offset=0&username=misaka7369&filter=1" }
     });
   });
 

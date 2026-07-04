@@ -132,6 +132,37 @@ describe("config transfer", () => {
     expect(JSON.stringify(file)).not.toContain("linuxdoFriendsCloudAuth");
   });
 
+  it("preserves explicit all-except-like scopes through export and import normalization", () => {
+    const state: AppState = {
+      ...defaultAppState,
+      friends: {
+        neo: {
+          username: "neo",
+          note: "",
+          groups: [],
+          pinned: false,
+          activityKinds: ["topic", "reply", "boost", "reaction"],
+          upgradedAt: "2026-06-28T00:00:00.000Z",
+          updatedAt: "2026-06-28T00:00:00.000Z"
+        }
+      },
+      dredgeRules: [
+        currentRule({
+          id: "rule-no-like",
+          kinds: ["topic", "reply", "boost", "reaction"]
+        })
+      ]
+    };
+
+    const exported = createConfigExport(state);
+    const parsed = parseConfigImportJson(JSON.stringify(exported));
+
+    expect(exported.friends.neo.activityKinds).toEqual(["topic", "reply", "boost", "reaction"]);
+    expect(exported.dredgeRules[0].kinds).toEqual(["topic", "reply", "boost", "reaction"]);
+    expect(parsed.friends.neo.activityKinds).toEqual(["topic", "reply", "boost", "reaction"]);
+    expect(parsed.dredgeRules[0].kinds).toEqual(["topic", "reply", "boost", "reaction"]);
+  });
+
   it("normalizes valid import files", () => {
     const file = parseConfigImportJson(
       JSON.stringify({
@@ -284,7 +315,7 @@ describe("config transfer", () => {
       })
     );
 
-    expect(file.friends.legacy.activityKinds).toEqual(["topic", "reply", "boost", "reaction"]);
+    expect(file.friends.legacy.activityKinds).toEqual(["topic", "reply", "boost", "reaction", "like"]);
     expect(file.friends.quiet.activityKinds).toEqual([]);
     expect(file.settings.openActivityLinksInPage).toBe(true);
     expect(file.settings.timedActivityRefreshScopeMode).toBe("rules");
@@ -614,7 +645,7 @@ function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
     enabled: true,
     mode: "allow",
     usernames: "all",
-    kinds: ["topic", "reply", "boost", "reaction"],
+    kinds: ["topic", "reply", "boost", "reaction", "like"],
     patterns: [],
     createdAt: "2026-06-28T00:00:00.000Z",
     updatedAt: "2026-06-28T00:00:00.000Z",

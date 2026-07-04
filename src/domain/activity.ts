@@ -82,7 +82,7 @@ export function normalizeActivity(usernameInput: Username, actions: RawUserActio
 export function normalizeFriendActivity(usernameInput: Username, sources: RawFriendActivitySources): FriendActivitySummary {
   const username = normalizeUsername(usernameInput);
   const items = sortActivityItems([
-    ...sources.userActions.map((action) => normalizeUserAction(username, action)),
+    ...sources.userActions.map((action) => normalizeUserAction(username, action)).filter(isActivityItem),
     ...sources.boosts.map(normalizeBoost),
     ...sources.reactions.map(normalizeReaction)
   ]);
@@ -96,10 +96,11 @@ export function normalizeFriendActivity(usernameInput: Username, sources: RawFri
   };
 }
 
-export function normalizeUserAction(usernameInput: Username, action: RawUserAction): ActivityItem {
+export function normalizeUserAction(usernameInput: Username, action: RawUserAction): ActivityItem | undefined {
   const requestedUsername = normalizeUsername(usernameInput);
   const actorUsername = normalizeOptionalUsername(action.acting_username ?? action.username) ?? requestedUsername;
-  const kind = action.action_type === 4 ? "topic" : "reply";
+  const kind = activityKindFromUserActionType(action.action_type);
+  if (!kind) return undefined;
   const topicId = readNumber(action.topic_id);
   const postId = readNumber(action.post_id);
   const postNumber = readNumber(action.post_number);
@@ -133,6 +134,13 @@ export function normalizeUserAction(usernameInput: Username, action: RawUserActi
     closed: action.closed === true,
     archived: action.archived === true
   };
+}
+
+function activityKindFromUserActionType(actionType: number | undefined): ActivityItem["kind"] | undefined {
+  if (actionType === 1) return "like";
+  if (actionType === 4) return "topic";
+  if (actionType === 5) return "reply";
+  return undefined;
 }
 
 export function normalizeBoost(boost: RawBoost): ActivityItem {
@@ -291,6 +299,10 @@ function isRawBoost(value: unknown): value is RawBoost {
 
 function isRawReaction(value: unknown): value is RawReaction {
   return isRecord(value);
+}
+
+function isActivityItem(value: ActivityItem | undefined): value is ActivityItem {
+  return Boolean(value);
 }
 
 function isRecord(value: unknown): value is RawRecord {

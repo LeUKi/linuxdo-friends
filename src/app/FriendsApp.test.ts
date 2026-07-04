@@ -284,7 +284,7 @@ describe("FriendsApp UI scene persistence", () => {
             note: "",
             groups: [],
             pinned: false,
-            activityKinds: ["topic", "reply", "boost", "reaction"],
+            activityKinds: ["topic", "reply", "boost", "reaction", "like"],
             upgradedAt: "2026-06-28T00:00:00.000Z",
             updatedAt: "2026-06-28T00:00:00.000Z"
           }
@@ -1564,10 +1564,10 @@ describe("FriendsApp UI scene persistence", () => {
     const options = Array.from(container.querySelectorAll<HTMLButtonElement>(".filter-popover-menu button"));
     const optionText = options.map((option) => option.textContent?.trim());
 
-    expect(optionText).toEqual(["全部2", "话题0", "回复1", "Boost1", "回应0"]);
+    expect(optionText).toEqual(["全部2", "话题0", "回复1", "Boost1", "回应0", "点赞0"]);
     expect(container.textContent).not.toContain("x 2");
     expect(container.textContent).not.toContain("x 0");
-    expect(container.querySelectorAll(".filter-popover-menu .filter-option-count")).toHaveLength(5);
+    expect(container.querySelectorAll(".filter-popover-menu .filter-option-count")).toHaveLength(6);
   });
 
   it("shows the all-user filter as a compact label with a count tag", async () => {
@@ -3084,7 +3084,7 @@ describe("FriendsApp UI scene persistence", () => {
             note: "",
             groups: [],
             pinned: false,
-            activityKinds: ["topic", "reply", "boost", "reaction"],
+            activityKinds: ["topic", "reply", "boost", "reaction", "like"],
             upgradedAt: "2026-06-28T00:00:00.000Z",
             updatedAt: "2026-06-28T00:00:00.000Z"
           }
@@ -3453,7 +3453,7 @@ function activityFeedState(url = "/t/topic/1"): AppState {
         note: "",
         groups: [],
         pinned: false,
-        activityKinds: ["topic", "reply", "boost", "reaction"],
+        activityKinds: ["topic", "reply", "boost", "reaction", "like"],
         upgradedAt: "2026-06-28T00:00:00.000Z",
         updatedAt: "2026-06-28T00:00:00.000Z"
       }
@@ -3485,7 +3485,7 @@ function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
     enabled: true,
     mode: "allow",
     usernames: "all",
-    kinds: ["topic", "reply", "boost", "reaction"],
+    kinds: ["topic", "reply", "boost", "reaction", "like"],
     patterns: [],
     createdAt: "2026-06-28T00:00:00.000Z",
     updatedAt: "2026-06-28T00:00:00.000Z",

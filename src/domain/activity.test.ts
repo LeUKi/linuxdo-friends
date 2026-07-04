@@ -79,6 +79,33 @@ describe("activity normalization", () => {
     });
   });
 
+  it("normalizes likes from user actions without treating unknown action types as replies", () => {
+    const like = normalizeUserAction("shark55ovo", {
+      action_type: 1,
+      created_at: "2026-07-04T02:33:28.511Z",
+      slug: "topic",
+      topic_id: 2088508,
+      post_number: 10,
+      post_id: 17370515,
+      username: "lafish",
+      acting_username: "Shark55OvO",
+      acting_name: "Alex奇数君",
+      target_username: "Shark55OvO",
+      title: "佬们有没有买了一次后相见恨晚的东西"
+    });
+
+    expect(like).toMatchObject({
+      id: "user_action:shark55ovo:1:2088508:17370515",
+      kind: "like",
+      username: "shark55ovo",
+      actorUsername: "shark55ovo",
+      targetUsername: "shark55ovo",
+      url: "/t/topic/2088508/10",
+      source: "user_actions"
+    });
+    expect(normalizeUserAction("shark55ovo", { action_type: 999, title: "unknown" })).toBeUndefined();
+  });
+
   it("normalizes boosts with actor and target post metadata", () => {
     const item = normalizeBoost({
       id: 391850,

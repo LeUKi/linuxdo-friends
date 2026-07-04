@@ -260,6 +260,10 @@ export function deriveActivityRequestCounts(state: AppState, username: "all" | U
     reaction: planActivityRefreshTargets(state, { kind: "reaction", usernames: username === "all" ? undefined : [username] }).reduce(
       (sum, target) => sum + target.steps.length,
       0
+    ),
+    like: planActivityRefreshTargets(state, { kind: "like", usernames: username === "all" ? undefined : [username] }).reduce(
+      (sum, target) => sum + target.steps.length,
+      0
     )
   };
 }

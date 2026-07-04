@@ -1,20 +1,19 @@
 import { nowIso } from "../shared/time";
 import type { ActivityRefreshKind, AppState, FollowedUser, FriendProfileSummary, FriendUser, Username } from "../shared/types";
 
-export const ALL_ACTIVITY_KINDS: ActivityRefreshKind[] = ["topic", "reply", "boost", "reaction"];
+export const ALL_ACTIVITY_KINDS: ActivityRefreshKind[] = ["topic", "reply", "boost", "reaction", "like"];
 
 export function normalizeUsername(username: string): Username {
   return username.trim().replace(/^@/, "").toLowerCase();
 }
 
 export function isActivityRefreshKind(value: unknown): value is ActivityRefreshKind {
-  return value === "topic" || value === "reply" || value === "boost" || value === "reaction";
+  return value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "like";
 }
 
 export function normalizeActivityKinds(value: unknown, fallback: ActivityRefreshKind[] = ALL_ACTIVITY_KINDS): ActivityRefreshKind[] {
-  if (value === undefined) return [...fallback];
-  if (!Array.isArray(value)) return [...fallback];
-  const kinds = value.filter(isActivityRefreshKind);
+  const source = value === undefined || !Array.isArray(value) ? fallback : value;
+  const kinds = source.filter(isActivityRefreshKind);
   return ALL_ACTIVITY_KINDS.filter((kind) => kinds.includes(kind));
 }
 

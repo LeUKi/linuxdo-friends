@@ -1774,7 +1774,7 @@ function isActivityRequestStepMessage(value: unknown): value is { kind: Activity
 }
 
 function isActivityRequestKind(value: unknown): value is ActivityRefreshRequestKind {
-  return value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "user_actions";
+  return value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "like" || value === "user_actions";
 }
 
 function isLinuxDoRelativeJsonPath(path: string): boolean {
@@ -1809,7 +1809,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 function isActivityKind(value: unknown): value is ActivityKindFilter | ActivityRefreshRequestKind {
-  return value === "all" || value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "user_actions";
+  return value === "all" || value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "like" || value === "user_actions";
 }
 
 function extractUsername(link: HTMLAnchorElement) {
@@ -2026,7 +2026,7 @@ function isRawReaction(value: unknown): value is RawReaction {
 function normalizeFriendActivity(usernameInput: Username, sources: RawFriendActivitySources): FriendActivitySummary {
   const username = normalizeUsername(usernameInput);
   const items = sortActivityItems([
-    ...sources.userActions.map((action) => normalizeUserAction(username, action)),
+    ...sources.userActions.map((action) => normalizeUserAction(username, action)).filter(isActivityItem),
     ...sources.boosts.map(normalizeBoost),
     ...sources.reactions.map(normalizeReaction)
   ]);
@@ -2066,6 +2066,9 @@ function activityRequestStepsForUser(username: Username, kind: ActivityKindFilte
   if (kind === "reaction") {
     return [{ username, kind: "reaction", path: `/discourse-reactions/posts/reactions.json?username=${encodeURIComponent(username)}` }];
   }
+  if (kind === "like") {
+    return [{ username, kind: "like", path: `/user_actions.json?offset=0&username=${encodeURIComponent(username)}&filter=1` }];
+  }
   if (kind === "user_actions") {
     return [{ username, kind: "user_actions", path: `/user_actions.json?offset=0&username=${encodeURIComponent(username)}&filter=4,5` }];
   }
@@ -2073,27 +2076,29 @@ function activityRequestStepsForUser(username: Username, kind: ActivityKindFilte
     { username, kind: "topic", path: `/user_actions.json?offset=0&username=${encodeURIComponent(username)}&filter=4` },
     { username, kind: "reply", path: `/user_actions.json?offset=0&username=${encodeURIComponent(username)}&filter=5` },
     { username, kind: "boost", path: `/discourse-boosts/users/${encodeURIComponent(username)}/boosts-given.json` },
-    { username, kind: "reaction", path: `/discourse-reactions/posts/reactions.json?username=${encodeURIComponent(username)}` }
+    { username, kind: "reaction", path: `/discourse-reactions/posts/reactions.json?username=${encodeURIComponent(username)}` },
+    { username, kind: "like", path: `/user_actions.json?offset=0&username=${encodeURIComponent(username)}&filter=1` }
   ];
 }
 
 function normalizeStepItems(username: Username, kind: ActivityRefreshRequestKind, json: unknown): ActivityItem[] {
-  if (kind === "topic" || kind === "reply") {
+  if (kind === "topic" || kind === "reply" || kind === "like") {
     return extractUserActions(json)
       .map((action) => normalizeUserAction(username, action))
-      .filter((item) => item.kind === kind);
+      .filter((item): item is ActivityItem => item !== undefined && item.kind === kind);
   }
   if (kind === "user_actions") {
-    return extractUserActions(json).map((action) => normalizeUserAction(username, action));
+    return extractUserActions(json).map((action) => normalizeUserAction(username, action)).filter(isActivityItem);
   }
   if (kind === "boost") return extractBoosts(json).map(normalizeBoost);
   return extractReactions(json).map(normalizeReaction);
 }
 
-function normalizeUserAction(usernameInput: Username, action: RawUserAction): ActivityItem {
+function normalizeUserAction(usernameInput: Username, action: RawUserAction): ActivityItem | undefined {
   const requestedUsername = normalizeUsername(usernameInput);
   const actorUsername = normalizeOptionalUsername(action.acting_username ?? action.username) ?? requestedUsername;
-  const kind = action.action_type === 4 ? "topic" : "reply";
+  const kind = activityKindFromUserActionType(action.action_type);
+  if (!kind) return undefined;
   const topicId = readNumber(action.topic_id);
   const postId = readNumber(action.post_id);
   const postNumber = readNumber(action.post_number);
@@ -2127,6 +2132,17 @@ function normalizeUserAction(usernameInput: Username, action: RawUserAction): Ac
     closed: action.closed === true,
     archived: action.archived === true
   };
+}
+
+function activityKindFromUserActionType(actionType: number | undefined): ActivityItem["kind"] | undefined {
+  if (actionType === 1) return "like";
+  if (actionType === 4) return "topic";
+  if (actionType === 5) return "reply";
+  return undefined;
+}
+
+function isActivityItem(value: ActivityItem | undefined): value is ActivityItem {
+  return Boolean(value);
 }
 
 function normalizeBoost(boost: RawBoost): ActivityItem {

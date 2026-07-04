@@ -176,6 +176,18 @@ describe("lao finds collection", () => {
     });
   });
 
+  it("preserves current all-except-like rule scopes", () => {
+    const state = upsertDredgeRule(defaultAppState, {
+      schemaVersion: 2,
+      id: "rule-no-like",
+      mode: "allow",
+      kinds: ["topic", "reply", "boost", "reaction"],
+      patterns: []
+    });
+
+    expect(state.dredgeRules[0].kinds).toEqual(["topic", "reply", "boost", "reaction"]);
+  });
+
   it("drops legacy keyword-only rules and invalid current regex rules during normalization", () => {
     const normalized = normalizeDredgeRules([
       { id: "legacy", name: "Legacy", enabled: true, usernames: "all", kinds: ["topic"], keywords: ["AI"] },
@@ -288,7 +300,7 @@ function rule(patch: Partial<DredgeRule>): DredgeRule {
     enabled: true,
     mode: "allow",
     usernames: "all",
-    kinds: ["topic", "reply", "boost", "reaction"],
+    kinds: ["topic", "reply", "boost", "reaction", "like"],
     patterns: [],
     createdAt: "2026-06-30T00:00:00.000Z",
     updatedAt: "2026-06-30T00:00:00.000Z",

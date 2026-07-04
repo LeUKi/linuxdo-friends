@@ -147,7 +147,7 @@ function isUsernameList(value: unknown): value is string[] {
 }
 
 function isActivityKindFilter(value: unknown): value is ActivityKindFilter {
-  return value === "all" || value === "topic" || value === "reply" || value === "boost" || value === "reaction";
+  return value === "all" || value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "like";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

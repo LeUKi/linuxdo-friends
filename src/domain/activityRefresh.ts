@@ -140,7 +140,7 @@ export function activityRequestStepsForUserKinds(usernameInput: Username, kinds:
 }
 
 export function activityKindsForScope(kind: ActivityKindFilter): ActivityRefreshKind[] {
-  if (kind === "all") return ["topic", "reply", "boost", "reaction"];
+  if (kind === "all") return [...ALL_ACTIVITY_KINDS];
   return [kind];
 }
 
@@ -257,6 +257,7 @@ export function kindLabelText(kind: ActivityKindFilter): string {
   if (kind === "reply") return "回复";
   if (kind === "boost") return "Boost";
   if (kind === "reaction") return "回应";
+  if (kind === "like") return "点赞";
   return "全部动态";
 }
 
@@ -272,6 +273,7 @@ function userActionsStep(username: Username, kind: ActivityRefreshRequestKind, f
 function activityRequestStepForKind(username: Username, kind: ActivityRefreshKind): ActivityRequestStep {
   if (kind === "topic") return userActionsStep(username, "topic", "4", "话题");
   if (kind === "reply") return userActionsStep(username, "reply", "5", "回复");
+  if (kind === "like") return userActionsStep(username, "like", "1", "点赞");
   if (kind === "boost") {
     return {
       username,
@@ -389,11 +391,11 @@ function normalizeScopeUsernames(usernames?: Username[]): Username[] | undefined
 }
 
 function isActivityKindFilter(value: unknown): value is ActivityKindFilter {
-  return value === "all" || value === "topic" || value === "reply" || value === "boost" || value === "reaction";
+  return value === "all" || value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "like";
 }
 
 function isRefreshKind(value: string): value is ActivityRefreshKind {
-  return value === "topic" || value === "reply" || value === "boost" || value === "reaction";
+  return value === "topic" || value === "reply" || value === "boost" || value === "reaction" || value === "like";
 }
 
 function classifyCoarseStatus(value?: string): FriendActivitySummary["coarseStatus"] {
