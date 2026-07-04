@@ -475,7 +475,7 @@ export type BackgroundCommand =
   | { type: "importConfig"; json: string }
   | { type: "clearCache" }
   | { type: "resetExtension" }
-  | { type: "testTelegramNotification" };
+  | { type: "testTelegramNotification"; credentials: { kind: "saved" } | { kind: "draft"; botToken: string; chatId: string } };
 
 export type BackgroundResponse<T = unknown> =
   | { ok: true; data: T }

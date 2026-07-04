@@ -160,8 +160,8 @@ export function NotificationsSettingsSection({
   telegramMessage,
   updateSettings
 }: {
-  onSaveTelegram: (token: string, chatId: string) => Promise<boolean>;
-  onTestTelegram: () => Promise<boolean>;
+  onSaveTelegram: (token: string, chatId: string, enableTelegram?: boolean) => Promise<boolean>;
+  onTestTelegram: (credentials?: { botToken: string; chatId: string }) => Promise<boolean>;
   state: AppState;
   telegramBusy: "save" | "test" | null;
   telegramMessage: string | null;
@@ -189,9 +189,16 @@ export function NotificationsSettingsSection({
     setTelegramModalOpen(false);
   }
 
-  async function saveTelegramFromModal() {
-    const saved = await onSaveTelegram(telegramDraftToken, telegramDraftChatId);
+  const telegramDraftComplete = Boolean(telegramDraftToken.trim() && telegramDraftChatId.trim());
+  const telegramEnabled = state.settings.laoFindsTelegramNotificationsEnabled;
+
+  async function saveTelegramFromModal(enableTelegram = false) {
+    const saved = await onSaveTelegram(telegramDraftToken, telegramDraftChatId, enableTelegram);
     if (saved) setTelegramModalOpen(false);
+  }
+
+  function testTelegramDraftFromModal() {
+    return onTestTelegram({ botToken: telegramDraftToken, chatId: telegramDraftChatId });
   }
 
   useEffect(() => {
@@ -256,7 +263,7 @@ export function NotificationsSettingsSection({
       >
         <div className={classNames("settings-setting-row timed-setting-row telegram-config-row")}>
           <div>
-            <strong>配置状态</strong>
+            <strong>Telegram Bot</strong>
             <span>{telegramConfigured ? "已配置 Bot Token 和 Chat ID。" : "未配置 Bot Token 和 Chat ID。"}</span>
           </div>
           <button className={classNames("small-action")} type="button" onClick={openTelegramModal}>
@@ -269,7 +276,7 @@ export function NotificationsSettingsSection({
             <section className={classNames("modal telegram-config-modal")} role="dialog" aria-modal="true" aria-labelledby="telegram-config-title">
               <div className={classNames("modal-head")}>
                 <div>
-                  <h2 id="telegram-config-title">Telegram 配置</h2>
+                  <h2 id="telegram-config-title">Telegram Bot 配置</h2>
                   <p className={classNames("settings-meta")}>保存 Bot Token 和 Chat ID 后可发送通知。</p>
                 </div>
                 <button className={classNames("icon-button")} type="button" aria-label="关闭 Telegram 配置" onClick={closeTelegramModal}>
@@ -302,10 +309,25 @@ export function NotificationsSettingsSection({
                 {telegramMessage ? <p className={classNames("settings-meta")}>{telegramMessage}</p> : null}
               </div>
               <div className={classNames("maintenance-actions telegram-modal-actions")}>
-                <button className={classNames("small-action primary-action")} type="button" disabled={telegramBusy != null} onClick={() => void saveTelegramFromModal()}>
+                <button
+                  className={classNames("small-action", telegramEnabled && "primary-action")}
+                  type="button"
+                  disabled={telegramBusy != null}
+                  onClick={() => void saveTelegramFromModal()}
+                >
                   {telegramBusy === "save" ? "保存中" : "保存"}
                 </button>
-                <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={() => void onTestTelegram()}>
+                {!telegramEnabled ? (
+                  <button
+                    className={classNames("small-action primary-action")}
+                    type="button"
+                    disabled={telegramBusy != null || !telegramDraftComplete}
+                    onClick={() => void saveTelegramFromModal(true)}
+                  >
+                    {telegramBusy === "save" ? "保存中" : "保存并开启"}
+                  </button>
+                ) : null}
+                <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={() => void testTelegramDraftFromModal()}>
                   {telegramBusy === "test" ? "发送中" : "发送测试消息"}
                 </button>
                 <button className={classNames("small-action")} type="button" disabled={telegramBusy != null} onClick={closeTelegramModal}>
@@ -320,7 +342,7 @@ export function NotificationsSettingsSection({
         variant="unavailable"
         title="Webhook"
         subtitle="发送到自定义地址。"
-        actions={<span className={classNames("settings-unavailable-badge")}>暂未开放</span>}
+        actions={<span className={classNames("settings-unavailable-badge")}>正在施工</span>}
       />
     </div>
   );

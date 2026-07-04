@@ -25,8 +25,9 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
     case "exportConfig":
     case "clearCache":
     case "resetExtension":
-    case "testTelegramNotification":
       return true;
+    case "testTelegramNotification":
+      return isTelegramTestCredentials(command.credentials);
     case "openOptionsPage":
       return command.hash === undefined || isOptionsHash(command.hash);
     case "openActivityLink":
@@ -73,6 +74,13 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
     default:
       return false;
   }
+}
+
+
+function isTelegramTestCredentials(value: unknown): value is { kind: "saved" } | { kind: "draft"; botToken: string; chatId: string } {
+  if (!isRecord(value)) return false;
+  if (value.kind === "saved") return true;
+  return value.kind === "draft" && typeof value.botToken === "string" && typeof value.chatId === "string";
 }
 
 function isDredgeRulePatch(value: unknown): boolean {

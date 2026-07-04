@@ -232,19 +232,27 @@ export function OptionsApp() {
     setActiveHash(hash);
   }
 
-  async function handleSaveTelegram(token: string, chatId: string): Promise<boolean> {
+  async function handleSaveTelegram(token: string, chatId: string, enableTelegram = false): Promise<boolean> {
     setTelegramBusy("save");
     setTelegramMessage(null);
     try {
       const nextToken = token.trim();
       const nextChatId = chatId.trim();
+      if (enableTelegram && (!nextToken || !nextChatId)) {
+        setTelegramMessage("请先填写 Bot Token 和 Chat ID。");
+        return false;
+      }
       const response = await sendCommand<typeof state>({
         type: "updateSettings",
-        settings: { telegramBotToken: nextToken, telegramChatId: nextChatId }
+        settings: {
+          telegramBotToken: nextToken,
+          telegramChatId: nextChatId,
+          ...(enableTelegram ? { laoFindsTelegramNotificationsEnabled: true } : {})
+        }
       });
       if (response.ok) {
         setState(response.data);
-        setTelegramMessage(nextToken ? "Telegram 配置已保存。" : "已清除 Telegram 配置。");
+        setTelegramMessage(enableTelegram ? "Telegram 配置已保存并启用。" : nextToken ? "Telegram 配置已保存。" : "已清除 Telegram 配置。");
         return true;
       } else {
         setTelegramMessage(response.error);
@@ -255,11 +263,15 @@ export function OptionsApp() {
     }
   }
 
-  async function handleTestTelegram(): Promise<boolean> {
+  async function handleTestTelegram(credentials?: { botToken: string; chatId: string }): Promise<boolean> {
     setTelegramBusy("test");
     setTelegramMessage(null);
     try {
-      const response = await sendCommand<unknown>({ type: "testTelegramNotification" });
+      const response = await sendCommand<unknown>(
+        credentials
+          ? { type: "testTelegramNotification", credentials: { kind: "draft", botToken: credentials.botToken, chatId: credentials.chatId } }
+          : { type: "testTelegramNotification", credentials: { kind: "saved" } }
+      );
       setTelegramMessage(response.ok ? "测试消息已发送，请检查 Telegram。" : response.error);
       return response.ok;
     } finally {

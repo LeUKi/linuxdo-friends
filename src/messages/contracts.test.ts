@@ -30,4 +30,39 @@ describe("message contracts", () => {
       })
     ).toBe(false);
   });
+  it("accepts saved Telegram credentials marker for channel-level test notifications", () => {
+    expect(
+      isBackgroundCommand({
+        type: "testTelegramNotification",
+        credentials: { kind: "saved" }
+      })
+    ).toBe(true);
+  });
+
+  it("rejects missing Telegram test credentials", () => {
+    expect(
+      isBackgroundCommand({
+        type: "testTelegramNotification"
+      })
+    ).toBe(false);
+  });
+
+  it("accepts draft Telegram credentials for one-off test notifications", () => {
+    expect(
+      isBackgroundCommand({
+        type: "testTelegramNotification",
+        credentials: { kind: "draft", botToken: "draft-token", chatId: "12345" }
+      })
+    ).toBe(true);
+  });
+
+  it("rejects invalid draft Telegram test credentials", () => {
+    expect(
+      isBackgroundCommand({
+        type: "testTelegramNotification",
+        credentials: { kind: "draft", botToken: 123, chatId: "12345" }
+      })
+    ).toBe(false);
+  });
+
 });

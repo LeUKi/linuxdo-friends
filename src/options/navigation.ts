@@ -3,9 +3,9 @@ export type OptionsSectionId = "basic" | "scope" | "lao-finds" | "request-stats"
 export const OPTIONS_SECTIONS: Array<{ id: OptionsSectionId; hash: string; label: string }> = [
   { id: "basic", hash: "#basic", label: "基础" },
   { id: "scope", hash: "#scope", label: "视奸范围" },
-  { id: "lao-finds", hash: "#lao-finds", label: "佬有料" },
+  { id: "lao-finds", hash: "#lao-finds", label: "佬料打捞" },
+  { id: "notifications", hash: "#notifications", label: "新料通知" },
   { id: "request-stats", hash: "#request-stats", label: "请求统计" },
-  { id: "notifications", hash: "#notifications", label: "通知渠道" },
   { id: "data", hash: "#data", label: "数据管理" },
   { id: "sponsor", hash: "#sponsor", label: "赞助" }
 ];

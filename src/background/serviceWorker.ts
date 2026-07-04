@@ -338,15 +338,22 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
     case "resetExtension":
       return ok(await resetExtension());
     case "testTelegramNotification": {
-      const testState = await loadState();
-      const { telegramBotToken, telegramChatId } = testState.settings;
-      if (!telegramBotToken || !telegramChatId) {
+      const telegramCredentials = command.credentials.kind === "draft"
+        ? { botToken: command.credentials.botToken.trim(), chatId: command.credentials.chatId.trim() }
+        : await loadSavedTelegramTestCredentials();
+      if (!telegramCredentials.botToken || !telegramCredentials.chatId) {
         return { ok: false, error: "请先填写 Bot Token 和 Chat ID。" };
       }
-      const telegramResult = await sendTelegramMessage(telegramBotToken, telegramChatId, "🔔 佬朋友测试消息：Telegram 配置成功！");
+      const telegramResult = await sendTelegramMessage(telegramCredentials.botToken, telegramCredentials.chatId, "🔔 佬朋友测试消息：Telegram 配置成功！");
       return telegramResult.ok ? ok("已发送测试消息。") : { ok: false, error: telegramResult.error };
     }
   }
+}
+
+
+async function loadSavedTelegramTestCredentials(): Promise<{ botToken?: string; chatId?: string }> {
+  const testState = await loadState();
+  return { botToken: testState.settings.telegramBotToken, chatId: testState.settings.telegramChatId };
 }
 
 async function importConfig(json: string): Promise<AppState> {

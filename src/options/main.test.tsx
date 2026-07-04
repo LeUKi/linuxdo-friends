@@ -167,6 +167,15 @@ describe("OptionsApp update diagnostics", () => {
 
     expect(window.location.hash).toBe("#basic");
     expect(getButton(container, "基础").classList.contains("active")).toBe(true);
+    expect(Array.from(container.querySelectorAll(".options-nav button")).map((button) => button.textContent)).toEqual([
+      "基础",
+      "视奸范围",
+      "佬料打捞",
+      "新料通知",
+      "请求统计",
+      "数据管理",
+      "赞助"
+    ]);
     expect(container.textContent).toContain("本地账号探测");
     expect(container.textContent).toContain("动态跳转");
     const activityLinkCard = headingByText(container, "动态跳转").closest<HTMLElement>(".settings-card");
@@ -527,9 +536,9 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).toContain("动态跳转");
     expect(container.textContent).not.toContain("后台刷新");
     await act(async () => {
-      getButton(container, "佬有料").click();
+      getButton(container, "佬料打捞").click();
     });
-    expect(getButton(container, "佬有料").classList.contains("active")).toBe(true);
+    expect(getButton(container, "佬料打捞").classList.contains("active")).toBe(true);
     expect(container.textContent).toContain("自动捞料");
     expect(container.textContent).toContain("打捞请求范围");
     expect(container.textContent).toContain("打捞间隔");
@@ -537,7 +546,6 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).not.toContain("刷新范围");
     expect(container.textContent).not.toContain("刷新间隔");
     expect(container.textContent).not.toContain("后台刷新");
-    expect(container.textContent).not.toContain("正在施工");
     expect(container.textContent).not.toContain("WIP");
     expect(container.textContent).not.toContain("开发中");
     expect(container.textContent).not.toContain("边界");
@@ -553,15 +561,14 @@ describe("OptionsApp update diagnostics", () => {
     const telegramCard = getTelegramCard(container);
     const telegramActions = getSettingsCardActions(telegramCard);
 
-    expect(getButton(container, "通知渠道").classList.contains("active")).toBe(true);
-    expect(container.textContent).toContain("通知渠道");
+    expect(getButton(container, "新料通知").classList.contains("active")).toBe(true);
+    expect(container.textContent).toContain("新料通知");
     expect(queryHeadingByText(container, "佬有料通知")).toBeNull();
     expect(headingByText(container, "浏览器本地通知")).toBeTruthy();
     expect(headingByText(container, "Telegram")).toBeTruthy();
     expect(headingByText(container, "Webhook")).toBeTruthy();
-    expect(container.textContent).toContain("暂未开放");
+    expect(container.textContent).toContain("正在施工");
     expect(container.textContent).not.toContain("digest");
-    expect(container.textContent).not.toContain("正在施工");
     expect(container.textContent).not.toContain("WIP");
     expect(container.textContent).not.toContain("开发中");
     expect(allSettingHeadings(container).every((heading) => heading.querySelector("svg") == null)).toBe(true);
@@ -570,6 +577,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(telegramActions.textContent).toContain("未启用");
     expect(telegramActions.textContent).toContain("发送测试");
     expect(telegramCard.querySelector(".settings-card-body .switch-button")).toBeNull();
+    expect(telegramCard.textContent).toContain("Telegram Bot");
     expect(telegramCard.textContent).toContain("未配置 Bot Token 和 Chat ID");
     expect(telegramCard.querySelector("#tg-bot-token")).toBeNull();
     expect(telegramCard.querySelector("#tg-chat-id")).toBeNull();
@@ -578,6 +586,13 @@ describe("OptionsApp update diagnostics", () => {
       getButton(telegramCard, "配置").click();
       await Promise.resolve();
     });
+    const telegramDialog = getTelegramDialog(container);
+    expect(telegramDialog?.textContent).toContain("Telegram Bot 配置");
+    const saveButton = getButton(telegramDialog!, "保存");
+    const saveAndEnableButton = getButton(telegramDialog!, "保存并开启");
+    expect(saveButton.classList.contains("primary-action")).toBe(false);
+    expect(saveAndEnableButton.classList.contains("primary-action")).toBe(true);
+    expect(saveAndEnableButton.disabled).toBe(true);
     const { tokenInput, chatInput } = getTelegramInputs(container);
     await act(async () => {
       setInputValue(tokenInput!, "bot-token");
@@ -586,6 +601,7 @@ describe("OptionsApp update diagnostics", () => {
       chatInput?.dispatchEvent(new Event("input", { bubbles: true }));
       await Promise.resolve();
     });
+    expect(saveAndEnableButton.disabled).toBe(false);
     await act(async () => {
       getButton(container, "保存").click();
     });
@@ -617,8 +633,117 @@ describe("OptionsApp update diagnostics", () => {
       await Promise.resolve();
     });
 
-    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "testTelegramNotification" });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "testTelegramNotification", credentials: { kind: "saved" } });
     expect(telegramCard.textContent).toContain("测试消息已发送，请检查 Telegram。");
+  });
+
+  it("tests Telegram modal draft credentials without saving or enabling", async () => {
+    const chromeMock = setupChrome({
+      state: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          telegramBotToken: "saved-token",
+          telegramChatId: "saved-chat",
+          laoFindsTelegramNotificationsEnabled: false
+        }
+      }
+    });
+    const { container } = await renderOptionsApp("#notifications");
+    const telegramCard = getTelegramCard(container);
+
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    const { tokenInput, chatInput } = getTelegramInputs(container);
+    await act(async () => {
+      setInputValue(tokenInput, "draft-token");
+      tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInputValue(chatInput, "draft-chat");
+      chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    chromeMock.sendMessage.mockClear();
+
+    await act(async () => {
+      getButton(getTelegramDialog(container)!, "发送测试消息").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "testTelegramNotification",
+      credentials: { kind: "draft", botToken: "draft-token", chatId: "draft-chat" }
+    });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: expect.objectContaining({ telegramBotToken: "draft-token" })
+    });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: expect.objectContaining({ laoFindsTelegramNotificationsEnabled: true })
+    });
+    expect(getTelegramDialog(container)).not.toBeNull();
+  });
+
+  it("saves and enables Telegram from the disabled modal primary action", async () => {
+    const chromeMock = setupChrome();
+    const { container } = await renderOptionsApp("#notifications");
+    const telegramCard = getTelegramCard(container);
+
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    const { tokenInput, chatInput } = getTelegramInputs(container);
+    await act(async () => {
+      setInputValue(tokenInput, "enabled-token");
+      tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInputValue(chatInput, "enabled-chat");
+      chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      getButton(getTelegramDialog(container)!, "保存并开启").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: {
+        telegramBotToken: "enabled-token",
+        telegramChatId: "enabled-chat",
+        laoFindsTelegramNotificationsEnabled: true
+      }
+    });
+    expect(getTelegramDialog(container)).toBeNull();
+    expect(telegramCard.textContent).toContain("Telegram 配置已保存并启用。");
+  });
+
+  it("uses the normal save button as the primary Telegram modal action when the channel is enabled", async () => {
+    setupChrome({
+      state: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          laoFindsTelegramNotificationsEnabled: true,
+          telegramBotToken: "saved-token",
+          telegramChatId: "saved-chat"
+        }
+      }
+    });
+    const { container } = await renderOptionsApp("#notifications");
+    const telegramCard = getTelegramCard(container);
+
+    await act(async () => {
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    const dialog = getTelegramDialog(container)!;
+
+    expect(dialog.textContent).not.toContain("保存并开启");
+    expect(getButton(dialog, "保存").classList.contains("primary-action")).toBe(true);
   });
 
   it("preserves saved Telegram credentials when the channel switch is toggled off", async () => {
@@ -753,9 +878,14 @@ describe("OptionsApp update diagnostics", () => {
     expect(tokenInput.value).toBe("draft-token");
     expect(chatInput.value).toBe("draft-chat");
 
+    chromeMock.sendMessage.mockClear();
     await act(async () => {
       getButton(container, "发送测试消息").click();
       await Promise.resolve();
+    });
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({
+      type: "testTelegramNotification",
+      credentials: { kind: "draft", botToken: "draft-token", chatId: "draft-chat" }
     });
     expect(container.textContent).toContain("测试失败");
     expect(tokenInput.value).toBe("draft-token");
@@ -1349,7 +1479,7 @@ describe("OptionsApp update diagnostics", () => {
     const { container } = await renderOptionsApp();
 
     await act(async () => {
-      getButton(container, "通知渠道").click();
+      getButton(container, "新料通知").click();
     });
 
     await act(async () => {
@@ -1389,7 +1519,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(syncedTelegramInputs.chatInput.value).toBe("98765");
 
     await act(async () => {
-      getButton(container, "佬有料").click();
+      getButton(container, "佬料打捞").click();
     });
 
     expect(getButton(container, "已启用").getAttribute("aria-pressed")).toBe("true");

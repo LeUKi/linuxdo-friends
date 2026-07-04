@@ -443,13 +443,58 @@ describe("message contracts", () => {
       }
     });
 
-    const response = await send({ type: "testTelegramNotification" });
+    const response = await send({ type: "testTelegramNotification", credentials: { kind: "saved" } });
 
     expect(response).toEqual({ ok: true, data: "已发送测试消息。" });
     expect(fetch).toHaveBeenCalledWith(
       "https://api.telegram.org/botbot-token/sendMessage",
       expect.objectContaining({ body: expect.stringContaining("佬朋友测试消息") })
     );
+  });
+
+  it("uses draft Telegram credentials for one-off tests without mutating saved settings", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })));
+    const { send, localStorage } = await setupWorker({
+      initialState: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          telegramBotToken: "saved-token",
+          telegramChatId: "saved-chat"
+        }
+      }
+    });
+
+    const response = await send({ type: "testTelegramNotification", credentials: { kind: "draft", botToken: " draft-token ", chatId: " draft-chat " } });
+
+    expect(response).toEqual({ ok: true, data: "已发送测试消息。" });
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.telegram.org/botdraft-token/sendMessage",
+      expect.objectContaining({ body: expect.stringContaining("draft-chat") })
+    );
+    expect((localStorage.dump().linuxdoFriendsState as AppState).settings).toMatchObject({
+      telegramBotToken: "saved-token",
+      telegramChatId: "saved-chat"
+    });
+  });
+
+  it("does not mix partial draft Telegram test credentials with saved credentials", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const { send } = await setupWorker({
+      initialState: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          telegramBotToken: "saved-token",
+          telegramChatId: "saved-chat"
+        }
+      }
+    });
+
+    const response = await send({ type: "testTelegramNotification", credentials: { kind: "draft", botToken: "draft-token", chatId: "" } });
+
+    expect(response).toEqual({ ok: false, error: "请先填写 Bot Token 和 Chat ID。" });
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("records failed direct linux.do attempts for non-mutating profile lookup", async () => {
