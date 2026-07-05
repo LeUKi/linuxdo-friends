@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 136 136" role="img" aria-label="佬朋友图标">
+  <defs>
+    <clipPath id="badge-clip"><circle cx="68" cy="68" r="54"/></clipPath>
+    <linearGradient id="orange" x1="4" y1="97" x2="132" y2="132" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffb000"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="136" height="136" rx="20" fill="#ffffff"/>
+  <circle cx="68" cy="68" r="58" fill="#ffffff"/>
+  <g clip-path="url(#badge-clip)">
+    <rect x="4" y="4" width="128" height="128" fill="#f8fbfa"/>
+    <path d="M4 4H132V45L4 71Z" fill="#171d1c"/>
+    <circle cx="39" cy="55" r="11.5" fill="#f8fbfa"/>
+    <circle cx="64" cy="50" r="11.5" fill="#f8fbfa"/>
+    <circle cx="43" cy="58" r="5.6" fill="#171d1c"/>
+    <circle cx="68" cy="53" r="5.6" fill="#171d1c"/>
+    <path d="M4 71L132 45V97H4Z" fill="#f8fbfa"/>
+    <rect x="4" y="97" width="128" height="35" fill="url(#orange)"/>
+  </g>
+  <circle cx="68" cy="68" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+</svg>

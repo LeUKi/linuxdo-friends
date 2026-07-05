@@ -1,0 +1,233 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480" role="img" aria-label="佬朋友窥视风格图标候选">
+  <defs>
+    <clipPath id="round-logo"><circle cx="64" cy="64" r="54"/></clipPath>
+    <linearGradient id="orange" x1="18" y1="82" x2="110" y2="122" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffb000"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="24" y1="22" x2="104" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0fbaa4"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#101817" flood-opacity="0.16"/>
+    </filter>
+
+    <g id="eyes-a">
+      <circle cx="43" cy="61" r="13" fill="#f6f8f7"/>
+      <circle cx="62" cy="56" r="13" fill="#f6f8f7"/>
+      <circle cx="47" cy="64" r="6.2" fill="#171d1c"/>
+      <circle cx="65" cy="59" r="6.2" fill="#171d1c"/>
+    </g>
+    <g id="eyes-b">
+      <path d="M40 67a13 13 0 0 1 26 0v15H40z" fill="#f8fbfa"/>
+      <path d="M66 63a13 13 0 0 1 26 0v15H66z" fill="#f8fbfa"/>
+      <circle cx="55" cy="70" r="6.2" fill="#171d1c"/>
+      <circle cx="80" cy="66" r="6.2" fill="#171d1c"/>
+    </g>
+    <g id="eyes-c">
+      <circle cx="49" cy="60" r="11" fill="#f8fbfa"/>
+      <circle cx="71" cy="60" r="11" fill="#f8fbfa"/>
+      <circle cx="53" cy="63" r="5.5" fill="#171d1c"/>
+      <circle cx="75" cy="63" r="5.5" fill="#171d1c"/>
+    </g>
+  </defs>
+
+  <rect width="640" height="480" fill="#f6f8f7"/>
+
+  <g fill="#5d6763" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="14" font-weight="700" text-anchor="middle">
+    <text x="84" y="162">1</text>
+    <text x="236" y="162">2</text>
+    <text x="388" y="162">3</text>
+    <text x="540" y="162">4</text>
+    <text x="84" y="314">5</text>
+    <text x="236" y="314">6</text>
+    <text x="388" y="314">7</text>
+    <text x="540" y="314">8</text>
+    <text x="84" y="466">9</text>
+    <text x="236" y="466">10</text>
+    <text x="388" y="466">11</text>
+    <text x="540" y="466">12</text>
+  </g>
+
+  <g transform="translate(16 16)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 18H128V63L0 92Z" fill="#171d1c"/>
+        <use href="#eyes-a"/>
+        <path d="M0 82L128 50V84L0 110Z" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(168 16)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 20H128V58L0 78Z" fill="#171d1c"/>
+        <use href="#eyes-b"/>
+        <path d="M0 72L128 60V88L0 98Z" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(320 16)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <rect width="128" height="64" fill="#171d1c"/>
+        <use href="#eyes-c"/>
+        <rect y="62" width="128" height="30" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(472 16)">
+    <rect width="136" height="136" rx="20" fill="#101817" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 16H128V55L0 84Z" fill="#171d1c"/>
+        <use href="#eyes-a" transform="translate(3 -1)"/>
+        <path d="M0 78L128 45V79L0 105Z" fill="#f8fbfa"/>
+        <path d="M0 78L128 45" stroke="#0d9488" stroke-width="4" opacity="0.7"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(16 168)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 16H128V70H0z" fill="#171d1c"/>
+        <path d="M35 68a13 13 0 0 1 26 0v14H35z" fill="#f8fbfa"/>
+        <path d="M62 68a13 13 0 0 1 26 0v14H62z" fill="#f8fbfa"/>
+        <circle cx="50" cy="72" r="5.8" fill="#171d1c"/>
+        <circle cx="76" cy="72" r="5.8" fill="#171d1c"/>
+        <rect y="70" width="128" height="27" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(168 168)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 10H128V55L38 72L0 72Z" fill="#171d1c"/>
+        <use href="#eyes-b" transform="translate(-6 -5)"/>
+        <path d="M0 68L128 52V86L0 92Z" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(320 168)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 14H128V58L0 66Z" fill="#171d1c"/>
+        <use href="#eyes-c" transform="translate(1 -6)"/>
+        <path d="M0 64L128 57V90L0 95Z" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(472 168)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <rect x="10" y="10" width="108" height="108" rx="26" fill="#f8fbfa"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 17H128V61L0 88Z" fill="#171d1c"/>
+        <use href="#eyes-a" transform="translate(-7 0)"/>
+        <path d="M0 80L128 52V86L0 111Z" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(16 320)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="#f8fbfa"/>
+        <path d="M0 12H128V64H0Z" fill="#171d1c"/>
+        <path d="M32 63a12 12 0 0 1 24 0v13H32z" fill="#f8fbfa"/>
+        <path d="M56 63a12 12 0 0 1 24 0v13H56z" fill="#f8fbfa"/>
+        <circle cx="45" cy="67" r="5.4" fill="#171d1c"/>
+        <circle cx="68" cy="67" r="5.4" fill="#171d1c"/>
+        <rect y="65" width="128" height="26" fill="#f8fbfa"/>
+        <path d="M0 94H128V128H0Z" fill="url(#orange)"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(168 320)">
+    <rect width="136" height="136" rx="20" fill="#101817" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 20H128V60L0 60Z" fill="#171d1c"/>
+        <use href="#eyes-c" transform="translate(-12 -4)"/>
+        <rect y="60" width="128" height="27" fill="#f8fbfa"/>
+        <path d="M0 87L128 76V95L0 105Z" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(320 320)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#teal)"/>
+        <path d="M0 18H128V60L0 80Z" fill="#171d1c"/>
+        <use href="#eyes-a" transform="translate(0 -3)"/>
+        <path d="M0 72L128 54V88L0 104Z" fill="#f8fbfa"/>
+        <path d="M0 98H128V128H0Z" fill="url(#orange)"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <g transform="translate(472 320)">
+    <rect width="136" height="136" rx="20" fill="#ffffff" filter="url(#soft)"/>
+    <g transform="translate(4 4)">
+      <circle cx="64" cy="64" r="58" fill="#ffffff"/>
+      <g clip-path="url(#round-logo)">
+        <rect width="128" height="128" fill="url(#orange)"/>
+        <path d="M0 12H128V58L0 78Z" fill="#171d1c"/>
+        <path d="M38 64a10 10 0 0 1 20 0v12H38z" fill="#f8fbfa"/>
+        <path d="M62 59a10 10 0 0 1 20 0v12H62z" fill="#f8fbfa"/>
+        <circle cx="50" cy="66" r="5" fill="#171d1c"/>
+        <circle cx="73" cy="61" r="5" fill="#171d1c"/>
+        <path d="M0 73L128 48V84L0 102Z" fill="#f8fbfa"/>
+      </g>
+      <circle cx="64" cy="64" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+</svg>

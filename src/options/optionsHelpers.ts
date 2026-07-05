@@ -21,33 +21,26 @@ export function cloudArchiveStatusTitle(state: CloudArchiveLocalStateResult | nu
   return cloudArchiveStatusCopy(state).title;
 }
 
-export function cloudArchiveStatusDescription(state: CloudArchiveLocalStateResult | null): string {
-  return cloudArchiveStatusCopy(state).description;
-}
-
 export function cloudArchiveStatusHint(state: CloudArchiveLocalStateResult | null): string {
   return cloudArchiveStatusCopy(state).hint;
 }
 
-function cloudArchiveStatusCopy(state: CloudArchiveLocalStateResult | null): { title: string; description: string; hint: string } {
+function cloudArchiveStatusCopy(state: CloudArchiveLocalStateResult | null): { title: string; hint: string } {
   const archiveState: CloudArchiveLocalState = state?.archiveState ?? "unbound";
   if (archiveState === "same") {
     return {
       title: "已备份",
-      description: "可迁移配置已备份到 linuxdo-cloud-save.lafish.workers.dev。",
       hint: state?.syncedAt ? `同步于 ${new Date(state.syncedAt).toLocaleString()}` : "可迁移配置已备份到 linuxdo-cloud-save。"
     };
   }
   if (archiveState === "different") {
     return {
       title: "待备份",
-      description: "可迁移配置有更新，尚未备份到 linuxdo-cloud-save.lafish.workers.dev。",
       hint: "建议备份到 linuxdo-cloud-save。"
     };
   }
   return {
     title: "未绑定",
-    description: "绑定后可以把可迁移配置备份到 linuxdo-cloud-save.lafish.workers.dev。",
     hint: "尚未绑定云存档。"
   };
 }

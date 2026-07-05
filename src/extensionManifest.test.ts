@@ -18,6 +18,16 @@ describe("extension manifest safety", () => {
   it("declares the MV3 extension surfaces inside the linux.do boundary", () => {
     expect(manifest.manifest_version).toBe(3);
     expect(manifest.action.default_title).toBe("佬朋友");
+    expect(manifest.action.default_icon).toEqual({
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    });
+    expect(manifest.icons).toEqual({
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    });
     expect(manifest.action.default_popup).toBeUndefined();
     expect(manifest.side_panel.default_path).toBe("src/side-panel/index.html");
     expect(manifest.options_page).toBe("src/options/index.html");

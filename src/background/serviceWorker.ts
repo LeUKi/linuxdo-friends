@@ -179,7 +179,7 @@ async function sendLaoFindsBrowserNotification({
   try {
     await chrome.notifications.create(notificationId, {
       type: "basic",
-      iconUrl: chrome.runtime.getURL("notification-icon.svg"),
+      iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
       title: "佬有料有新收录",
       message: `${sourceLabel}新增 ${count} 条，点击查看佬有料。`,
       priority: 1

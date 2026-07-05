@@ -104,6 +104,13 @@
 >
 > 扩展不绕过 Cloudflare，不读取或导出 Cookie，不使用远程服务器代请求 linux.do。云存档和 Telegram 属于可选集成；配置导出和云存档可能包含已配置的 Telegram Bot Token / Chat ID，请把备份文件作为私密数据保存。
 
+## 商店素材
+
+- Store icon: `store-assets/ld-friends-icon-128.png`
+- Small promo tile: `store-assets/small-promo-tile-440x280.png`
+- SVG sources: `store-assets/ld-friends-icon.svg`, `store-assets/small-promo-tile.svg`
+- Extension manifest icons: `public/icons/icon-16.png`, `public/icons/icon-32.png`, `public/icons/icon-48.png`, `public/icons/icon-128.png`
+
 ## Source map 和发布包
 
 当前 Vite 构建启用了 `sourcemap: true`，`scripts/package-extension.mjs` 会把 `dist/` 原样打包，因此 release zip 会包含 `.map` 文件。当前建议保留这一行为：项目开源，source map 有助于审核透明度和问题诊断；同时必须保证仓库源码和打包产物中没有硬编码个人密钥、Token 或 Cookie。

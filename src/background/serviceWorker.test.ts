@@ -260,7 +260,11 @@ describe("message contracts", () => {
     expect(response).toMatchObject({ ok: true, data: { laoFindsStartedAt: "2026-06-28T00:00:00.000Z" } });
     expect(notifications.create).toHaveBeenCalledWith(
       expect.stringMatching(/^linuxdoFriends\.laoFinds\./),
-      expect.objectContaining({ title: "佬有料有新收录", message: "自动捞料新增 1 条，点击查看佬有料。" })
+      expect.objectContaining({
+        iconUrl: "chrome-extension://linuxdo-friends/icons/icon-128.png",
+        title: "佬有料有新收录",
+        message: "自动捞料新增 1 条，点击查看佬有料。"
+      })
     );
     expect(fetch).toHaveBeenCalledWith(
       "https://api.telegram.org/botbot-token/sendMessage",

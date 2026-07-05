@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="280" viewBox="0 0 440 280" role="img" aria-label="佬朋友 Chrome Web Store small promo tile">
+  <defs>
+    <linearGradient id="tile-bg" x1="0" y1="0" x2="440" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f8fbfa"/>
+      <stop offset="1" stop-color="#edf4f2"/>
+    </linearGradient>
+    <linearGradient id="promo-orange" x1="4" y1="97" x2="132" y2="132" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffb000"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <clipPath id="promo-badge-clip"><circle cx="68" cy="68" r="54"/></clipPath>
+    <filter id="tile-shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#1f2a2a" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+  <rect width="440" height="280" rx="0" fill="url(#tile-bg)"/>
+  <g opacity="0.55">
+    <path d="M24 228H416" stroke="#d2dedb" stroke-width="1"/>
+    <path d="M24 188H416" stroke="#e3ece9" stroke-width="1"/>
+    <path d="M24 148H416" stroke="#e3ece9" stroke-width="1"/>
+  </g>
+
+  <g transform="translate(34 42)">
+    <g transform="scale(0.867647)">
+      <rect width="136" height="136" rx="20" fill="#ffffff"/>
+      <circle cx="68" cy="68" r="58" fill="#ffffff"/>
+      <g clip-path="url(#promo-badge-clip)">
+        <rect x="4" y="4" width="128" height="128" fill="#f8fbfa"/>
+        <path d="M4 4H132V45L4 71Z" fill="#171d1c"/>
+        <circle cx="39" cy="55" r="11.5" fill="#f8fbfa"/>
+        <circle cx="64" cy="50" r="11.5" fill="#f8fbfa"/>
+        <circle cx="43" cy="58" r="5.6" fill="#171d1c"/>
+        <circle cx="68" cy="53" r="5.6" fill="#171d1c"/>
+        <path d="M4 71L132 45V97H4Z" fill="#f8fbfa"/>
+        <rect x="4" y="97" width="128" height="35" fill="url(#promo-orange)"/>
+      </g>
+      <circle cx="68" cy="68" r="56" fill="none" stroke="#f8fbfa" stroke-width="5"/>
+    </g>
+  </g>
+
+  <text x="34" y="191" fill="#101817" font-size="28" font-weight="700" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Arial Unicode MS', sans-serif">佬朋友</text>
+  <text x="35" y="217" fill="#52625f" font-size="13" font-weight="600" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', Arial, sans-serif">LinuxDo Friends</text>
+  <text x="35" y="239" fill="#066a60" font-size="11" font-weight="600" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Arial Unicode MS', sans-serif">跟踪你关心的佬朋友</text>
+
+  <g filter="url(#tile-shadow)" transform="translate(180 36)">
+    <rect width="224" height="208" rx="14" fill="#ffffff" stroke="#d2dedb"/>
+    <rect x="14" y="14" width="196" height="22" rx="7" fill="#edf4f2"/>
+    <circle cx="28" cy="25" r="6" fill="#0d9488"/>
+    <rect x="42" y="21" width="72" height="8" rx="4" fill="#52625f" opacity="0.36"/>
+    <rect x="162" y="20" width="34" height="10" rx="5" fill="#dcfbf6" stroke="#20b8a6"/>
+
+    <g transform="translate(14 54)">
+      <rect width="196" height="40" rx="9" fill="#f8fbfa" stroke="#e3ece9"/>
+      <circle cx="22" cy="20" r="11" fill="#dcfbf6" stroke="#20b8a6"/>
+      <rect x="42" y="11" width="64" height="8" rx="4" fill="#1f2a2a" opacity="0.78"/>
+      <rect x="42" y="25" width="104" height="6" rx="3" fill="#71817d" opacity="0.45"/>
+      <circle cx="169" cy="20" r="5" fill="#f59e0b"/>
+    </g>
+
+    <g transform="translate(14 104)">
+      <rect width="196" height="40" rx="9" fill="#ffffff" stroke="#e3ece9"/>
+      <circle cx="22" cy="20" r="11" fill="#e8edff" stroke="#91a0f5"/>
+      <rect x="42" y="11" width="72" height="8" rx="4" fill="#1f2a2a" opacity="0.70"/>
+      <rect x="42" y="25" width="118" height="6" rx="3" fill="#71817d" opacity="0.40"/>
+      <rect x="158" y="15" width="22" height="10" rx="5" fill="#fff2c8" stroke="#d69a23"/>
+    </g>
+
+    <g transform="translate(14 154)">
+      <rect width="196" height="40" rx="9" fill="#f8fbfa" stroke="#e3ece9"/>
+      <circle cx="22" cy="20" r="11" fill="#ffe4ec" stroke="#e28aa4"/>
+      <rect x="42" y="11" width="58" height="8" rx="4" fill="#1f2a2a" opacity="0.72"/>
+      <rect x="42" y="25" width="90" height="6" rx="3" fill="#71817d" opacity="0.40"/>
+      <path d="M164 24C171 15 179 15 186 24" fill="none" stroke="#0d9488" stroke-width="4" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

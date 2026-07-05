@@ -9,7 +9,6 @@ import { deriveFollowedCandidates, deriveFriendList } from "../popup/selectors";
 import { classNames } from "./classNames";
 import { SettingsCard } from "./SettingsCard";
 import {
-  cloudArchiveStatusDescription,
   cloudArchiveStatusHint,
   cloudArchiveStatusTitle,
   cloudBindingMetaText,
@@ -25,6 +24,19 @@ type UpdateSettings = (patch: Partial<AppState["settings"]>) => Promise<void>;
 type Friends = ReturnType<typeof deriveFriendList>;
 type FollowedCandidates = ReturnType<typeof deriveFollowedCandidates>;
 type CloudBinding = Extract<CloudConfigViewState["binding"], { bound: true }> | null;
+
+function DataDisclosure({ items }: { items: string[] }) {
+  return (
+    <div className={classNames("settings-data-disclosure")} aria-label="数据说明">
+      <strong>数据说明</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function BasicSettingsSection({
   accountBusy,
@@ -270,9 +282,13 @@ export function NotificationsSettingsSection({
             配置
           </button>
         </div>
-        <p className={classNames("settings-meta")}>
-          Bot Token 和 Chat ID 保存在本地；已配置时会随配置导出和云存档备份；只有启用 Telegram 通知或发送测试时才请求 Telegram API。
-        </p>
+        <DataDisclosure
+          items={[
+            "Bot Token 和 Chat ID 保存在本地。",
+            "已配置时会随配置导出和云存档备份。",
+            "只有发送测试或启用通知时才请求 Telegram API。"
+          ]}
+        />
         {telegramMessage ? <p className={classNames("settings-meta")}>{telegramMessage}</p> : null}
         {telegramModalOpen ? (
           <div className={classNames("modal-backdrop")} role="presentation">
@@ -503,7 +519,7 @@ export function DataSettingsSection({
     <div className={classNames("settings-card-list")}>
       <SettingsCard
         title="配置迁移"
-        subtitle="导入导出佬朋友、打捞规则、请求统计和设置；已配置的 Telegram Bot Token / Chat ID 也会随配置迁移。"
+        subtitle="导入导出佬朋友、打捞规则、请求统计和设置。"
         actions={
           <>
             <button className={classNames("small-action")} type="button" onClick={onExportConfig}>
@@ -522,7 +538,13 @@ export function DataSettingsSection({
           </>
         }
       >
-        <p className={classNames("settings-meta")}>账号登录状态、动态内容和头像缓存不会导出。导出的 JSON 可能包含通知凭据，请作为私密备份保存。</p>
+        <DataDisclosure
+          items={[
+            "导出的 JSON 可能包含 Telegram Bot Token / Chat ID。",
+            "账号登录状态、动态内容和头像缓存不会导出。",
+            "请把导出文件作为私密备份保存。"
+          ]}
+        />
         {configMessage ? <p className={classNames("settings-meta")}>{configMessage}</p> : null}
       </SettingsCard>
 
@@ -530,7 +552,7 @@ export function DataSettingsSection({
         id="cloud-backup"
         ref={cloudBackupRef}
         title="云存档"
-        subtitle={cloudArchiveStatusDescription(cloudArchiveState)}
+        subtitle="备份和恢复可迁移配置。"
         actions={
           <>
             <button className={classNames("small-action")} type="button" disabled={cloudBusy != null} onClick={onBindCloudSave}>
@@ -556,15 +578,19 @@ export function DataSettingsSection({
           </>
         }
       >
-        <p className={classNames("settings-meta")}>
-          备份会把可迁移配置上传到 linuxdo-cloud-save.lafish.workers.dev，包括佬朋友、打捞规则、请求统计、设置，以及已配置的 Telegram Bot Token / Chat ID。
-        </p>
         <div className={classNames(`cloud-backup-status cloud-backup-${cloudArchiveState?.archiveState ?? "unbound"}`)}>
           <strong>{cloudArchiveStatusTitle(cloudArchiveState)}</strong>
           <span>{cloudArchiveStatusHint(cloudArchiveState)}</span>
         </div>
         <p className={classNames("settings-meta cloud-backup-remote")}>{cloudStatusText(cloudState?.status)}</p>
         {cloudBinding ? <p className={classNames("settings-meta cloud-backup-meta")}>{cloudBindingMetaText(cloudBinding)}</p> : null}
+        <DataDisclosure
+          items={[
+            "备份会上传可迁移配置到 linuxdo-cloud-save.lafish.workers.dev。",
+            "内容包括佬朋友、打捞规则、请求统计和设置。",
+            "已配置的 Telegram Bot Token / Chat ID 也会随云存档备份。"
+          ]}
+        />
         <div className={classNames("settings-setting-row timed-setting-row cloud-stats-sync-row")}>
           <div>
             <strong>每日自动备份</strong>
