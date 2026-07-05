@@ -244,7 +244,7 @@ export function NotificationsSettingsSection({
       </SettingsCard>
       <SettingsCard
         title="Telegram"
-        subtitle="发送到 Telegram。"
+        subtitle="发送打捞通知到 Telegram。"
         actions={
           <>
             <button
@@ -270,6 +270,9 @@ export function NotificationsSettingsSection({
             配置
           </button>
         </div>
+        <p className={classNames("settings-meta")}>
+          Bot Token 和 Chat ID 保存在本地；已配置时会随配置导出和云存档备份；只有启用 Telegram 通知或发送测试时才请求 Telegram API。
+        </p>
         {telegramMessage ? <p className={classNames("settings-meta")}>{telegramMessage}</p> : null}
         {telegramModalOpen ? (
           <div className={classNames("modal-backdrop")} role="presentation">
@@ -277,7 +280,7 @@ export function NotificationsSettingsSection({
               <div className={classNames("modal-head")}>
                 <div>
                   <h2 id="telegram-config-title">Telegram Bot 配置</h2>
-                  <p className={classNames("settings-meta")}>保存 Bot Token 和 Chat ID 后可发送通知。</p>
+                  <p className={classNames("settings-meta")}>保存 Bot Token 和 Chat ID 后可发送通知；凭据会保存在本地并随配置迁移。</p>
                 </div>
                 <button className={classNames("icon-button")} type="button" aria-label="关闭 Telegram 配置" onClick={closeTelegramModal}>
                   ×
@@ -500,7 +503,7 @@ export function DataSettingsSection({
     <div className={classNames("settings-card-list")}>
       <SettingsCard
         title="配置迁移"
-        subtitle="导入导出佬朋友、设置和请求统计；账号登录状态、动态内容和头像缓存不会导出。"
+        subtitle="导入导出佬朋友、打捞规则、请求统计和设置；已配置的 Telegram Bot Token / Chat ID 也会随配置迁移。"
         actions={
           <>
             <button className={classNames("small-action")} type="button" onClick={onExportConfig}>
@@ -519,6 +522,7 @@ export function DataSettingsSection({
           </>
         }
       >
+        <p className={classNames("settings-meta")}>账号登录状态、动态内容和头像缓存不会导出。导出的 JSON 可能包含通知凭据，请作为私密备份保存。</p>
         {configMessage ? <p className={classNames("settings-meta")}>{configMessage}</p> : null}
       </SettingsCard>
 
@@ -552,6 +556,9 @@ export function DataSettingsSection({
           </>
         }
       >
+        <p className={classNames("settings-meta")}>
+          备份会把可迁移配置上传到 linuxdo-cloud-save.lafish.workers.dev，包括佬朋友、打捞规则、请求统计、设置，以及已配置的 Telegram Bot Token / Chat ID。
+        </p>
         <div className={classNames(`cloud-backup-status cloud-backup-${cloudArchiveState?.archiveState ?? "unbound"}`)}>
           <strong>{cloudArchiveStatusTitle(cloudArchiveState)}</strong>
           <span>{cloudArchiveStatusHint(cloudArchiveState)}</span>

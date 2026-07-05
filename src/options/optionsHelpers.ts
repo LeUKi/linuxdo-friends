@@ -34,20 +34,20 @@ function cloudArchiveStatusCopy(state: CloudArchiveLocalStateResult | null): { t
   if (archiveState === "same") {
     return {
       title: "已备份",
-      description: "本地配置已备份到云端。",
-      hint: state?.syncedAt ? `同步于 ${new Date(state.syncedAt).toLocaleString()}` : "本地配置已备份到云端。"
+      description: "可迁移配置已备份到 linuxdo-cloud-save.lafish.workers.dev。",
+      hint: state?.syncedAt ? `同步于 ${new Date(state.syncedAt).toLocaleString()}` : "可迁移配置已备份到 linuxdo-cloud-save。"
     };
   }
   if (archiveState === "different") {
     return {
       title: "待备份",
-      description: "本地配置有更新，尚未备份到云端。",
-      hint: "建议备份到云端。"
+      description: "可迁移配置有更新，尚未备份到 linuxdo-cloud-save.lafish.workers.dev。",
+      hint: "建议备份到 linuxdo-cloud-save。"
     };
   }
   return {
     title: "未绑定",
-    description: "绑定后可以把佬朋友、设置和请求统计备份到云端。",
+    description: "绑定后可以把可迁移配置备份到 linuxdo-cloud-save.lafish.workers.dev。",
     hint: "尚未绑定云存档。"
   };
 }

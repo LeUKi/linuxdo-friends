@@ -142,6 +142,8 @@ describe("OptionsApp update diagnostics", () => {
     expect(click).toHaveBeenCalled();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:config");
     expect(container.textContent).toContain("已导出 1 位佬朋友配置。");
+    expect(container.textContent).toContain("已配置的 Telegram Bot Token / Chat ID 也会随配置迁移");
+    expect(container.textContent).toContain("导出的 JSON 可能包含通知凭据");
   });
 
   it("imports config from the options page after confirmation", async () => {
@@ -318,6 +320,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).toContain("已备份");
     expect(container.textContent).toContain("云端配置：1 位佬朋友");
     expect(container.textContent).toContain("账号 42");
+    expect(container.textContent).toContain("可迁移配置已备份到 linuxdo-cloud-save.lafish.workers.dev。");
     expect(container.textContent).not.toContain("chromiumapp.org");
     expect(container.textContent).not.toContain("secret-token");
   });
@@ -332,8 +335,10 @@ describe("OptionsApp update diagnostics", () => {
     const status = container.querySelector(".cloud-backup-status");
     expect(status?.classList.contains("cloud-backup-different")).toBe(true);
     expect(status?.textContent).toContain("待备份");
-    expect(status?.textContent).toContain("建议备份到云端。");
-    expect(container.textContent).toContain("本地配置有更新，尚未备份到云端。");
+    expect(status?.textContent).toContain("建议备份到 linuxdo-cloud-save。");
+    expect(container.textContent).toContain("可迁移配置有更新，尚未备份到 linuxdo-cloud-save.lafish.workers.dev。");
+    expect(container.textContent).toContain("备份会把可迁移配置上传到 linuxdo-cloud-save.lafish.workers.dev");
+    expect(container.textContent).toContain("已配置的 Telegram Bot Token / Chat ID");
     expect(getButton(container, "备份到云端").classList.contains("primary-action")).toBe(true);
     expect(container.textContent).not.toContain("不一致");
   });
@@ -579,6 +584,8 @@ describe("OptionsApp update diagnostics", () => {
     expect(telegramCard.querySelector(".settings-card-body .switch-button")).toBeNull();
     expect(telegramCard.textContent).toContain("Telegram Bot");
     expect(telegramCard.textContent).toContain("未配置 Bot Token 和 Chat ID");
+    expect(telegramCard.textContent).toContain("Bot Token 和 Chat ID 保存在本地");
+    expect(telegramCard.textContent).toContain("已配置时会随配置导出和云存档备份");
     expect(telegramCard.querySelector("#tg-bot-token")).toBeNull();
     expect(telegramCard.querySelector("#tg-chat-id")).toBeNull();
 
@@ -588,6 +595,7 @@ describe("OptionsApp update diagnostics", () => {
     });
     const telegramDialog = getTelegramDialog(container);
     expect(telegramDialog?.textContent).toContain("Telegram Bot 配置");
+    expect(telegramDialog?.textContent).toContain("凭据会保存在本地并随配置迁移");
     const saveButton = getButton(telegramDialog!, "保存");
     const saveAndEnableButton = getButton(telegramDialog!, "保存并开启");
     expect(saveButton.classList.contains("primary-action")).toBe(false);

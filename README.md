@@ -1,8 +1,10 @@
 # 佬朋友 - LinuxDo Friends
 
-佬朋友是一个面向 [linux.do](https://linux.do/) 的浏览器插件，用来在本地管理关注对象，并主动刷新好友状态和公开动态。
+佬朋友是一个面向 [linux.do](https://linux.do/) 的浏览器插件，用来在本地优先地管理关注对象，并主动刷新好友状态和公开动态。
 
-项目目标是克制地把“关注”升级成更好用的“朋友”视图：列表里看最近状态，佬友圈里看公开活动。插件不绕过 Cloudflare，不读取或导出 Cookie，不使用远程服务器代请求。
+项目目标是克制地把“关注”升级成更好用的“朋友”视图：列表里看最近状态，佬友圈里看公开活动。插件不绕过 Cloudflare，不读取或导出 Cookie，不使用远程服务器代请求 linux.do。
+
+佬朋友是 local-first，而不是 local-only。默认数据优先保存在浏览器扩展存储中；用户可以按需启用云存档和 Telegram 通知等可选集成。扩展界面打开时会检查 GitHub Release 更新，并使用 12 小时缓存。
 
 ## 功能
 
@@ -11,6 +13,11 @@
 - 查看佬友圈动态，支持按用户和活动类型筛选。
 - 在 linux.do 页面内集成入口，并支持浏览器侧栏视图。
 - 数据优先保存在本地浏览器扩展存储中。
+- 可选云存档会把可迁移配置备份到 `linuxdo-cloud-save.lafish.workers.dev`，包括佬朋友、打捞规则、请求统计、设置，以及已配置的 Telegram Bot Token / Chat ID。
+- 可选 Telegram 通知会在启用通知或发送测试时请求 Telegram API。
+- GitHub Release 更新检查会在扩展界面打开时请求 GitHub API，并使用 12 小时缓存；失败时可回退到 `github-api.lafish.workers.dev` 镜像。
+
+更多发布和隐私披露见 [隐私政策草案](./docs/privacy-policy.md) 与 [Chrome Web Store 提交说明](./docs/chrome-web-store-submission.md)。
 
 ## 开发
 
