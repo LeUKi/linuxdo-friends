@@ -260,6 +260,7 @@ export const removeFriendAtom = atom(null, async (_get, set, username: string) =
 export const updateFriendAtom = atom(null, async (_get, set, username: string, patch: Partial<Pick<FriendUser, "note" | "groups" | "pinned" | "activityKinds">>) => {
   const response = await sendLoadingStateCommand(set, { type: "updateFriend", username, patch });
   applyStateResponse(set, response, response.ok ? null : undefined);
+  return response;
 });
 
 export const upsertDredgeRuleAtom = atom(null, async (_get, set, rule: Partial<DredgeRule> & { id?: string }) => {

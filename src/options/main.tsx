@@ -40,6 +40,7 @@ import type {
   Username
 } from "../shared/types";
 import { deriveFollowedCandidates, deriveFriendList } from "../popup/selectors";
+import { normalizeUsername } from "../domain/friends";
 import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
 import { deriveRequestStatsView } from "../domain/requestStats";
 import { classNames } from "./classNames";
@@ -301,6 +302,14 @@ export function OptionsApp() {
     void updateFriend(username, { activityKinds });
   }
 
+  async function handleUpdateFriendNote(username: Username, note: string) {
+    const response = await updateFriend(username, { note });
+    if (!response.ok) return { ok: false as const, error: response.error };
+    return response.data.friends[normalizeUsername(username)]
+      ? { ok: true as const }
+      : { ok: false as const, error: "该用户已不在佬朋友中。" };
+  }
+
   async function handleClearCache() {
     await clearCache();
   }
@@ -442,6 +451,7 @@ export function OptionsApp() {
               onLookupFriend={(target) => lookupFriendProfile(target)}
               onRemoveFriend={(target) => void removeFriend(target)}
               onSyncFollows={() => void handleSyncFollows()}
+              onUpdateNote={handleUpdateFriendNote}
               onUpdateScope={handleUpdateFriendScope}
               setFriendsQuery={setFriendsQuery}
               syncBusy={syncBusy}

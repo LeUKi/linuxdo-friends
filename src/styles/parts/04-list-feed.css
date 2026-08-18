@@ -194,7 +194,137 @@
 
 .friend-note {
   grid-column: 1 / -1;
-  overflow-wrap: anywhere;
+}
+
+.friend-note-preview {
+  display: block;
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-note-preview[tabindex="0"] {
+  cursor: help;
+}
+
+.friend-note-preview:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.friend-note-preview-side-panel,
+.friend-note-preview-user-card {
+  max-width: min(240px, 100%);
+}
+
+.friend-note-preview-settings {
+  max-width: min(280px, 100%);
+}
+
+.friend-note-preview-profile {
+  max-width: min(420px, 100%);
+}
+
+.friend-note-preview-profile,
+.friend-note-preview-post,
+.friend-note-preview-user-card {
+  color: var(--accent-strong);
+}
+
+.friend-note-preview-post {
+  display: inline-block;
+  max-width: min(160px, 40vw);
+  vertical-align: baseline;
+}
+
+.linuxdo-friends-post-note-root {
+  display: inline-flex;
+  min-width: 0;
+  max-width: min(160px, 40vw);
+  align-items: baseline;
+  margin-inline-start: 0.45em;
+  line-height: inherit;
+  vertical-align: baseline;
+}
+
+.linuxdo-friends-note-row-root {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.friend-note-inline-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+
+:is(.friend-note-inline-row .friend-note-preview, .friend-note-placeholder) {
+  flex: 0 1 auto;
+}
+
+:is(.friend-note-placeholder, .friend-note-edit-button) {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-subtle);
+  font: inherit;
+  cursor: pointer;
+}
+
+.friend-note-placeholder {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friend-note-inline-row-profile .friend-note-placeholder,
+.friend-note-inline-row-user-card .friend-note-placeholder {
+  color: color-mix(in srgb, var(--accent-strong) 64%, var(--text-subtle));
+}
+
+.friend-note-edit-button {
+  display: inline-flex;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 4px;
+}
+
+.friend-note-placeholder:hover,
+.friend-note-placeholder:focus-visible,
+.friend-note-edit-button:hover,
+.friend-note-edit-button:focus-visible {
+  color: var(--accent-strong);
+}
+
+.friend-note-placeholder:focus-visible,
+.friend-note-edit-button:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.friend-note-edit-button:hover {
+  background: var(--surface-hover);
 }
 
 .filters {

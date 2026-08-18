@@ -1451,7 +1451,7 @@ describe("FriendsApp UI scene persistence", () => {
           refreshedAt: "2026-06-28T00:00:00.000Z"
         }),
         "neo",
-        { activityKinds: ["reply", "boost"] }
+        { activityKinds: ["reply", "boost"], note: "NAS" }
       )
     });
     const { container } = await renderFriendsApp("side-panel");
@@ -1460,6 +1460,8 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.textContent).not.toContain("去设置管理");
     expect(container.querySelector(".scope-select-trigger")).toBeFalsy();
     expect(container.querySelector(".candidate-action-remove")).toBeTruthy();
+    expect(container.querySelector(".candidate-note-edit")).toBeFalsy();
+    expect(container.querySelector(".modal-list .friend-note-preview")).toBeFalsy();
 
     await act(async () => {
       getButton(container, "移除").click();
@@ -1468,6 +1470,19 @@ describe("FriendsApp UI scene persistence", () => {
 
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "removeFriend", username: "neo" });
     expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#scope" });
+  });
+
+  it("shows a constrained friend note preview in the side panel", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    setupChrome({
+      session,
+      state: updateFriend(activityFeedState(), "neo", { note: "NAS homelab" })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    const note = container.querySelector(".friend-main-button .friend-note-preview-side-panel");
+    expect(note?.textContent).toBe("NAS homelab");
+    expect(note?.classList.contains("friend-note")).toBe(true);
   });
 
   it("keeps full activity scope quick actions out of the lightweight modal", async () => {

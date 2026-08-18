@@ -8,12 +8,12 @@
 
 ## 功能
 
-- 管理佬朋友列表，支持手动添加和从已关注列表快速添加。
+- 管理佬朋友列表，支持手动添加、从已关注列表快速添加，以及为已有佬朋友维护本地优先备注。
 - 查看好友最近状态，例如最后发帖和最后活动。
 - 查看佬友圈动态，支持按用户和活动类型筛选。
 - 在 linux.do 页面内集成入口，并支持浏览器侧栏视图。
 - 数据优先保存在本地浏览器扩展存储中。
-- 可选云存档会把可迁移配置备份到 `linuxdo-cloud-save.lafish.workers.dev`，包括佬朋友、打捞规则、请求统计、设置，以及已配置的 Telegram Bot Token / Chat ID。
+- 可选云存档会把可迁移配置备份到 `linuxdo-cloud-save.lafish.workers.dev`，包括佬朋友及其备注、打捞规则、请求统计、设置，以及已配置的 Telegram Bot Token / Chat ID。
 - 可选 Telegram 通知会在启用通知或发送测试时请求 Telegram API。
 - GitHub Release 更新检查会在扩展界面打开时请求 GitHub API，并使用 12 小时缓存；失败时可回退到 `github-api.lafish.workers.dev` 镜像。
 

@@ -145,6 +145,7 @@ describe("OptionsApp update diagnostics", () => {
     const migrationCard = headingByText(container, "配置迁移").closest<HTMLElement>(".settings-card");
     const disclosure = getDataDisclosure(migrationCard);
     expect(disclosure.textContent).toContain("数据说明");
+    expect(disclosure.textContent).toContain("好友备注默认保存在本地，导出配置时会随佬朋友配置迁移");
     expect(disclosure.textContent).toContain("导出的 JSON 可能包含 Telegram Bot Token / Chat ID");
     expect(disclosure.textContent).toContain("账号登录状态、动态内容和头像缓存不会导出");
     expect(disclosure.textContent).toContain("请把导出文件作为私密备份保存");
@@ -348,7 +349,7 @@ describe("OptionsApp update diagnostics", () => {
     expect(cloudCard?.textContent).not.toContain("可迁移配置有更新，尚未备份到 linuxdo-cloud-save.lafish.workers.dev。");
     const disclosure = getDataDisclosure(cloudCard);
     expect(disclosure.textContent).toContain("备份会上传可迁移配置到 linuxdo-cloud-save.lafish.workers.dev");
-    expect(disclosure.textContent).toContain("内容包括佬朋友、打捞规则、请求统计和设置");
+    expect(disclosure.textContent).toContain("内容包括佬朋友及其备注、打捞规则、请求统计和设置");
     expect(disclosure.textContent).toContain("已配置的 Telegram Bot Token / Chat ID 也会随云存档备份");
     expect(cloudCard?.textContent).not.toContain("备份会把可迁移配置上传到 linuxdo-cloud-save.lafish.workers.dev，包括");
     expect(getButton(container, "备份到云端").classList.contains("primary-action")).toBe(true);
@@ -1090,6 +1091,74 @@ describe("OptionsApp update diagnostics", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "removeFriend", username: "neo" });
   });
 
+  it("shows, saves, and clears friend notes from the friends section", async () => {
+    const state = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "Neo",
+        name: "Neo",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "neo",
+      { note: "NAS" }
+    );
+    const chromeMock = setupChrome({ state });
+    const { container } = await renderOptionsApp("#scope");
+
+    expect(container.querySelector(".friend-note-preview-settings")?.textContent).toBe("NAS");
+    const editButton = container.querySelector<HTMLButtonElement>('[aria-label="编辑 @neo 的备注"]');
+    await act(async () => editButton?.click());
+    const input = container.querySelector<HTMLInputElement>(".friend-note-field input");
+    expect(input?.value).toBe("NAS");
+
+    await act(async () => {
+      setInputValue(input!, "  Homelab  ");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>(".friend-note-dialog-actions .primary-action")?.click());
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "updateFriend", username: "neo", patch: { note: "Homelab" } });
+    expect(container.querySelector(".friend-note-modal")).toBeNull();
+    expect(container.querySelector(".friend-note-preview-settings")?.textContent).toBe("Homelab");
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="编辑 @neo 的备注"]')?.click());
+    const clearInput = container.querySelector<HTMLInputElement>(".friend-note-field input");
+    await act(async () => {
+      setInputValue(clearInput!, "   ");
+      clearInput?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>(".friend-note-dialog-actions .primary-action")?.click());
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "updateFriend", username: "neo", patch: { note: "" } });
+    expect(container.querySelector(".friend-note-preview-settings")).toBeNull();
+  });
+
+  it("keeps the friend note draft open when saving fails", async () => {
+    const state = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "Neo",
+        name: "Neo",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "neo",
+      { note: "NAS" }
+    );
+    const chromeMock = setupChrome({ state, updateFriendError: "保存失败" });
+    const { container } = await renderOptionsApp("#scope");
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="编辑 @neo 的备注"]')?.click());
+    const input = container.querySelector<HTMLInputElement>(".friend-note-field input");
+    await act(async () => {
+      setInputValue(input!, "失败草稿");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>(".friend-note-dialog-actions .primary-action")?.click());
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "updateFriend", username: "neo", patch: { note: "失败草稿" } });
+    expect(container.querySelector(".friend-note-modal")).toBeTruthy();
+    expect(container.querySelector<HTMLInputElement>(".friend-note-field input")?.value).toBe("失败草稿");
+    expect(container.querySelector(".friend-note-dialog-error")?.textContent).toBe("保存失败");
+  });
+
   it("syncs, looks up, and adds friends from the friends section", async () => {
     const chromeMock = setupChrome({ state: defaultAppState });
     const { container } = await renderOptionsApp("#scope");
@@ -1797,7 +1866,8 @@ function setupChrome({
   cloudArchiveState = differentCloudArchiveState(),
   identifyResponse,
   telegramTestResponse = { ok: true, data: "已发送测试消息。" },
-  updateSettingsError = null
+  updateSettingsError = null,
+  updateFriendError = null
 }: {
   state?: AppState;
   updateCheck?: {
@@ -1814,6 +1884,7 @@ function setupChrome({
   identifyResponse?: Promise<unknown>;
   telegramTestResponse?: { ok: true; data: unknown } | { ok: false; error: string };
   updateSettingsError?: string | null;
+  updateFriendError?: string | null;
 } = {}) {
   let currentState = state;
   let currentCloudState = cloudState;
@@ -1880,6 +1951,7 @@ function setupChrome({
       return { ok: true, data: currentState };
     }
     if (message.type === "updateFriend") {
+      if (updateFriendError) return { ok: false, error: updateFriendError };
       currentState = updateFriend(currentState, message.username, message.patch);
       return { ok: true, data: currentState };
     }

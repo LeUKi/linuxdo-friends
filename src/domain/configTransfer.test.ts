@@ -555,6 +555,13 @@ describe("config transfer", () => {
         neo: { ...base.friends.neo, activityKinds: ["reply" as const] }
       }
     };
+    const changedNote = {
+      ...base,
+      friends: {
+        ...base.friends,
+        neo: { ...base.friends.neo, note: "homelab" }
+      }
+    };
     const changedRule = {
       ...base,
       dredgeRules: [{ ...base.dredgeRules[0], patterns: ["LLM"] }]
@@ -616,6 +623,7 @@ describe("config transfer", () => {
     expect(fingerprint).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(fingerprint).toBe(await createConfigFingerprint(sameDifferentRuntimeState));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedScope));
+    expect(fingerprint).not.toBe(await createConfigFingerprint(changedNote));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedRule));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedSettings));
     expect(fingerprint).not.toBe(await createConfigFingerprint(changedTimedRefreshScopeMode));

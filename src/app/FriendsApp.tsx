@@ -78,6 +78,7 @@ import {
 import { VersionBadge } from "./VersionStatus";
 import { AvatarImageContext } from "./AvatarContext";
 import { FriendCandidateList } from "./FriendManagement";
+import { FriendNotePreview } from "./FriendNoteEditor";
 import { kindIcon } from "./activityKinds";
 import { UserIdentityRow } from "./UserIdentityRow";
 import { FilterPopover, type FilterOption } from "./FilterPopover";
@@ -197,7 +198,13 @@ function findScrollContainer(target: HTMLElement) {
   return null;
 }
 
-export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface }) {
+export function FriendsApp({
+  friendNoteTooltipPortalTarget,
+  surface = "side-panel"
+}: {
+  friendNoteTooltipPortalTarget?: Element | DocumentFragment;
+  surface?: AppSurface;
+}) {
   const [state] = useAtom(appStateAtom);
   const [loading] = useAtom(loadingAtom);
   const [status, setStatus] = useAtom(statusMessageAtom);
@@ -612,6 +619,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
 
       {tab === "friends" ? (
         <FriendListTab
+          friendNoteTooltipPortalTarget={friendNoteTooltipPortalTarget}
           friends={friends}
           loading={loading}
           now={relativeNow}
@@ -701,6 +709,7 @@ export function FriendsApp({ surface = "side-panel" }: { surface?: AppSurface })
 
 function FriendListTab({
   autoRefresh,
+  friendNoteTooltipPortalTarget,
   friends,
   loading,
   now,
@@ -714,6 +723,7 @@ function FriendListTab({
   refreshDisabled
 }: {
   autoRefresh: FriendStatusAutoRefreshSession;
+  friendNoteTooltipPortalTarget?: Element | DocumentFragment;
   friends: ReturnType<typeof deriveFriendList>;
   loading: boolean;
   now: number;
@@ -762,7 +772,14 @@ function FriendListTab({
                   <span>{latestStatus.label}</span>
                   <small>{formatRelativeTime(latestStatus.at, now)}</small>
                 </div>
-                {friend.note ? <p className="friend-note">{friend.note}</p> : null}
+                {friend.note ? (
+                  <FriendNotePreview
+                    className="friend-note"
+                    note={friend.note}
+                    surface="side-panel"
+                    tooltipPortalTarget={friendNoteTooltipPortalTarget}
+                  />
+                ) : null}
               </a>
               <button
                 className="friend-arrow-button"

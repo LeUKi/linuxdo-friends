@@ -87,6 +87,12 @@
   min-width: 0;
 }
 
+.candidate-identity {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
 .candidate-row button {
   flex: 0 0 auto;
   white-space: nowrap;
@@ -99,6 +105,84 @@
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.candidate-note-edit {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.friend-note-tooltip {
+  position: fixed;
+  z-index: 2147483645;
+  display: block;
+  max-width: min(320px, calc(100vw - 24px));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  box-shadow: 0 10px 24px var(--shadow);
+  color: var(--text-strong);
+  padding: 7px 9px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  white-space: normal;
+}
+
+.friend-note-backdrop {
+  z-index: 2147483646;
+}
+
+.friend-note-modal {
+  width: min(360px, 100%);
+  height: auto;
+  min-height: 0;
+  max-height: calc(100dvh - 24px);
+}
+
+.friend-note-dialog-user {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.friend-note-field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.friend-note-field-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.friend-note-field-meta .is-error,
+.friend-note-dialog-error {
+  color: var(--danger);
+}
+
+.friend-note-dialog-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.friend-note-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
 }
 
 .scope-select {

@@ -152,6 +152,19 @@ describe("storage migration", () => {
     });
   });
 
+  it("preserves an existing over-limit note until the user edits it", async () => {
+    const note = "中".repeat(81);
+    const storage = createMockStorage({
+      linuxdoFriendsState: {
+        friends: {
+          neo: { username: "neo", note }
+        }
+      }
+    });
+
+    await expect(loadState(storage)).resolves.toMatchObject({ friends: { neo: { note } } });
+  });
+
   it("preserves explicit empty friend activity scope", async () => {
     const storage = createMockStorage({
       linuxdoFriendsState: {

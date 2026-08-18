@@ -34,6 +34,12 @@ describe("message contracts", () => {
       })
     ).toBe(false);
   });
+
+  it("accepts normalized friend notes up to 80 characters and rejects longer updates", () => {
+    expect(isBackgroundCommand({ type: "updateFriend", username: "neo", patch: { note: "中".repeat(80) } })).toBe(true);
+    expect(isBackgroundCommand({ type: "updateFriend", username: "neo", patch: { note: "NAS\nlab" } })).toBe(true);
+    expect(isBackgroundCommand({ type: "updateFriend", username: "neo", patch: { note: "中".repeat(81) } })).toBe(false);
+  });
   it("accepts saved Telegram credentials marker for channel-level test notifications", () => {
     expect(
       isBackgroundCommand({

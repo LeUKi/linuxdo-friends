@@ -25,7 +25,7 @@ import {
   summarizeCloudConfigPayload
 } from "../domain/cloudConfig";
 import { applyConfigImport, createConfigExport, createConfigFingerprint, parseConfigImportJson } from "../domain/configTransfer";
-import { addFriendFromKnownUser, addFriendFromProfile, removeFriend, updateFriend, upsertFollowedUser, upsertFriendProfile } from "../domain/friends";
+import { addFriendFromKnownUser, addFriendFromProfile, normalizeUsername, removeFriend, updateFriend, upsertFollowedUser, upsertFriendProfile } from "../domain/friends";
 import {
   archiveLaoFindsItem,
   clearLaoFindsItems,
@@ -247,12 +247,21 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
     }
     case "removeFriend":
       return ok(await updateTimedActivityTargetInputs((state) => removeFriend(state, command.username)));
-    case "updateFriend":
-      return ok(
+    case "updateFriend": {
+      const username = normalizeUsername(command.username);
+      const applyUpdate = (state: AppState) => {
+        if (!state.friends[username]) throw new Error("该用户已不在佬朋友中。");
+        return updateFriend(state, username, command.patch);
+      };
+      const nextState =
         command.patch.activityKinds === undefined
-          ? await updateAppState((state) => updateFriend(state, command.username, command.patch))
-          : await updateTimedActivityTargetInputs((state) => updateFriend(state, command.username, command.patch))
-      );
+          ? await updateAppState(applyUpdate)
+          : await updateTimedActivityTargetInputs(applyUpdate);
+      if (!nextState.friends[username]) {
+        return { ok: false, error: "该用户已不在佬朋友中。" };
+      }
+      return ok(nextState);
+    }
     case "syncFollowedUsers":
       return runSiteDataTask(() => refreshState(syncFollowedUsersWithFallback));
     case "refreshFriendProfiles":

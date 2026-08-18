@@ -1,4 +1,5 @@
 import { nowIso } from "../shared/time";
+import { normalizeFriendNoteInput } from "./friendNote";
 import type { ActivityRefreshKind, AppState, FollowedUser, FriendProfileSummary, FriendUser, Username } from "../shared/types";
 
 export const ALL_ACTIVITY_KINDS: ActivityRefreshKind[] = ["topic", "reply", "boost", "reaction", "like"];
@@ -140,6 +141,7 @@ export function updateFriend(
   const next: FriendUser = {
     ...existing,
     ...patch,
+    note: patch.note === undefined ? existing.note : normalizeFriendNoteInput(patch.note),
     groups: patch.groups ?? existing.groups,
     activityKinds: patch.activityKinds === undefined ? existing.activityKinds : normalizeActivityKinds(patch.activityKinds, existing.activityKinds),
     updatedAt: nowIso()

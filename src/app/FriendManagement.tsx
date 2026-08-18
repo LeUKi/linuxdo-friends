@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, LoaderCircle, Search } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, Pencil, Search } from "lucide-react";
 import { ALL_ACTIVITY_KINDS, normalizeUsername } from "../domain/friends";
 import type { BackgroundResponse, FollowedUserInput, FriendProfileSummary, ActivityRefreshKind, Username } from "../shared/types";
 import type { deriveFollowedCandidates, deriveFriendList } from "../popup/selectors";
@@ -13,6 +13,7 @@ import {
 import { eventHappenedInside } from "./activityLinks";
 import { kindIcon, kindText } from "./activityKinds";
 import { UserIdentityRow } from "./UserIdentityRow";
+import { FriendNoteDialog, FriendNotePreview, type FriendNoteSaveResult } from "./FriendNoteEditor";
 
 export function ActivityScopeSelect({
   disabled,
@@ -122,6 +123,7 @@ export function FriendCandidateList({
   onAdd,
   onLookup,
   onRemove,
+  onUpdateNote,
   onUpdateScope,
   query
 }: {
@@ -133,12 +135,14 @@ export function FriendCandidateList({
   onAdd: (user: FollowedUserInput, profile?: FriendProfileSummary) => void;
   onLookup: (username: Username) => Promise<BackgroundResponse<FriendProfileSummary>>;
   onRemove?: (username: Username) => void;
+  onUpdateNote?: (username: Username, note: string) => Promise<FriendNoteSaveResult>;
   onUpdateScope?: (username: Username, activityKinds: ActivityRefreshKind[]) => void;
   query: string;
 }) {
   const [lookupProfiles, setLookupProfiles] = useState<Record<Username, FriendProfileSummary>>({});
   const [lookupErrors, setLookupErrors] = useState<Record<Username, string>>({});
   const [lookupPending, setLookupPending] = useState<Username | null>(null);
+  const [editingNoteUsername, setEditingNoteUsername] = useState<Username | null>(null);
   const baseCandidates = useMemo(() => mergeFriendCandidates(friends, candidates), [candidates, friends]);
   const [snapshotOrder] = useState(() => baseCandidates.map((candidate) => candidate.user.username));
   const orderedCandidates = useMemo(() => orderFollowedCandidates(baseCandidates, snapshotOrder), [baseCandidates, snapshotOrder]);
@@ -165,6 +169,13 @@ export function FriendCandidateList({
   }, [friends, lookupProfiles, orderedCandidates, query]);
   const visibleCandidates = syntheticCandidate ? [syntheticCandidate, ...filteredCandidates] : filteredCandidates;
   const actionDisabled = loading || lookupPending != null;
+  const editingFriend = editingNoteUsername
+    ? friends.find((item) => item.friend.username === editingNoteUsername)?.friend
+    : undefined;
+
+  useEffect(() => {
+    if (editingNoteUsername && !editingFriend) setEditingNoteUsername(null);
+  }, [editingFriend, editingNoteUsername]);
 
   async function handleLookup(usernameInput: Username) {
     const username = normalizeUsername(usernameInput);
@@ -196,24 +207,39 @@ export function FriendCandidateList({
 
   return (
     <div className="list modal-list">
-      {visibleCandidates.map((candidate) => (
-        <div className="candidate-row" key={candidate.user.username}>
-          <UserIdentityRow identity={candidate.identity} />
-          <CandidateAction
-            candidate={candidate}
-            disabled={actionDisabled}
-            lookupError={lookupErrors[candidate.user.username]}
-            lookupPending={lookupPending === candidate.user.username}
-            lookupVerified={Boolean(lookupProfiles[candidate.user.username])}
-            mode={mode}
-            onAdd={(user) => onAdd(user, lookupProfiles[user.username])}
-            onLookup={handleLookup}
-            onRemove={onRemove}
-            onUpdateScope={onUpdateScope}
-            scope={friends.find((item) => item.friend.username === candidate.user.username)?.friend.activityKinds}
-          />
-        </div>
-      ))}
+      {visibleCandidates.map((candidate) => {
+        const friend = friends.find((item) => item.friend.username === candidate.user.username)?.friend;
+        return (
+          <div className="candidate-row" key={candidate.user.username}>
+            <div className="candidate-identity">
+              <UserIdentityRow identity={candidate.identity} />
+              {mode === "full" && friend?.note ? <FriendNotePreview note={friend.note} surface="settings" /> : null}
+            </div>
+            <CandidateAction
+              candidate={candidate}
+              disabled={actionDisabled}
+              lookupError={lookupErrors[candidate.user.username]}
+              lookupPending={lookupPending === candidate.user.username}
+              lookupVerified={Boolean(lookupProfiles[candidate.user.username])}
+              mode={mode}
+              onAdd={(user) => onAdd(user, lookupProfiles[user.username])}
+              onEditNote={onUpdateNote ? setEditingNoteUsername : undefined}
+              onLookup={handleLookup}
+              onRemove={onRemove}
+              onUpdateScope={onUpdateScope}
+              scope={friend?.activityKinds}
+            />
+          </div>
+        );
+      })}
+      {editingFriend && onUpdateNote ? (
+        <FriendNoteDialog
+          initialNote={editingFriend.note}
+          username={editingFriend.username}
+          onClose={() => setEditingNoteUsername(null)}
+          onSave={(note) => onUpdateNote(editingFriend.username, note)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -226,6 +252,7 @@ function CandidateAction({
   lookupVerified,
   mode,
   onAdd,
+  onEditNote,
   onLookup,
   onRemove,
   onUpdateScope,
@@ -238,6 +265,7 @@ function CandidateAction({
   lookupVerified: boolean;
   mode: "light" | "full";
   onAdd: (user: FollowedUserInput) => void;
+  onEditNote?: (username: Username) => void;
   onLookup: (username: Username) => void;
   onRemove?: (username: Username) => void;
   onUpdateScope?: (username: Username, activityKinds: ActivityRefreshKind[]) => void;
@@ -255,6 +283,16 @@ function CandidateAction({
     }
     return (
       <div className="candidate-manage-actions">
+        <button
+          className="candidate-note-edit"
+          type="button"
+          onClick={() => onEditNote?.(candidate.user.username)}
+          disabled={disabled}
+          title="编辑备注"
+          aria-label={`编辑 @${candidate.user.username} 的备注`}
+        >
+          <Pencil size={14} aria-hidden="true" />
+        </button>
         <ActivityScopeSelect
           disabled={disabled}
           value={scope ?? ALL_ACTIVITY_KINDS}

@@ -1,3 +1,4 @@
+import { isValidFriendNoteInput } from "../domain/friendNote";
 import { isValidRefreshIntervalMinutes, isValidTimedActivityRefreshIntervalMinutes } from "../shared/settingsLimits";
 import type { BackgroundCommand } from "../shared/types";
 
@@ -144,7 +145,7 @@ function isKnownUserAddCommand(command: Record<string, unknown>): boolean {
 function isFriendPatch(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
-    isOptionalString(value.note) &&
+    (value.note === undefined || isValidFriendNoteInput(value.note)) &&
     (value.groups === undefined || isStringList(value.groups)) &&
     (value.pinned === undefined || typeof value.pinned === "boolean") &&
     (value.activityKinds === undefined || isActivityRefreshKindList(value.activityKinds))

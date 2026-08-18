@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type React from "react";
 import { DredgeRuleEditor } from "../app/DredgeRuleEditor";
 import { FriendCandidateList } from "../app/FriendManagement";
+import type { FriendNoteSaveResult } from "../app/FriendNoteEditor";
 import { VersionDiagnostics } from "../app/VersionStatus";
 import { TIMED_ACTIVITY_REFRESH_INTERVAL_MINUTES_MAX, TIMED_ACTIVITY_REFRESH_INTERVAL_MINUTES_MIN } from "../shared/settingsLimits";
 import type { ActivityRefreshKind, AppState, BackgroundResponse, CloudArchiveLocalStateResult, CloudConfigViewState, FollowedUserInput, FriendProfileSummary, UpdateCheckState, Username } from "../shared/types";
@@ -111,6 +112,7 @@ export function ScopeSettingsSection({
   onLookupFriend,
   onRemoveFriend,
   onSyncFollows,
+  onUpdateNote,
   onUpdateScope,
   setFriendsQuery,
   syncBusy
@@ -122,6 +124,7 @@ export function ScopeSettingsSection({
   onLookupFriend: (target: Username) => Promise<BackgroundResponse<FriendProfileSummary>>;
   onRemoveFriend: (target: Username) => void;
   onSyncFollows: () => void;
+  onUpdateNote: (username: Username, note: string) => Promise<FriendNoteSaveResult>;
   onUpdateScope: (username: Username, activityKinds: ActivityRefreshKind[]) => void;
   setFriendsQuery: (query: string) => void;
   syncBusy: boolean;
@@ -156,6 +159,7 @@ export function ScopeSettingsSection({
           onAdd={onAddFriend}
           onLookup={onLookupFriend}
           onRemove={onRemoveFriend}
+          onUpdateNote={onUpdateNote}
           onUpdateScope={onUpdateScope}
           query={friendsQuery}
         />
@@ -540,6 +544,7 @@ export function DataSettingsSection({
       >
         <DataDisclosure
           items={[
+            "好友备注默认保存在本地，导出配置时会随佬朋友配置迁移。",
             "导出的 JSON 可能包含 Telegram Bot Token / Chat ID。",
             "账号登录状态、动态内容和头像缓存不会导出。",
             "请把导出文件作为私密备份保存。"
@@ -587,7 +592,7 @@ export function DataSettingsSection({
         <DataDisclosure
           items={[
             "备份会上传可迁移配置到 linuxdo-cloud-save.lafish.workers.dev。",
-            "内容包括佬朋友、打捞规则、请求统计和设置。",
+            "内容包括佬朋友及其备注、打捞规则、请求统计和设置。",
             "已配置的 Telegram Bot Token / Chat ID 也会随云存档备份。"
           ]}
         />

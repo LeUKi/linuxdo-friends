@@ -37,6 +37,18 @@ describe("friend profile-backed domain operations", () => {
     expect(next.friendProfiles.neil).toMatchObject({ username: "neil", name: "Neo" });
   });
 
+  it("normalizes a note update without changing other friend metadata", () => {
+    const state = updateFriend(
+      addFriendFromProfile(defaultAppState, { username: "Neil", refreshedAt: "2026-06-28T00:00:00.000Z" }),
+      "neil",
+      { groups: ["core"], pinned: true }
+    );
+
+    const next = updateFriend(state, "neil", { note: "  NAS\nlab  " });
+
+    expect(next.friends.neil).toMatchObject({ note: "NAS lab", groups: ["core"], pinned: true });
+  });
+
   it("updates profile cache without creating a friend", () => {
     const state = upsertFriendProfile(defaultAppState, {
       username: "Neil",

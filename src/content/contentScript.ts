@@ -1,6 +1,8 @@
 import React from "react";
+import { Pencil } from "lucide-react";
 import { createRoot, type Root } from "react-dom/client";
 import { FriendsApp } from "../app/FriendsApp";
+import { FriendNoteDialog, FriendNotePreview } from "../app/FriendNoteEditor";
 import type { AppState } from "../shared/types";
 import type {
   ActivityItem,
@@ -32,6 +34,11 @@ const profileActionButtonId = "linuxdo-friends-profile-action";
 const profileActionButtonClass = "linuxdo-friends-profile-action";
 const friendActionWrapperClass = "linuxdo-friends-action-wrapper";
 const friendActionSurfaceAttr = "data-linuxdo-friends-surface";
+const friendNoteContainerClass = "linuxdo-friends-note-container";
+const friendNoteRowClass = "linuxdo-friends-note-row";
+const postFriendNoteClass = "linuxdo-friends-post-note";
+const friendNoteDialogHostId = "linuxdo-friends-note-dialog";
+const friendNoteTooltipHostId = "linuxdo-friends-note-tooltip-layer";
 const userMenuTabId = "linuxdo-friends-user-menu-tab";
 const userMenuPanelId = "linuxdo-friends-user-menu-panel";
 const userMenuActiveClass = "linuxdo-friends-user-menu-active";
@@ -70,6 +77,17 @@ let lastPageTheme: PageTheme | null = null;
 let routePopstateListener: (() => void) | null = null;
 let originalPushState: History["pushState"] | null = null;
 let originalReplaceState: History["replaceState"] | null = null;
+interface FriendNoteRowMount {
+  root: Root;
+  rootElement: HTMLElement;
+}
+
+const friendNoteRowRoots = new Map<HTMLElement, FriendNoteRowMount>();
+const postFriendNoteRoots = new Map<HTMLElement, FriendNoteRowMount>();
+let friendNoteDialogRoot: Root | null = null;
+let friendNoteDialogRootElement: HTMLElement | null = null;
+let friendNoteDialogUsername: Username | null = null;
+let friendNoteTooltipRootElement: HTMLElement | null = null;
 
 void init();
 subscribeToStorageChanges();
@@ -101,7 +119,9 @@ async function getState(): Promise<AppState | null> {
 export function markFriends(state: AppState) {
   ensurePageStyle();
   suppressFriendMarkerMutations = true;
+  sweepDetachedPostFriendNotes();
   clearMarkers();
+  const activePostNoteHosts = new Set<HTMLElement>();
   const friends = Object.keys(state.friends);
   try {
     if (friends.length === 0) return;
@@ -111,9 +131,13 @@ export function markFriends(state: AppState) {
       const username = extractUsername(link);
       if (!username || !friendSet.has(username) || !isProfileIdentityLink(link)) continue;
       markAvatarElements(link);
-      markNameText(link, getFriendDisplayName(state, username));
+      const displayName = getFriendDisplayName(state, username);
+      markNameText(link, displayName);
+      const postNoteHost = renderPostFriendNote(link, username, state.friends[username].note);
+      if (postNoteHost) activePostNoteHosts.add(postNoteHost);
     }
   } finally {
+    reconcilePostFriendNotes(activePostNoteHosts);
     window.setTimeout(() => {
       suppressFriendMarkerMutations = false;
     }, 0);
@@ -296,6 +320,29 @@ function ensurePageStyle() {
     .${profileActionButtonClass}[disabled] {
       cursor: wait !important;
       opacity: 0.72 !important;
+    }
+
+    .${friendNoteContainerClass} {
+      min-width: 0 !important;
+      flex-wrap: wrap !important;
+    }
+
+    .${friendNoteRowClass} {
+      display: block !important;
+      width: 100% !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      flex: 1 0 100% !important;
+      grid-column: 1 / -1 !important;
+      clear: both !important;
+      margin-top: 0.25rem !important;
+    }
+
+    .${postFriendNoteClass} {
+      display: inline-block !important;
+      min-width: 0 !important;
+      max-width: min(160px, 40vw) !important;
+      vertical-align: baseline !important;
     }
 
     .${friendActionWrapperClass} {
@@ -594,7 +641,12 @@ function mountUserMenuPanel() {
   shadow.append(style, rootNode);
   userMenuRootElement = rootNode;
   userMenuRoot = createRoot(rootNode);
-  userMenuRoot.render(React.createElement(FriendsApp, { surface: "in-page" }));
+  userMenuRoot.render(
+    React.createElement(FriendsApp, {
+      friendNoteTooltipPortalTarget: ensureFriendNoteTooltipRoot(),
+      surface: "in-page"
+    })
+  );
 }
 
 function closeUserMenuPanel(menu: HTMLElement) {
@@ -624,6 +676,18 @@ export function syncPageTheme() {
   });
   if (userMenuRootElement) {
     userMenuRootElement.dataset.linuxdoFriendsTheme = theme;
+  }
+  if (friendNoteDialogRootElement) {
+    friendNoteDialogRootElement.dataset.linuxdoFriendsTheme = theme;
+  }
+  friendNoteRowRoots.forEach(({ rootElement }) => {
+    rootElement.dataset.linuxdoFriendsTheme = theme;
+  });
+  postFriendNoteRoots.forEach(({ rootElement }) => {
+    rootElement.dataset.linuxdoFriendsTheme = theme;
+  });
+  if (friendNoteTooltipRootElement) {
+    friendNoteTooltipRootElement.dataset.linuxdoFriendsTheme = theme;
   }
 }
 
@@ -753,6 +817,7 @@ function enhanceFriendActions(state: AppState) {
   ensurePageStyle();
   suppressFriendActionMutations = true;
   try {
+    sweepDetachedFriendNoteRows();
     const activeSurfaces = new Set<string>();
     const profileTarget = profileFriendActionTarget();
     if (profileTarget) {
@@ -760,17 +825,27 @@ function enhanceFriendActions(state: AppState) {
       const button = ensureFriendActionButton(profileTarget.surface);
       updateFriendActionButton(button, state, profileTarget);
       placeFriendActionButton(button, profileTarget);
+      updateFriendNoteSurface(state, profileTarget);
     }
     for (const target of userCardFriendActionTargets()) {
       activeSurfaces.add(target.surface);
       const button = ensureFriendActionButton(target.surface);
       updateFriendActionButton(button, state, target);
       placeFriendActionButton(button, target);
+      updateFriendNoteSurface(state, target);
     }
     document.querySelectorAll<HTMLButtonElement>(`.${profileActionButtonClass}`).forEach((button) => {
       if (!button.dataset.linuxdoFriendsSurface || activeSurfaces.has(button.dataset.linuxdoFriendsSurface)) return;
       removeFriendActionButton(button);
     });
+    document.querySelectorAll<HTMLElement>(`.${friendNoteRowClass}`).forEach((element) => {
+      const surface = element.getAttribute(friendActionSurfaceAttr);
+      if (surface && activeSurfaces.has(surface)) return;
+      removeFriendNoteElement(element);
+    });
+    if (friendNoteDialogUsername && !state.friends[friendNoteDialogUsername]) {
+      closeFriendNoteDialog();
+    }
   } finally {
     window.setTimeout(() => {
       suppressFriendActionMutations = false;
@@ -786,6 +861,7 @@ interface FriendActionTarget {
   name?: string;
   avatarUrl?: string;
   wrapWithListItem?: boolean;
+  noteContainer?: HTMLElement;
 }
 
 function profileFriendActionTarget(): FriendActionTarget | null {
@@ -799,7 +875,8 @@ function profileFriendActionTarget(): FriendActionTarget | null {
     anchor: findProfileFollowButton() ?? undefined,
     name: profilePageDisplayName(username),
     avatarUrl: profilePageAvatarUrl(),
-    wrapWithListItem: container.matches("ul, ol")
+    wrapWithListItem: container.matches("ul, ol"),
+    noteContainer: findProfileNamesContainer() ?? undefined
   };
 }
 
@@ -865,7 +942,8 @@ function userCardFriendActionTargets(): FriendActionTarget[] {
         anchor: findUserCardFollowButton(card) ?? findUserCardActionButtons(card).at(-1),
         name: userCardDisplayName(card, username),
         avatarUrl: userCardAvatarUrl(card),
-        wrapWithListItem: container.matches("ul, ol")
+        wrapWithListItem: container.matches("ul, ol"),
+        noteContainer: findUserCardNamesContainer(card) ?? undefined
       }
     ];
   });
@@ -942,6 +1020,14 @@ function userCardDisplayName(card: HTMLElement, username: Username): string | un
     if (text && normalizeIdentityText(text) !== username) return text;
   }
   return undefined;
+}
+
+function findProfileNamesContainer(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".user-main .names, .user-profile .names, .user-main .user-profile-names, .user-profile .user-profile-names");
+}
+
+function findUserCardNamesContainer(card: HTMLElement): HTMLElement | null {
+  return card.querySelector<HTMLElement>(".names, .user-card-names, .usercard-names");
 }
 
 function userCardAvatarUrl(card: HTMLElement): string | undefined {
@@ -1021,6 +1107,276 @@ function removeFriendActionButton(button: HTMLButtonElement) {
     return;
   }
   button.remove();
+}
+
+function updateFriendNoteSurface(state: AppState, target: FriendActionTarget) {
+  const friend = state.friends[target.username];
+  if (!friend) {
+    removeFriendNoteSurface(target.surface);
+    return;
+  }
+  placeFriendNoteRow(friend.note, target);
+}
+
+function placeFriendNoteRow(note: string, target: FriendActionTarget) {
+  const container = target.noteContainer;
+  if (!container) {
+    removeFriendNoteSurface(target.surface);
+    return;
+  }
+  const host = ensureFriendNoteRowHost(target.surface);
+  host.dataset.username = target.username;
+  container.classList.add(friendNoteContainerClass);
+  if (host.parentElement !== container || container.lastElementChild !== host) container.append(host);
+  const mount = friendNoteRowRoots.get(host) ?? createFriendNoteRowRoot(host);
+  mount.rootElement.dataset.linuxdoFriendsTheme = currentPageTheme();
+  const surface = target.surface === "profile" ? "profile" : "user-card";
+  const hasNote = Boolean(note.trim());
+  const openEditor = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openFriendNoteDialogForUsername(target.username);
+  };
+  mount.root.render(
+    React.createElement(
+      "div",
+      { className: `friend-note-inline-row friend-note-inline-row-${surface}` },
+      hasNote
+        ? React.createElement(FriendNotePreview, {
+            note,
+            surface,
+            tooltipPortalTarget: ensureFriendNoteTooltipRoot()
+          })
+        : React.createElement(
+            "button",
+            {
+              "aria-label": "添加好友备注",
+              className: "friend-note-placeholder",
+              onClick: openEditor,
+              title: "添加好友备注",
+              type: "button"
+            },
+            "视奸备注"
+          ),
+      React.createElement(
+        "button",
+        {
+          "aria-label": "编辑好友备注",
+          className: "friend-note-edit-button",
+          onClick: openEditor,
+          title: "编辑好友备注",
+          type: "button"
+        },
+        React.createElement(Pencil, { "aria-hidden": true, size: 14 })
+      )
+    )
+  );
+}
+
+function ensureFriendNoteTooltipRoot() {
+  const existingHost = document.getElementById(friendNoteTooltipHostId);
+  if (friendNoteTooltipRootElement && existingHost) return friendNoteTooltipRootElement;
+  const host = document.createElement("div");
+  host.id = friendNoteTooltipHostId;
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = appCss;
+  const rootElement = document.createElement("div");
+  rootElement.className = "linuxdo-friends-menu-root linuxdo-friends-note-tooltip-root";
+  rootElement.dataset.linuxdoFriendsTheme = currentPageTheme();
+  shadow.append(style, rootElement);
+  document.body.append(host);
+  friendNoteTooltipRootElement = rootElement;
+  return rootElement;
+}
+
+function sweepDetachedFriendNoteRows() {
+  friendNoteRowRoots.forEach((mount, host) => {
+    if (host.isConnected) return;
+    mount.root.unmount();
+    friendNoteRowRoots.delete(host);
+  });
+}
+
+function createFriendNoteRowRoot(host: HTMLElement) {
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = appCss;
+  const rootElement = document.createElement("div");
+  rootElement.className = "linuxdo-friends-menu-root linuxdo-friends-note-row-root";
+  rootElement.dataset.linuxdoFriendsTheme = currentPageTheme();
+  shadow.append(style, rootElement);
+  const mount = { root: createRoot(rootElement), rootElement };
+  friendNoteRowRoots.set(host, mount);
+  return mount;
+}
+
+function renderPostFriendNote(link: HTMLAnchorElement, username: Username, note: string) {
+  if (!isTopicPostDisplayNameLink(link) || !link.textContent?.trim() || !note.trim()) return null;
+  const host = ensurePostFriendNoteHost(link);
+  if (!host) return null;
+  host.dataset.username = username;
+  const mount = postFriendNoteRoots.get(host) ?? createPostFriendNoteRoot(host);
+  mount.rootElement.dataset.linuxdoFriendsTheme = currentPageTheme();
+  mount.root.render(
+    React.createElement(FriendNotePreview, {
+      note,
+      surface: "post",
+      tooltipPortalTarget: ensureFriendNoteTooltipRoot()
+    })
+  );
+  return host;
+}
+
+function isTopicPostDisplayNameLink(link: HTMLAnchorElement) {
+  return (
+    location.pathname.startsWith("/t/") &&
+    link.matches(".topic-post .topic-meta-data > .names.trigger-user-card .full-name > a[data-user-card]")
+  );
+}
+
+function ensurePostFriendNoteHost(link: HTMLAnchorElement) {
+  const container = link.parentElement;
+  if (!container) return null;
+  const existing = Array.from(container.children).find(
+    (element): element is HTMLElement => element instanceof HTMLElement && element.classList.contains(postFriendNoteClass)
+  );
+  if (existing && postFriendNoteRoots.has(existing)) {
+    if (existing.previousElementSibling !== link) link.after(existing);
+    return existing;
+  }
+  existing?.remove();
+  const host = document.createElement("span");
+  host.className = postFriendNoteClass;
+  link.after(host);
+  return host;
+}
+
+function createPostFriendNoteRoot(host: HTMLElement) {
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = appCss;
+  const rootElement = document.createElement("span");
+  rootElement.className = "linuxdo-friends-menu-root linuxdo-friends-post-note-root";
+  rootElement.dataset.linuxdoFriendsTheme = currentPageTheme();
+  shadow.append(style, rootElement);
+  const mount = { root: createRoot(rootElement), rootElement };
+  postFriendNoteRoots.set(host, mount);
+  return mount;
+}
+
+function sweepDetachedPostFriendNotes() {
+  postFriendNoteRoots.forEach((_mount, host) => {
+    if (!host.isConnected) removePostFriendNoteElement(host);
+  });
+}
+
+function reconcilePostFriendNotes(activeHosts: Set<HTMLElement>) {
+  postFriendNoteRoots.forEach((_mount, host) => {
+    if (!activeHosts.has(host) || !host.isConnected) removePostFriendNoteElement(host);
+  });
+  document.querySelectorAll<HTMLElement>(`.${postFriendNoteClass}`).forEach((host) => {
+    if (!activeHosts.has(host)) removePostFriendNoteElement(host);
+  });
+}
+
+function removePostFriendNoteElement(host: HTMLElement) {
+  postFriendNoteRoots.get(host)?.root.unmount();
+  postFriendNoteRoots.delete(host);
+  host.remove();
+}
+
+function ensureFriendNoteRowHost(surface: string) {
+  const selector = `.${friendNoteRowClass}[${friendActionSurfaceAttr}="${cssEscape(surface)}"]`;
+  const existing = document.querySelector<HTMLElement>(selector);
+  if (existing) return existing;
+  const host = document.createElement("div");
+  host.className = friendNoteRowClass;
+  host.setAttribute(friendActionSurfaceAttr, surface);
+  return host;
+}
+
+function removeFriendNoteSurface(surface: string) {
+  document.querySelectorAll<HTMLElement>(`.${friendNoteRowClass}[${friendActionSurfaceAttr}="${cssEscape(surface)}"]`).forEach(removeFriendNoteElement);
+}
+
+function removeFriendNoteElement(element: HTMLElement) {
+  const container = element.parentElement;
+  friendNoteRowRoots.get(element)?.root.unmount();
+  friendNoteRowRoots.delete(element);
+  element.remove();
+  container?.classList.remove(friendNoteContainerClass);
+}
+
+function openFriendNoteDialogForUsername(username: Username) {
+  const friend = latestState?.friends[username];
+  if (!friend) return;
+  openFriendNoteDialog(username, friend.note);
+}
+
+function openFriendNoteDialog(username: Username, initialNote: string) {
+  const rootNode = ensureFriendNoteDialogRoot();
+  friendNoteDialogUsername = username;
+  rootNode.dataset.linuxdoFriendsTheme = currentPageTheme();
+  friendNoteDialogRoot?.render(
+    React.createElement(FriendNoteDialog, {
+      username,
+      initialNote,
+      onClose: closeFriendNoteDialog,
+      onSave: (note: string) => saveFriendNote(username, note)
+    })
+  );
+}
+
+function ensureFriendNoteDialogRoot() {
+  if (friendNoteDialogRootElement && friendNoteDialogRoot) return friendNoteDialogRootElement;
+  const host = document.createElement("div");
+  host.id = friendNoteDialogHostId;
+  const shadow = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = appCss;
+  const rootNode = document.createElement("div");
+  rootNode.className = "linuxdo-friends-menu-root linuxdo-friends-note-dialog-root";
+  rootNode.dataset.linuxdoFriendsTheme = currentPageTheme();
+  shadow.append(style, rootNode);
+  document.body.append(host);
+  friendNoteDialogRootElement = rootNode;
+  friendNoteDialogRoot = createRoot(rootNode);
+  return rootNode;
+}
+
+async function saveFriendNote(username: Username, note: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!latestState?.friends[username]) {
+    closeFriendNoteDialog();
+    return { ok: false, error: "该用户已不在佬朋友中。" };
+  }
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "updateFriend", username, patch: { note } });
+    if (!response?.ok) {
+      return { ok: false, error: response?.error ?? "备注保存失败。" };
+    }
+    if (!response.data?.friends?.[username]) {
+      latestState = response.data;
+      markFriends(response.data);
+      enhanceFriendActions(response.data);
+      return { ok: false, error: "该用户已不在佬朋友中。" };
+    }
+    latestState = response.data;
+    markFriends(response.data);
+    enhanceFriendActions(response.data);
+    closeFriendNoteDialog();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "备注保存失败。" };
+  }
+}
+
+function closeFriendNoteDialog() {
+  friendNoteDialogRoot?.unmount();
+  friendNoteDialogRoot = null;
+  friendNoteDialogRootElement = null;
+  friendNoteDialogUsername = null;
+  document.getElementById(friendNoteDialogHostId)?.remove();
 }
 
 async function toggleFriendAction(button: HTMLButtonElement) {
@@ -1874,6 +2230,18 @@ export function resetContentScriptForTest() {
   userMenuRoot?.unmount();
   userMenuRoot = null;
   userMenuRootElement = null;
+  friendNoteDialogRoot?.unmount();
+  friendNoteDialogRoot = null;
+  friendNoteDialogRootElement = null;
+  friendNoteDialogUsername = null;
+  friendNoteTooltipRootElement = null;
+  friendNoteRowRoots.forEach(({ root }) => root.unmount());
+  friendNoteRowRoots.clear();
+  postFriendNoteRoots.forEach(({ root }) => root.unmount());
+  postFriendNoteRoots.clear();
+  document.querySelectorAll(`.${postFriendNoteClass}`).forEach((element) => element.remove());
+  document.getElementById(friendNoteDialogHostId)?.remove();
+  document.getElementById(friendNoteTooltipHostId)?.remove();
   userMenuObserver?.disconnect();
   userMenuObserver = null;
   pageThemeObserver?.disconnect();

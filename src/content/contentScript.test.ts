@@ -2,7 +2,67 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { extractBoosts, extractReactions, extractUserActions, normalizeFriendActivity } from "../domain/activity";
 import { extractFriendProfile } from "../api/profileParser";
 import { defaultAppState } from "../domain/defaultState";
-import { addFriendFromProfile } from "../domain/friends";
+import { addFriendFromProfile, updateFriend } from "../domain/friends";
+
+vi.mock("../app/FriendNoteEditor", async () => {
+  const React = await import("react");
+  return {
+    FriendNotePreview({
+      note,
+      surface,
+      className,
+      tooltipPortalTarget
+    }: {
+      note: string;
+      surface: string;
+      className?: string;
+      tooltipPortalTarget?: Element | DocumentFragment;
+    }) {
+      return React.createElement(
+        "span",
+        {
+          className: className ? `mock-note-preview ${className}` : "mock-note-preview",
+          "data-surface": surface,
+          "data-tooltip-portal": tooltipPortalTarget ? "provided" : "default"
+        },
+        note
+      );
+    },
+    FriendNoteDialog({
+      username,
+      initialNote,
+      onClose,
+      onSave
+    }: {
+      username: string;
+      initialNote: string;
+      onClose: () => void;
+      onSave: (note: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+    }) {
+      const inputRef = React.useRef<HTMLTextAreaElement>(null);
+      const [error, setError] = React.useState("");
+      return React.createElement(
+        "form",
+        {
+          "data-testid": "friend-note-dialog",
+          "data-username": username,
+          onSubmit: async (event: React.FormEvent) => {
+            event.preventDefault();
+            const response = await onSave(inputRef.current?.value ?? "");
+            if (!response.ok) setError(response.error);
+          }
+        },
+        React.createElement("textarea", {
+          ref: inputRef,
+          defaultValue: initialNote
+        }),
+        error ? React.createElement("p", { role: "alert" }, error) : null,
+        React.createElement("button", { type: "submit" }, "保存"),
+        React.createElement("button", { type: "button", onClick: onClose }, "取消")
+      );
+    }
+  };
+});
 
 const nativePushState = window.history.pushState;
 const nativeReplaceState = window.history.replaceState;
@@ -76,6 +136,152 @@ describe("content script friend markers", () => {
     expect(pageStyle).toContain("padding-inline: 1ch");
     expect(pageStyle).toContain("top: 56%");
     expect(pageStyle.match(/\.linuxdo-friends-name-mark \{[^}]+}/)?.[0]).not.toContain("color:");
+  });
+
+  it("shows an independent read-only note after each topic post display name", async () => {
+    const state = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "Neil",
+        name: "Neo",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "neil",
+      { note: "NAS 同好" }
+    );
+    window.history.replaceState({}, "", "/t/storage-talk/42");
+    document.body.innerHTML = `${topicPostFixture("post_1", "neil", "Neo")}${topicPostFixture("post_2", "neil", "Neo")}`;
+
+    const { markFriends } = await import("./contentScript");
+    markFriends(state);
+
+    await vi.waitFor(() => expect(postFriendNoteTexts()).toEqual(["NAS 同好", "NAS 同好"]));
+    const hosts = Array.from(document.querySelectorAll<HTMLElement>(".linuxdo-friends-post-note"));
+    for (const host of hosts) {
+      expect(host.parentElement?.classList.contains("full-name")).toBe(true);
+      expect(host.previousElementSibling?.matches('a[data-user-card="neil"]')).toBe(true);
+      expect(postFriendNotePreview(host)?.textContent).toBe("NAS 同好");
+      expect(postFriendNotePreview(host)?.dataset.surface).toBe("post");
+      expect(postFriendNotePreview(host)?.dataset.tooltipPortal).toBe("provided");
+      expect(host.shadowRoot?.querySelector("button")).toBeNull();
+    }
+  });
+
+  it("limits topic notes to non-empty friend display names in post metadata", async () => {
+    const friendState = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "Neil",
+        name: "Neo",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "neil",
+      { note: "只在楼层名称后显示" }
+    );
+    const whitespaceState = updateFriend(friendState, "neil", { note: " \n " });
+    const namelessFriendState = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "Neil",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "neil",
+      { note: "无需存档名称" }
+    );
+    window.history.replaceState({}, "", "/t/storage-talk/42");
+    document.body.innerHTML = `
+      ${topicPostFixture("post_1", "neil", "Neo")}
+      ${topicPostFixture("post_2", "other", "Other")}
+      <article class="topic-post" id="post_3">
+        <div class="topic-meta-data">
+          <div class="names trigger-user-card"><span class="username"><a href="/u/neil" data-user-card="neil">neil</a></span></div>
+        </div>
+        <div class="cooked">
+          <a href="/u/neil" data-user-card="neil">Neo</a>
+          <aside class="quote"><a href="/u/neil" data-user-card="neil">Neo</a></aside>
+          <a class="mention" href="/u/neil">@neil</a>
+        </div>
+      </article>
+      <aside class="user-card">
+        <div class="topic-meta-data"><div class="names trigger-user-card"><span class="full-name"><a href="/u/neil" data-user-card="neil">Neo</a></span></div></div>
+      </aside>
+    `;
+
+    const { markFriends } = await import("./contentScript");
+    markFriends(friendState);
+    await vi.waitFor(() => expect(document.querySelectorAll(".linuxdo-friends-post-note")).toHaveLength(1));
+
+    markFriends(namelessFriendState);
+    await vi.waitFor(() => expect(postFriendNoteTexts()).toEqual(["无需存档名称"]));
+
+    markFriends(whitespaceState);
+    await vi.waitFor(() => expect(document.querySelectorAll(".linuxdo-friends-post-note")).toHaveLength(0));
+
+    window.history.replaceState({}, "", "/latest");
+    markFriends(friendState);
+    expect(document.querySelectorAll(".linuxdo-friends-post-note")).toHaveLength(0);
+  });
+
+  it("reconciles topic notes across stream virtualization, DOM rebuilds, routes, and state changes", async () => {
+    let state = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "Neil",
+        name: "Neo",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "neil",
+      { note: "初始备注" }
+    );
+    const storageListeners: Array<(changes: Record<string, unknown>, areaName: string) => void> = [];
+    window.history.replaceState({}, "", "/t/storage-talk/42");
+    document.body.innerHTML = `<section id="post-stream">${topicPostFixture("post_1", "neil", "Neo")}</section>`;
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn(async (message: unknown) => {
+          if (isHeartbeatMessage(message)) return { ok: true };
+          return { ok: true, data: state };
+        }),
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn((listener) => storageListeners.push(listener))
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await vi.waitFor(() => expect(postFriendNoteTexts()).toEqual(["初始备注"]));
+
+    document.getElementById("post-stream")?.insertAdjacentHTML("beforeend", topicPostFixture("post_2", "neil", "Neo"));
+    await vi.waitFor(() => expect(postFriendNoteTexts()).toEqual(["初始备注", "初始备注"]));
+
+    const detachedHost = document.querySelector<HTMLElement>("#post_1 .linuxdo-friends-post-note");
+    document.getElementById("post_1")?.remove();
+    await vi.waitFor(() => expect(detachedHost?.shadowRoot?.querySelector(".mock-note-preview")).toBeNull());
+    expect(document.querySelectorAll(".linuxdo-friends-post-note")).toHaveLength(1);
+
+    const rebuiltHost = document.querySelector<HTMLElement>("#post_2 .linuxdo-friends-post-note");
+    document.querySelector("#post_2 .topic-meta-data")?.replaceWith(topicPostMetaFixture("neil", "Neo"));
+    await vi.waitFor(() => {
+      const replacementHost = document.querySelector("#post_2 .linuxdo-friends-post-note");
+      expect(replacementHost).not.toBeNull();
+      expect(replacementHost).not.toBe(rebuiltHost);
+      expect(rebuiltHost?.shadowRoot?.querySelector(".mock-note-preview")).toBeNull();
+    });
+
+    state = updateFriend(state, "neil", { note: "更新后的备注" });
+    storageListeners.forEach((listener) => listener({}, "local"));
+    await vi.waitFor(() => expect(postFriendNoteTexts()).toEqual(["更新后的备注"]));
+
+    window.history.pushState({}, "", "/latest");
+    await vi.waitFor(() => expect(document.querySelectorAll(".linuxdo-friends-post-note")).toHaveLength(0));
+    window.history.pushState({}, "", "/t/storage-talk/42");
+    await vi.waitFor(() => expect(postFriendNoteTexts()).toEqual(["更新后的备注"]));
+
+    state = defaultAppState;
+    storageListeners.forEach((listener) => listener({}, "local"));
+    await vi.waitFor(() => expect(document.querySelectorAll(".linuxdo-friends-post-note")).toHaveLength(0));
   });
 
   it("detects explicit page theme signals before rendered background fallback", async () => {
@@ -449,6 +655,8 @@ describe("content script friend markers", () => {
     const controlItems = Array.from(document.querySelectorAll<HTMLElement>(".controls > ul > li"));
     const button = document.getElementById("linuxdo-friends-profile-action");
     expect(controlItems.map((item) => item.textContent?.trim())).toEqual(["私信", "常规", "认可", "取消关注", "取消视奸"]);
+    expect(document.querySelector(".names > .linuxdo-friends-note-row")).not.toBeNull();
+    expect(document.querySelector(".controls .linuxdo-friends-note-action")).toBeNull();
     expect(button?.closest(".follow-button-container")).toBeNull();
     expect(button?.closest("li")?.className).toBe("linuxdo-friends-action-wrapper");
   });
@@ -574,6 +782,498 @@ describe("content script friend markers", () => {
 
     expect(sendMessage).toHaveBeenCalledWith({ type: "removeFriend", username: "misaka7369" });
     expect(button?.textContent).toBe("视奸");
+  });
+
+  it("shows and edits a profile friend note without duplicating injected nodes", async () => {
+    const friendState = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "misaka7369",
+        name: "星",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "misaka7369",
+      { note: "旧备注" }
+    );
+    const savedState = updateFriend(friendState, "misaka7369", { note: "新备注" });
+    window.history.replaceState({}, "", "/u/misaka7369");
+    document.body.innerHTML = `
+      <section class="user-main">
+        <div class="names"><h1>星</h1><span class="username">Misaka7369</span></div>
+        <div class="controls">
+          <button class="btn">取消关注</button>
+        </div>
+      </section>
+    `;
+    const sendMessage = vi.fn(async (message: unknown) => {
+      if (isHeartbeatMessage(message)) return { ok: true };
+      if (isGetStateMessage(message)) return { ok: true, data: friendState };
+      if (isUpdateFriendMessage(message)) return { ok: true, data: savedState };
+      return { ok: true, data: friendState };
+    });
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage,
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn()
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+    await waitForNotePreview("旧备注");
+
+    expect(friendNotePreviewText()).toBe("旧备注");
+    expect(friendNotePreviewRoot()?.classList.contains("linuxdo-friends-menu-root")).toBe(true);
+    expect(friendNotePreviewRoot()?.dataset.linuxdoFriendsTheme).toBe("light");
+    expect(friendNotePreviewStyleElement()).not.toBeNull();
+    expect(friendNotePreviewElement()?.getAttribute("data-surface")).toBe("profile");
+    expect(friendNotePreviewElement()?.getAttribute("data-tooltip-portal")).toBe("provided");
+    const noteRow = friendNoteRowHost();
+    expect(noteRow?.parentElement).toBe(document.querySelector(".user-main .names"));
+    expect(noteRow?.previousElementSibling?.classList.contains("username")).toBe(true);
+    expect(noteRow?.parentElement?.classList.contains("linuxdo-friends-note-container")).toBe(true);
+    expect(friendNoteEditButton()?.querySelector("svg")).not.toBeNull();
+    const tooltipHost = document.getElementById("linuxdo-friends-note-tooltip-layer");
+    const tooltipRoot = tooltipHost?.shadowRoot?.querySelector<HTMLElement>(".linuxdo-friends-note-tooltip-root");
+    expect(tooltipHost?.parentElement).toBe(document.body);
+    expect(tooltipRoot?.classList.contains("linuxdo-friends-menu-root")).toBe(true);
+    expect(tooltipRoot?.dataset.linuxdoFriendsTheme).toBe("light");
+    expect(tooltipHost?.shadowRoot?.querySelector("style")).not.toBeNull();
+    expect(document.querySelectorAll(".linuxdo-friends-note-row")).toHaveLength(1);
+    expect(document.querySelectorAll(".linuxdo-friends-note-action")).toHaveLength(0);
+
+    friendNoteEditButton()?.click();
+    const dialog = await waitForFriendNoteDialog();
+    const textarea = dialog.querySelector("textarea") as HTMLTextAreaElement;
+    expect(dialog.getAttribute("data-username")).toBe("misaka7369");
+    const dialogHost = document.getElementById("linuxdo-friends-note-dialog");
+    expect(dialogHost?.shadowRoot?.querySelector(".linuxdo-friends-note-dialog-root")?.classList.contains("linuxdo-friends-menu-root")).toBe(true);
+    expect(dialogHost?.shadowRoot?.querySelector("style")).not.toBeNull();
+    expect(textarea.value).toBe("旧备注");
+    textarea.value = "新备注";
+    dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await flushContentScriptAsyncWork();
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: "updateFriend", username: "misaka7369", patch: { note: "新备注" } });
+    expect(document.getElementById("linuxdo-friends-note-dialog")).toBeNull();
+    await waitForNotePreview("新备注");
+  });
+
+  it("shows a user-card friend note and keeps the editor alive after the card disappears", async () => {
+    const friendState = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "misaka7369",
+        name: "星",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "misaka7369",
+      { note: "卡片备注" }
+    );
+    const savedState = updateFriend(friendState, "misaka7369", { note: "卡片新备注" });
+    window.history.replaceState({}, "", "/t/topic/1");
+    document.body.innerHTML = `
+      <aside class="user-card" data-username="Misaka7369">
+        <div class="names"><span class="name">星</span><span class="username">@Misaka7369</span></div>
+        <ul class="usercard-controls">
+          <li><button class="btn">关注</button></li>
+        </ul>
+      </aside>
+    `;
+    const sendMessage = vi.fn(async (message: unknown) => {
+      if (isHeartbeatMessage(message)) return { ok: true };
+      if (isGetStateMessage(message)) return { ok: true, data: friendState };
+      if (isUpdateFriendMessage(message)) return { ok: true, data: savedState };
+      return { ok: true, data: friendState };
+    });
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage,
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn()
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+    await waitForNotePreview("卡片备注");
+
+    expect(friendNotePreviewText(".user-card .linuxdo-friends-note-row")).toBe("卡片备注");
+    expect(friendNotePreviewElement(".user-card .linuxdo-friends-note-row")?.getAttribute("data-surface")).toBe("user-card");
+    const cardNoteRow = friendNoteRowHost(".user-card .linuxdo-friends-note-row");
+    expect(cardNoteRow?.parentElement).toBe(document.querySelector(".user-card .names"));
+    expect(cardNoteRow?.previousElementSibling?.classList.contains("username")).toBe(true);
+    friendNoteEditButton(".user-card .linuxdo-friends-note-row")?.click();
+    const dialog = await waitForFriendNoteDialog();
+    const detachedPreviewHost = friendNoteRowHost(".user-card .linuxdo-friends-note-row");
+    document.querySelector(".user-card")?.remove();
+    await vi.waitFor(() => expect(detachedPreviewHost?.shadowRoot?.querySelector(".mock-note-preview")).toBeNull());
+    const textarea = dialog.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "卡片新备注";
+    dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await flushContentScriptAsyncWork();
+
+    expect(sendMessage).toHaveBeenCalledWith({ type: "updateFriend", username: "misaka7369", patch: { note: "卡片新备注" } });
+    expect(document.getElementById("linuxdo-friends-note-dialog")).toBeNull();
+  });
+
+  it("shows an editable placeholder for empty profile and user-card notes", async () => {
+    const baseState = addFriendFromProfile(defaultAppState, {
+      username: "misaka7369",
+      name: "星",
+      refreshedAt: "2026-06-28T00:00:00.000Z"
+    });
+    const friendState = {
+      ...baseState,
+      friends: {
+        ...baseState.friends,
+        misaka7369: {
+          ...baseState.friends.misaka7369,
+          note: " \n "
+        }
+      }
+    };
+    window.history.replaceState({}, "", "/u/misaka7369");
+    document.body.innerHTML = `
+      <section class="user-main">
+        <div class="names"><h1>星</h1><span class="username">Misaka7369</span></div>
+        <div class="controls"><button class="btn">取消关注</button></div>
+      </section>
+      <aside class="user-card" data-username="Misaka7369">
+        <div class="names"><span class="name">星</span><span class="username">@Misaka7369</span></div>
+        <ul class="usercard-controls"><li><button class="btn">关注</button></li></ul>
+      </aside>
+    `;
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn(async (message: unknown) => {
+          if (isHeartbeatMessage(message)) return { ok: true };
+          return { ok: true, data: friendState };
+        }),
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn()
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+    await vi.waitFor(() => expect(document.querySelectorAll(".linuxdo-friends-note-row")).toHaveLength(2));
+
+    const profileSelector = ".user-main .linuxdo-friends-note-row";
+    const cardSelector = ".user-card .linuxdo-friends-note-row";
+    await vi.waitFor(() => {
+      expect(friendNotePlaceholder(profileSelector)).not.toBeNull();
+      expect(friendNotePlaceholder(cardSelector)).not.toBeNull();
+    });
+    expect(friendNotePlaceholder(profileSelector)?.textContent).toBe("视奸备注");
+    expect(friendNotePlaceholder(cardSelector)?.textContent).toBe("视奸备注");
+    expect(friendNotePreviewElement(profileSelector)).toBeNull();
+    expect(friendNotePreviewElement(cardSelector)).toBeNull();
+    expect(document.getElementById("linuxdo-friends-note-tooltip-layer")).toBeNull();
+
+    friendNotePlaceholder(profileSelector)?.click();
+    const profileDialog = await waitForFriendNoteDialog();
+    expect(profileDialog.getAttribute("data-username")).toBe("misaka7369");
+    profileDialog.querySelectorAll<HTMLButtonElement>("button")[1]?.click();
+    await flushContentScriptAsyncWork();
+
+    friendNoteEditButton(cardSelector)?.click();
+    const cardDialog = await waitForFriendNoteDialog();
+    expect(cardDialog.getAttribute("data-username")).toBe("misaka7369");
+  });
+
+  it("reinjects the note row after user-card DOM rebuilds and route changes", async () => {
+    const friendState = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "misaka7369",
+        name: "星",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "misaka7369",
+      { note: "重建备注" }
+    );
+    window.history.replaceState({}, "", "/t/topic/1");
+    document.body.innerHTML = `
+      <aside class="user-card" data-username="Misaka7369">
+        <div class="names"><span class="name">星</span><span class="username">@Misaka7369</span></div>
+        <ul class="usercard-controls"><li><button class="btn">关注</button></li></ul>
+      </aside>
+    `;
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn(async (message: unknown) => {
+          if (isHeartbeatMessage(message)) return { ok: true };
+          return { ok: true, data: friendState };
+        }),
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn()
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await waitForNotePreview("重建备注");
+    const originalHost = friendNoteRowHost(".user-card .linuxdo-friends-note-row");
+    const replacementNames = document.createElement("div");
+    replacementNames.className = "names";
+    replacementNames.innerHTML = '<span class="name">星</span><span class="username">@Misaka7369</span>';
+    document.querySelector(".user-card .names")?.replaceWith(replacementNames);
+
+    await vi.waitFor(() => expect(friendNotePreviewText(".user-card .linuxdo-friends-note-row")).toBe("重建备注"));
+    expect(friendNoteRowHost(".user-card .linuxdo-friends-note-row")).not.toBe(originalHost);
+    expect(originalHost?.shadowRoot?.querySelector(".mock-note-preview")).toBeNull();
+    expect(document.querySelectorAll(".linuxdo-friends-note-row")).toHaveLength(1);
+
+    window.history.pushState({}, "", "/u/misaka7369");
+    document.body.innerHTML = `
+      <section class="user-main">
+        <div class="names"><h1>星</h1><span class="username">Misaka7369</span></div>
+        <div class="controls"><button class="btn">取消关注</button></div>
+      </section>
+    `;
+
+    await vi.waitFor(() => expect(friendNotePreviewText(".user-main .linuxdo-friends-note-row")).toBe("重建备注"));
+    expect(document.querySelectorAll(".linuxdo-friends-note-row")).toHaveLength(1);
+    expect(friendNoteRowHost(".user-main .linuxdo-friends-note-row")?.parentElement).toBe(document.querySelector(".user-main .names"));
+  });
+
+  it("does not show note preview or note editor action for non-friends", async () => {
+    window.history.replaceState({}, "", "/u/misaka7369");
+    document.body.innerHTML = `
+      <section class="user-main">
+        <div class="names"><h1>星</h1><span class="username">Misaka7369</span></div>
+        <div class="controls">
+          <button class="btn">关注</button>
+        </div>
+      </section>
+      <aside class="user-card" data-username="Other">
+        <div class="names"><span class="name">Other</span></div>
+        <ul class="usercard-controls"><li><button class="btn">关注</button></li></ul>
+      </aside>
+    `;
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn(async (message: unknown) => {
+          if (isHeartbeatMessage(message)) return { ok: true };
+          return { ok: true, data: defaultAppState };
+        }),
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn()
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+
+    expect(document.querySelectorAll(".linuxdo-friends-note-row")).toHaveLength(0);
+    expect(document.querySelectorAll(".linuxdo-friends-note-action")).toHaveLength(0);
+    expect(document.getElementById("linuxdo-friends-profile-action")?.textContent).toBe("视奸");
+  });
+
+  it("keeps a profile note dialog open with draft and error when save fails", async () => {
+    const friendState = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "misaka7369",
+        name: "星",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "misaka7369",
+      { note: "旧备注" }
+    );
+    window.history.replaceState({}, "", "/u/misaka7369");
+    document.body.innerHTML = `
+      <section class="user-main">
+        <div class="names"><h1>星</h1><span class="username">Misaka7369</span></div>
+        <div class="controls">
+          <button class="btn">取消关注</button>
+        </div>
+      </section>
+    `;
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn(async (message: unknown) => {
+          if (isHeartbeatMessage(message)) return { ok: true };
+          if (isGetStateMessage(message)) return { ok: true, data: friendState };
+          if (isUpdateFriendMessage(message)) return { ok: false, error: "后台拒绝" };
+          return { ok: true, data: friendState };
+        }),
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn()
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+
+    (await waitForFriendNoteEditButton())?.click();
+    const dialog = await waitForFriendNoteDialog();
+    const textarea = dialog.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "失败草稿";
+    dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await flushContentScriptAsyncWork();
+
+    expect(document.getElementById("linuxdo-friends-note-dialog")).not.toBeNull();
+    expect((dialog.querySelector("textarea") as HTMLTextAreaElement).value).toBe("失败草稿");
+    await vi.waitFor(() => expect(dialog.querySelector('[role="alert"]')?.textContent).toBe("后台拒绝"));
+  });
+
+  it("keeps a profile note dialog open with draft and error when save rejects", async () => {
+    const friendState = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "misaka7369",
+        name: "星",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "misaka7369",
+      { note: "旧备注" }
+    );
+    window.history.replaceState({}, "", "/u/misaka7369");
+    document.body.innerHTML = `
+      <section class="user-main">
+        <div class="names"><h1>星</h1><span class="username">Misaka7369</span></div>
+        <div class="controls">
+          <button class="btn">取消关注</button>
+        </div>
+      </section>
+    `;
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn(async (message: unknown) => {
+          if (isHeartbeatMessage(message)) return { ok: true };
+          if (isGetStateMessage(message)) return { ok: true, data: friendState };
+          if (isUpdateFriendMessage(message)) throw new Error("runtime disconnected");
+          return { ok: true, data: friendState };
+        }),
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn()
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+
+    (await waitForFriendNoteEditButton())?.click();
+    const dialog = await waitForFriendNoteDialog();
+    const textarea = dialog.querySelector("textarea") as HTMLTextAreaElement;
+    textarea.value = "异常草稿";
+    dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await flushContentScriptAsyncWork();
+
+    expect(document.getElementById("linuxdo-friends-note-dialog")).not.toBeNull();
+    expect((dialog.querySelector("textarea") as HTMLTextAreaElement).value).toBe("异常草稿");
+    await vi.waitFor(() => expect(dialog.querySelector('[role="alert"]')?.textContent).toBe("runtime disconnected"));
+  });
+
+  it("clears notes and closes an open editor when storage refresh removes the friend", async () => {
+    const friendState = updateFriend(
+      addFriendFromProfile(defaultAppState, {
+        username: "misaka7369",
+        name: "星",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      "misaka7369",
+      { note: "待清除" }
+    );
+    const clearedState = updateFriend(friendState, "misaka7369", { note: "" });
+    window.history.replaceState({}, "", "/u/misaka7369");
+    document.body.innerHTML = `
+      <section class="user-main">
+        <div class="names"><h1>星</h1><span class="username">Misaka7369</span></div>
+        <div class="controls">
+          <button class="btn">取消关注</button>
+        </div>
+      </section>
+    `;
+    const storageListeners: Array<(changes: Record<string, unknown>, areaName: string) => void> = [];
+    const sendMessage = vi.fn(async (message: unknown) => {
+      if (isHeartbeatMessage(message)) return { ok: true };
+      if (isGetStateMessage(message)) return { ok: true, data: storageListeners.length > 0 ? defaultAppState : friendState };
+      if (isUpdateFriendMessage(message)) return { ok: true, data: clearedState };
+      return { ok: true, data: friendState };
+    });
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage,
+        onMessage: {
+          addListener: vi.fn()
+        }
+      },
+      storage: {
+        local: createMockLocalStorage(),
+        onChanged: {
+          addListener: vi.fn((listener: (changes: Record<string, unknown>, areaName: string) => void) => {
+            storageListeners.push(listener);
+          })
+        }
+      }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+
+    (await waitForFriendNoteEditButton())?.click();
+    const dialog = await waitForFriendNoteDialog();
+    (dialog.querySelector("textarea") as HTMLTextAreaElement).value = "";
+    dialog.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await flushContentScriptAsyncWork();
+    expect(sendMessage).toHaveBeenCalledWith({ type: "updateFriend", username: "misaka7369", patch: { note: "" } });
+    await vi.waitFor(() => expect(friendNotePlaceholder()?.textContent).toBe("视奸备注"));
+    expect(friendNotePreviewElement()).toBeNull();
+
+    friendNotePlaceholder()?.click();
+    await waitForFriendNoteDialog();
+    storageListeners[0]?.({}, "local");
+    await flushContentScriptAsyncWork();
+
+    expect(document.getElementById("linuxdo-friends-note-dialog")).toBeNull();
+    expect(document.querySelector(".linuxdo-friends-note-row")).toBeNull();
   });
 
   it("injects a page launcher before the current-user header item and opens the native user menu friends tab", async () => {
@@ -1769,6 +2469,10 @@ async function waitForFriendMark(selector: string) {
   throw new Error(`Friend mark not found: ${selector}`);
 }
 
+async function waitForNotePreview(text: string) {
+  await vi.waitFor(() => expect(friendNotePreviewText()).toBe(text));
+}
+
 async function flushContentScriptAsyncWork() {
   await Promise.resolve();
   await Promise.resolve();
@@ -1796,4 +2500,77 @@ function isAddFriendFromKnownUserMessage(value: unknown): boolean {
 
 function isRemoveFriendMessage(value: unknown): boolean {
   return typeof value === "object" && value != null && (value as { type?: unknown }).type === "removeFriend";
+}
+
+function isUpdateFriendMessage(value: unknown): boolean {
+  return typeof value === "object" && value != null && (value as { type?: unknown }).type === "updateFriend";
+}
+
+async function waitForFriendNoteDialog() {
+  for (let index = 0; index < 20; index += 1) {
+    await flushContentScriptAsyncWork();
+    const host = document.getElementById("linuxdo-friends-note-dialog");
+    const dialog = host?.shadowRoot?.querySelector<HTMLElement>('[data-testid="friend-note-dialog"]');
+    if (dialog) return dialog;
+  }
+  throw new Error("Friend note dialog not found");
+}
+
+function friendNoteRowHost(selector = ".linuxdo-friends-note-row") {
+  return document.querySelector<HTMLElement>(selector);
+}
+
+function friendNotePreviewRoot(selector = ".linuxdo-friends-note-row") {
+  return friendNoteRowHost(selector)?.shadowRoot?.querySelector<HTMLElement>(".linuxdo-friends-note-row-root") ?? null;
+}
+
+function friendNotePreviewElement(selector = ".linuxdo-friends-note-row") {
+  return friendNoteRowHost(selector)?.shadowRoot?.querySelector<HTMLElement>(".mock-note-preview") ?? null;
+}
+
+function friendNotePreviewText(selector = ".linuxdo-friends-note-row") {
+  return friendNotePreviewElement(selector)?.textContent ?? "";
+}
+
+function friendNotePreviewStyleElement(selector = ".linuxdo-friends-note-row") {
+  return friendNoteRowHost(selector)?.shadowRoot?.querySelector("style") ?? null;
+}
+
+function friendNoteEditButton(selector = ".linuxdo-friends-note-row") {
+  return friendNoteRowHost(selector)?.shadowRoot?.querySelector<HTMLButtonElement>(".friend-note-edit-button") ?? null;
+}
+
+async function waitForFriendNoteEditButton(selector = ".linuxdo-friends-note-row") {
+  await vi.waitFor(() => expect(friendNoteEditButton(selector)).not.toBeNull());
+  return friendNoteEditButton(selector);
+}
+
+function friendNotePlaceholder(selector = ".linuxdo-friends-note-row") {
+  return friendNoteRowHost(selector)?.shadowRoot?.querySelector<HTMLButtonElement>(".friend-note-placeholder") ?? null;
+}
+
+function topicPostFixture(id: string, username: string, displayName: string) {
+  return `<article class="topic-post" id="${id}">${topicPostMetaFixture(username, displayName).outerHTML}</article>`;
+}
+
+function topicPostMetaFixture(username: string, displayName: string) {
+  const metadata = document.createElement("div");
+  metadata.className = "topic-meta-data";
+  metadata.innerHTML = `
+    <div class="names trigger-user-card">
+      <span class="full-name"><a href="/u/${username}" data-user-card="${username}">${displayName}</a></span>
+      <span class="username"><a href="/u/${username}" data-user-card="${username}">@${username}</a></span>
+    </div>
+  `;
+  return metadata;
+}
+
+function postFriendNotePreview(host: HTMLElement) {
+  return host.shadowRoot?.querySelector<HTMLElement>(".mock-note-preview") ?? null;
+}
+
+function postFriendNoteTexts() {
+  return Array.from(document.querySelectorAll<HTMLElement>(".linuxdo-friends-post-note")).map(
+    (host) => postFriendNotePreview(host)?.textContent ?? ""
+  );
 }

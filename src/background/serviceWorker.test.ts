@@ -796,6 +796,15 @@ describe("message contracts", () => {
     expect(combinedSettingsWorker.sessionStorage.dump()[TIMED_ACTIVITY_SESSION_STORAGE_KEY]).not.toHaveProperty("noTargetMessage");
   });
 
+  it("rejects friend updates after the target friend has been removed", async () => {
+    const { send } = await setupWorker({ initialState: defaultAppState });
+
+    await expect(send({ type: "updateFriend", username: "neo", patch: { note: "NAS" } })).resolves.toEqual({
+      ok: false,
+      error: "该用户已不在佬朋友中。"
+    });
+  });
+
   it("keeps no-rule timed session state when rule edits do not change timed targets", async () => {
     const activeState: AppState = {
       ...addFriendFromProfile(defaultAppState, { username: "Neo", refreshedAt: "2026-06-28T00:00:00.000Z" }),
