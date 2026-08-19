@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, LoaderCircle, Pencil, Search } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, Search } from "lucide-react";
 import { ALL_ACTIVITY_KINDS, normalizeUsername } from "../domain/friends";
 import type { BackgroundResponse, FollowedUserInput, FriendProfileSummary, ActivityRefreshKind, Username } from "../shared/types";
 import type { deriveFollowedCandidates, deriveFriendList } from "../popup/selectors";
@@ -13,7 +13,7 @@ import {
 import { eventHappenedInside } from "./activityLinks";
 import { kindIcon, kindText } from "./activityKinds";
 import { UserIdentityRow } from "./UserIdentityRow";
-import { FriendNoteDialog, FriendNotePreview, type FriendNoteSaveResult } from "./FriendNoteEditor";
+import { FriendNoteDialog, FriendNoteEditButton, FriendNotePreview, type FriendNoteSaveResult } from "./FriendNoteEditor";
 
 export function ActivityScopeSelect({
   disabled,
@@ -125,7 +125,8 @@ export function FriendCandidateList({
   onRemove,
   onUpdateNote,
   onUpdateScope,
-  query
+  query,
+  tooltipPortalTarget
 }: {
   candidates: ReturnType<typeof deriveFollowedCandidates>;
   emptyText?: string;
@@ -138,6 +139,7 @@ export function FriendCandidateList({
   onUpdateNote?: (username: Username, note: string) => Promise<FriendNoteSaveResult>;
   onUpdateScope?: (username: Username, activityKinds: ActivityRefreshKind[]) => void;
   query: string;
+  tooltipPortalTarget?: Element | DocumentFragment;
 }) {
   const [lookupProfiles, setLookupProfiles] = useState<Record<Username, FriendProfileSummary>>({});
   const [lookupErrors, setLookupErrors] = useState<Record<Username, string>>({});
@@ -206,7 +208,7 @@ export function FriendCandidateList({
   }
 
   return (
-    <div className="list modal-list">
+    <div className={`list modal-list friend-candidate-list-${mode}`}>
       {visibleCandidates.map((candidate) => {
         const friend = friends.find((item) => item.friend.username === candidate.user.username)?.friend;
         return (
@@ -227,7 +229,9 @@ export function FriendCandidateList({
               onLookup={handleLookup}
               onRemove={onRemove}
               onUpdateScope={onUpdateScope}
+              note={friend?.note ?? ""}
               scope={friend?.activityKinds}
+              tooltipPortalTarget={tooltipPortalTarget}
             />
           </div>
         );
@@ -256,7 +260,9 @@ function CandidateAction({
   onLookup,
   onRemove,
   onUpdateScope,
-  scope
+  note,
+  scope,
+  tooltipPortalTarget
 }: {
   candidate: ReturnType<typeof mergeFriendCandidates>[number];
   disabled: boolean;
@@ -269,12 +275,22 @@ function CandidateAction({
   onLookup: (username: Username) => void;
   onRemove?: (username: Username) => void;
   onUpdateScope?: (username: Username, activityKinds: ActivityRefreshKind[]) => void;
+  note: string;
   scope?: ActivityRefreshKind[];
+  tooltipPortalTarget?: Element | DocumentFragment;
 }) {
   if (candidate.isFriend) {
     if (mode === "light") {
       return (
         <div className="candidate-manage-actions">
+          <FriendNoteEditButton
+            disabled={disabled}
+            note={note}
+            onClick={() => onEditNote?.(candidate.user.username)}
+            showNoteTooltip
+            tooltipPortalTarget={tooltipPortalTarget}
+            username={candidate.user.username}
+          />
           <button className="candidate-action-remove" onClick={() => onRemove?.(candidate.user.username)} disabled={disabled} type="button">
             移除
           </button>
@@ -283,16 +299,13 @@ function CandidateAction({
     }
     return (
       <div className="candidate-manage-actions">
-        <button
-          className="candidate-note-edit"
-          type="button"
-          onClick={() => onEditNote?.(candidate.user.username)}
+        <FriendNoteEditButton
           disabled={disabled}
-          title="编辑备注"
-          aria-label={`编辑 @${candidate.user.username} 的备注`}
-        >
-          <Pencil size={14} aria-hidden="true" />
-        </button>
+          note={note}
+          onClick={() => onEditNote?.(candidate.user.username)}
+          tooltipPortalTarget={tooltipPortalTarget}
+          username={candidate.user.username}
+        />
         <ActivityScopeSelect
           disabled={disabled}
           value={scope ?? ALL_ACTIVITY_KINDS}

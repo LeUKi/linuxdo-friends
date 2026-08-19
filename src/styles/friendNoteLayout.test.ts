@@ -82,6 +82,12 @@ describe("friend note layout styles", () => {
     expect(cssBlock(".friend-main-button", listCss)).toContain("min-width: 0;");
     expect(cssBlock(".candidate-row", modalCss)).toContain("grid-template-columns: minmax(0, 1fr) minmax(0, auto);");
     expect(cssBlock(".candidate-identity", modalCss)).toContain("min-width: 0;");
+
+    const editButton = cssBlock(".candidate-note-edit", modalCss);
+    expect(editButton).toContain("width: 38px;");
+    expect(editButton).toContain("height: 38px;");
+    expect(cssBlock(".friend-candidate-list-light .candidate-note-edit.has-note", modalCss)).toContain("color: var(--text-strong);");
+    expect(cssBlock(".friend-candidate-list-light .candidate-note-edit.is-empty", modalCss)).toContain("color: var(--text-subtle);");
   });
 });
 

@@ -3,7 +3,7 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-08-18
+- Last refreshed: 2026-08-19
 - Primary product surfaces: Chrome side panel, options/settings page, linux.do profile page integration, linux.do user card integration, and read-only topic-detail post metadata integration.
 - Evidence reviewed: `README.md`; `docs/privacy-policy.md`; `docs/chrome-web-store-submission.md`; `docs/linuxdo-friends-extension-feasibility.md`; `src/app/FriendsApp.tsx`; `src/app/FriendManagement.tsx`; `src/content/contentScript.ts`; `src/styles/app.css`; `src/shared/types.ts`; `src/domain/configTransfer.ts`.
 
@@ -29,7 +29,7 @@
 
 - Primary navigation: The side panel is the main daily surface; the options page owns configuration and full friend management; linux.do page injections provide contextual actions.
 - Core routes/screens: Friends list, activity feed, Lao Finds, settings scope management, cloud backup settings, profile action area, user card action area, and `/t/...` post author metadata.
-- Content hierarchy: Identity first; profile and user-card surfaces place a dedicated editable note row below identity, while topic posts place a non-empty read-only note directly after the display-name link.
+- Content hierarchy: Identity first; profile and user-card surfaces place a dedicated editable note row below identity, topic posts place a non-empty read-only note directly after the display-name link, and the compact quick-add list keeps notes behind a stateful pencil control to preserve row width.
 
 ## Design principles
 
@@ -49,14 +49,14 @@
 ## Components
 
 - Existing components to reuse: `FriendsApp`, `FriendCandidateList`, `ActivityScopeSelect`, `UserIdentityRow`, shared modal/button/list styling, and content-script Shadow DOM roots.
-- New/changed components: `FriendNotePreview` for constrained one-line note display; one shared note editor dialog reused by settings, profile, and user-card surfaces; one profile/user-card note row containing preview or placeholder plus an adjacent pencil control; one read-only topic-post preview root per visible floor.
-- Variants and states: Side panel and user card note previews cap at `240px`; settings cap at `280px`; profile caps at `420px`; topic-post previews cap at `min(160px, 40vw)`. Page-injected profile, user-card, and topic-post notes use `var(--accent-strong)`, while plugin surfaces keep their muted hierarchy. Every variant uses `min-width: 0`, `width: fit-content`, and single-line ellipsis without resizing parent grids or card height. Profile and user-card note rows sit inside the identity names container on their own line. Topic-post notes appear only for non-empty friend notes after `.full-name > a[data-user-card]`, with no placeholder, separator, background, pencil, or edit action.
+- New/changed components: `FriendNotePreview` for constrained one-line note display; `FriendNoteEditButton` for the shared pencil, full-note tooltip, and edit trigger across extension and injected surfaces; one shared fixed-position tooltip portal; one shared note editor dialog reused by settings, the side-panel quick-add list, profile, and user-card surfaces; one profile/user-card note row containing preview or placeholder plus an adjacent pencil control; one read-only topic-post preview root per visible floor.
+- Variants and states: Side panel and user card note previews cap at `240px`; settings cap at `280px`; profile caps at `420px`; topic-post previews cap at `min(160px, 40vw)`. Page-injected profile, user-card, and topic-post notes use `var(--accent-strong)`, while plugin surfaces keep their muted hierarchy. Every preview variant uses `min-width: 0`, `width: fit-content`, and single-line ellipsis without resizing parent grids or card height. Profile and user-card note rows sit inside the identity names container on their own line. Their pencils keep the existing subtle default and accent hover/focus styling, and always show a non-empty note in full on hover or focus. Topic-post notes appear only for non-empty friend notes after `.full-name > a[data-user-card]`, with no placeholder, separator, background, pencil, or edit action. The side-panel quick-add list never renders note text inline: existing friends get a fixed pencil beside Remove, with `var(--text-strong)` when a note exists and `var(--text-subtle)` when empty.
 - Token/component ownership: Keep reusable React UI in `src/app/` or adjacent shared UI helpers; keep content-script-only DOM/CSS behavior isolated inside `src/content/`; use `src/styles/app.css` and existing CSS variables for extension surfaces.
 
 ## Accessibility
 
 - Target standard: Keyboard-usable, readable, and nonblocking for Chrome extension and injected linux.do surfaces.
-- Keyboard/focus behavior: Note previews show the full-text overlay on focus only when truncated; Escape closes overlays and editors; Enter saves in the note editor.
+- Keyboard/focus behavior: Note previews show the full-text overlay on focus only when truncated; quick-add, profile, and user-card pencils show any existing note in full on hover or focus; Escape closes overlays and editors; Enter saves in the note editor.
 - Contrast/readability: Maintain existing light/dark theme contrast. Page-injected note previews use the synchronized accent token; plugin previews and full-note tooltips preserve their quieter, high-readability text colors.
 - Screen-reader semantics: Preview text remains text; topic-post notes stay read-only; edit controls expose a clear note-editing label; dialogs announce title, validation, character count, and error state.
 - Reduced motion and sensory considerations: Do not animate note preview, tooltip, or editor in a way required for comprehension.
@@ -65,12 +65,12 @@
 
 - Supported breakpoints/devices: Chrome side panel width, full options page desktop width, narrow browser windows, linux.do desktop hover, and touch-capable devices.
 - Layout adaptations: Long Chinese text, continuous English, emoji, and long URLs stay within the configured surface width and use single-line ellipsis in preview. Topic notes must not change floor-header height.
-- Touch/hover differences: Desktop hover and keyboard focus can show overflow text; touch opens full text on tap and closes on outside tap or Escape.
+- Touch/hover differences: Desktop hover and keyboard focus can show overflow text, and editable note pencils always show an existing note in full. Touching an editable pencil opens the editor directly; other touch previews open full text on tap and close on outside tap or Escape.
 
 ## Interaction states
 
 - Loading: Keep existing row and action loading states; do not block note viewing during unrelated refresh work.
-- Empty: Empty or whitespace-only profile/user-card notes show `视奸备注` in `color-mix(in srgb, var(--accent-strong) 64%, var(--text-subtle))` with an adjacent subdued pencil; either opens the editor. Topic posts render nothing for empty notes or username-only identities. Clearing a note is valid.
+- Empty: Empty or whitespace-only profile/user-card notes show `视奸备注` in `color-mix(in srgb, var(--accent-strong) 64%, var(--text-subtle))` with an adjacent subdued pencil; either opens the editor. The quick-add list shows only a subdued pencil and no placeholder or empty tooltip. Topic posts render nothing for empty notes or username-only identities. Clearing a note is valid.
 - Error: Failed save keeps the editor open with the draft and an error message.
 - Success: Saved notes immediately update local state and archive-difference indicators through existing state flow.
 - Disabled: Disable save while submitting or when the user is no longer a friend.
@@ -86,9 +86,9 @@
 
 - Framework/styling system: TypeScript, React, Jotai, MV3 content scripts, Vite, and repo CSS variables.
 - Design-token constraints: Do not introduce a new design-system layer or dependency. Extend existing CSS files and local helpers.
-- Performance constraints: Tooltip overflow detection should be measurement-based (`scrollWidth > clientWidth`) and event-driven, not continuous polling.
+- Performance constraints: Preview overflow detection should be measurement-based (`scrollWidth > clientWidth`) and event-driven, not continuous polling; editable pencils do not measure overflow because their tooltip intentionally shows any non-empty note in full.
 - Compatibility constraints: Keep config schema v1, `FriendUser.note`, config export/import, and cloud archive payload shape unchanged. Do not add permissions, background commands, or remote services for notes.
-- Test/screenshot expectations: Verify note constraints across side panel, settings, profile, user card, and topic-post author names; confirm excluded dense surfaces remain untouched; verify content-script bundle stays self-contained with no top-level import/export remnants.
+- Test/screenshot expectations: Verify note constraints across the side-panel friend list and quick-add manager, settings, profile, user card, and topic-post author names; confirm editable pencils expose full notes on hover/focus, the quick-add list stays compact, and excluded dense surfaces remain untouched; verify content-script bundle stays self-contained with no top-level import/export remnants.
 
 ## Open questions
 

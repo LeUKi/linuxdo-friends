@@ -1,8 +1,7 @@
 import React from "react";
-import { Pencil } from "lucide-react";
 import { createRoot, type Root } from "react-dom/client";
 import { FriendsApp } from "../app/FriendsApp";
-import { FriendNoteDialog, FriendNotePreview } from "../app/FriendNoteEditor";
+import { FriendNoteDialog, FriendNoteEditButton, FriendNotePreview } from "../app/FriendNoteEditor";
 import type { AppState } from "../shared/types";
 import type {
   ActivityItem,
@@ -1158,17 +1157,17 @@ function placeFriendNoteRow(note: string, target: FriendActionTarget) {
             },
             "视奸备注"
           ),
-      React.createElement(
-        "button",
-        {
-          "aria-label": "编辑好友备注",
-          className: "friend-note-edit-button",
-          onClick: openEditor,
-          title: "编辑好友备注",
-          type: "button"
-        },
-        React.createElement(Pencil, { "aria-hidden": true, size: 14 })
-      )
+      React.createElement(FriendNoteEditButton, {
+        ariaLabel: "编辑好友备注",
+        className: "friend-note-edit-button",
+        disabled: false,
+        note,
+        onClick: openEditor,
+        showNoteTooltip: true,
+        title: "编辑好友备注",
+        tooltipPortalTarget: hasNote ? ensureFriendNoteTooltipRoot() : undefined,
+        username: target.username
+      })
     )
   );
 }

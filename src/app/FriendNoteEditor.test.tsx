@@ -2,7 +2,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FriendNoteDialog, FriendNotePreview, friendNoteTooltipPosition } from "./FriendNoteEditor";
+import { FriendNoteDialog, FriendNoteEditButton, FriendNotePreview, friendNoteTooltipPosition } from "./FriendNoteEditor";
 
 describe("friend note preview", () => {
   beforeEach(() => {
@@ -81,6 +81,79 @@ describe("friend note preview", () => {
     expect(preview?.getAttribute("tabindex")).toBeNull();
     await act(async () => preview?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
     expect(document.body.querySelector("[role='tooltip']")).toBeNull();
+    await act(async () => root.unmount());
+  });
+});
+
+describe("friend note edit button", () => {
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.restoreAllMocks();
+  });
+
+  it("shows any existing note on hover and focus, then hides it before editing", async () => {
+    const onClick = vi.fn();
+    const tooltipPortalTarget = document.createElement("div");
+    document.body.append(tooltipPortalTarget);
+    const { host, root } = await render(
+      <FriendNoteEditButton
+        ariaLabel="编辑好友备注"
+        className="friend-note-edit-button"
+        disabled={false}
+        note="NAS"
+        onClick={onClick}
+        showNoteTooltip
+        title="编辑好友备注"
+        tooltipPortalTarget={tooltipPortalTarget}
+        username="neo"
+      />
+    );
+    const button = host.querySelector<HTMLButtonElement>(".friend-note-edit-button");
+
+    expect(button?.classList.contains("has-note")).toBe(true);
+    expect(button?.getAttribute("aria-label")).toBe("编辑好友备注");
+    expect(button?.getAttribute("title")).toBeNull();
+    await act(async () => button?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    expect(tooltipPortalTarget.querySelector("[role='tooltip']")?.textContent).toBe("NAS");
+
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(document.body.querySelector("[role='tooltip']")).toBeNull();
+
+    await act(async () => button?.focus());
+    expect(document.body.querySelector("[role='tooltip']")?.textContent).toBe("NAS");
+
+    await act(async () => button?.blur());
+    expect(document.body.querySelector("[role='tooltip']")).toBeNull();
+
+    await act(async () => button?.focus());
+    expect(document.body.querySelector("[role='tooltip']")?.textContent).toBe("NAS");
+
+    await act(async () => button?.click());
+    expect(onClick).toHaveBeenCalledOnce();
+    expect(onClick.mock.calls[0]?.[0].type).toBe("click");
+    expect(document.body.querySelector("[role='tooltip']")).toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("keeps an empty note subdued without rendering an empty tooltip", async () => {
+    const onClick = vi.fn();
+    const { host, root } = await render(
+      <FriendNoteEditButton disabled={false} note="" onClick={onClick} showNoteTooltip title="编辑好友备注" username="neo" />
+    );
+    const button = host.querySelector<HTMLButtonElement>(".candidate-note-edit");
+
+    expect(button?.classList.contains("is-empty")).toBe(true);
+    expect(button?.getAttribute("title")).toBe("编辑好友备注");
+    await act(async () => button?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    await act(async () => button?.focus());
+    expect(document.body.querySelector("[role='tooltip']")).toBeNull();
+
+    await act(async () => button?.click());
+    expect(onClick).toHaveBeenCalledOnce();
     await act(async () => root.unmount());
   });
 });

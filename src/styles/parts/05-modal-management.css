@@ -116,6 +116,19 @@
   padding: 0;
 }
 
+.friend-candidate-list-light .candidate-note-edit.has-note {
+  color: var(--text-strong);
+}
+
+.friend-candidate-list-light .candidate-note-edit.is-empty {
+  color: var(--text-subtle);
+}
+
+.candidate-note-edit:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+
 .friend-note-tooltip {
   position: fixed;
   z-index: 2147483645;

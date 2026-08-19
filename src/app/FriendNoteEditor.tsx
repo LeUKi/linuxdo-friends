@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { Pencil, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { friendNoteLength, MAX_FRIEND_NOTE_LENGTH, normalizeFriendNoteInput } from "../domain/friendNote";
 import type { Username } from "../shared/types";
@@ -15,6 +15,94 @@ interface TooltipPosition {
   left: number;
   top: number;
   placement: "top" | "bottom";
+}
+
+function useFriendNoteTooltip<T extends HTMLElement>({
+  enabled,
+  note,
+  tooltipPortalTarget,
+  triggerRef
+}: {
+  enabled: boolean;
+  note: string;
+  tooltipPortalTarget?: Element | DocumentFragment;
+  triggerRef: React.RefObject<T | null>;
+}) {
+  const tooltipRef = useRef<HTMLSpanElement>(null);
+  const tooltipId = useId();
+  const [visible, setVisible] = useState(false);
+  const [position, setPosition] = useState<TooltipPosition>({ left: 12, top: 12, placement: "top" });
+  const hide = useCallback(() => setVisible(false), []);
+  const show = useCallback(() => setVisible(true), []);
+  const toggle = useCallback(() => setVisible((current) => !current), []);
+  const tooltipVisible = visible && enabled;
+
+  const placeTooltip = useCallback(() => {
+    const trigger = triggerRef.current;
+    const tooltip = tooltipRef.current;
+    if (!trigger || !tooltip) return;
+    setPosition(
+      friendNoteTooltipPosition(
+        trigger.getBoundingClientRect(),
+        { width: tooltip.offsetWidth, height: tooltip.offsetHeight },
+        { width: window.innerWidth, height: window.innerHeight }
+      )
+    );
+  }, [triggerRef]);
+
+  useLayoutEffect(() => {
+    if (tooltipVisible) placeTooltip();
+  }, [note, placeTooltip, tooltipVisible]);
+
+  useEffect(() => {
+    if (!enabled) setVisible(false);
+  }, [enabled, note]);
+
+  useEffect(() => {
+    if (!tooltipVisible) return undefined;
+    function dismiss(event: Event) {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event.type === "pointerdown" && eventHappenedInside(event, triggerRef.current)) return;
+      setVisible(false);
+    }
+    window.addEventListener("resize", placeTooltip);
+    window.addEventListener("scroll", placeTooltip, true);
+    document.addEventListener("pointerdown", dismiss, true);
+    document.addEventListener("keydown", dismiss, true);
+    return () => {
+      window.removeEventListener("resize", placeTooltip);
+      window.removeEventListener("scroll", placeTooltip, true);
+      document.removeEventListener("pointerdown", dismiss, true);
+      document.removeEventListener("keydown", dismiss, true);
+    };
+  }, [placeTooltip, tooltipVisible, triggerRef]);
+
+  const root = triggerRef.current?.getRootNode();
+  const portalTarget = tooltipPortalTarget ?? (typeof ShadowRoot !== "undefined" && root instanceof ShadowRoot ? root : document.body);
+
+  return {
+    hide,
+    show,
+    toggle,
+    tooltipId,
+    visible: tooltipVisible,
+    tooltip:
+      tooltipVisible && portalTarget
+        ? createPortal(
+            <span
+              className="friend-note-tooltip"
+              data-placement={position.placement}
+              id={tooltipId}
+              ref={tooltipRef}
+              role="tooltip"
+              style={{ left: position.left, top: position.top }}
+            >
+              {note}
+            </span>,
+            portalTarget
+          )
+        : null
+  };
 }
 
 export function friendNoteTooltipPosition(
@@ -45,32 +133,17 @@ export function FriendNotePreview({
   tooltipPortalTarget?: Element | DocumentFragment;
 }) {
   const triggerRef = useRef<HTMLSpanElement>(null);
-  const tooltipRef = useRef<HTMLSpanElement>(null);
-  const tooltipId = useId();
   const [overflowing, setOverflowing] = useState(false);
-  const [visible, setVisible] = useState(false);
-  const [position, setPosition] = useState<TooltipPosition>({ left: 12, top: 12, placement: "top" });
+  const tooltip = useFriendNoteTooltip({ enabled: overflowing, note, tooltipPortalTarget, triggerRef });
+  const hideTooltip = tooltip.hide;
 
   const measureOverflow = useCallback(() => {
     const trigger = triggerRef.current;
     const nextOverflowing = Boolean(trigger && trigger.scrollWidth > trigger.clientWidth);
     setOverflowing(nextOverflowing);
-    if (!nextOverflowing) setVisible(false);
+    if (!nextOverflowing) hideTooltip();
     return nextOverflowing;
-  }, []);
-
-  const placeTooltip = useCallback(() => {
-    const trigger = triggerRef.current;
-    const tooltip = tooltipRef.current;
-    if (!trigger || !tooltip) return;
-    setPosition(
-      friendNoteTooltipPosition(
-        trigger.getBoundingClientRect(),
-        { width: tooltip.offsetWidth, height: tooltip.offsetHeight },
-        { width: window.innerWidth, height: window.innerHeight }
-      )
-    );
-  }, []);
+  }, [hideTooltip]);
 
   useLayoutEffect(() => {
     measureOverflow();
@@ -81,42 +154,16 @@ export function FriendNotePreview({
     return () => observer.disconnect();
   }, [measureOverflow, note, surface]);
 
-  useLayoutEffect(() => {
-    if (visible) placeTooltip();
-  }, [placeTooltip, visible]);
-
-  useEffect(() => {
-    if (!visible) return undefined;
-    function dismiss(event: Event) {
-      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
-      if (event.type === "pointerdown" && eventHappenedInside(event, triggerRef.current)) return;
-      setVisible(false);
-    }
-    window.addEventListener("resize", placeTooltip);
-    window.addEventListener("scroll", placeTooltip, true);
-    document.addEventListener("pointerdown", dismiss, true);
-    document.addEventListener("keydown", dismiss, true);
-    return () => {
-      window.removeEventListener("resize", placeTooltip);
-      window.removeEventListener("scroll", placeTooltip, true);
-      document.removeEventListener("pointerdown", dismiss, true);
-      document.removeEventListener("keydown", dismiss, true);
-    };
-  }, [placeTooltip, visible]);
-
   function showIfOverflowing() {
-    if (measureOverflow()) setVisible(true);
+    if (measureOverflow()) tooltip.show();
   }
 
   function togglePreview(event: React.MouseEvent) {
     if (!measureOverflow()) return;
     event.preventDefault();
     event.stopPropagation();
-    setVisible((current) => !current);
+    tooltip.toggle();
   }
-
-  const root = triggerRef.current?.getRootNode();
-  const portalTarget = tooltipPortalTarget ?? (typeof ShadowRoot !== "undefined" && root instanceof ShadowRoot ? root : document.body);
 
   return (
     <>
@@ -124,30 +171,74 @@ export function FriendNotePreview({
         className={`friend-note-preview friend-note-preview-${surface}${className ? ` ${className}` : ""}`}
         ref={triggerRef}
         tabIndex={overflowing ? 0 : undefined}
-        aria-describedby={visible ? tooltipId : undefined}
-        onBlur={() => setVisible(false)}
+        aria-describedby={tooltip.visible ? tooltip.tooltipId : undefined}
+        onBlur={tooltip.hide}
         onClick={togglePreview}
         onFocus={showIfOverflowing}
         onMouseEnter={showIfOverflowing}
-        onMouseLeave={() => setVisible(false)}
+        onMouseLeave={tooltip.hide}
       >
         {note}
       </span>
-      {visible && portalTarget
-        ? createPortal(
-            <span
-              className="friend-note-tooltip"
-              data-placement={position.placement}
-              id={tooltipId}
-              ref={tooltipRef}
-              role="tooltip"
-              style={{ left: position.left, top: position.top }}
-            >
-              {note}
-            </span>,
-            portalTarget
-          )
-        : null}
+      {tooltip.tooltip}
+    </>
+  );
+}
+
+export function FriendNoteEditButton({
+  ariaLabel,
+  className = "candidate-note-edit",
+  disabled,
+  note,
+  onClick,
+  showNoteTooltip = false,
+  title,
+  tooltipPortalTarget,
+  username
+}: {
+  ariaLabel?: string;
+  className?: string;
+  disabled: boolean;
+  note: string;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  showNoteTooltip?: boolean;
+  title?: string;
+  tooltipPortalTarget?: Element | DocumentFragment;
+  username: Username;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const hasNote = note.trim().length > 0;
+  const tooltipEnabled = showNoteTooltip && hasNote && !disabled;
+  const tooltip = useFriendNoteTooltip({
+    enabled: tooltipEnabled,
+    note,
+    tooltipPortalTarget,
+    triggerRef
+  });
+  const nativeTitle = tooltipEnabled ? undefined : title ?? (showNoteTooltip ? undefined : "编辑备注");
+
+  return (
+    <>
+      <button
+        className={`${className} ${hasNote ? "has-note" : "is-empty"}`}
+        type="button"
+        ref={triggerRef}
+        onClick={(event) => {
+          tooltip.hide();
+          onClick(event);
+        }}
+        onBlur={tooltip.hide}
+        onFocus={tooltipEnabled ? tooltip.show : undefined}
+        onMouseEnter={tooltipEnabled ? tooltip.show : undefined}
+        onMouseLeave={tooltip.hide}
+        disabled={disabled}
+        title={nativeTitle}
+        aria-describedby={tooltip.visible ? tooltip.tooltipId : undefined}
+        aria-label={ariaLabel ?? `编辑 @${username} 的备注`}
+      >
+        <Pencil size={14} aria-hidden="true" />
+      </button>
+      {tooltip.tooltip}
     </>
   );
 }

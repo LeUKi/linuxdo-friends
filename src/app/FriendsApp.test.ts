@@ -1437,7 +1437,7 @@ describe("FriendsApp UI scene persistence", () => {
     expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "getCloudConfigStatus" });
   });
 
-  it("shows only remove for added users in the lightweight modal", async () => {
+  it("shows and edits an existing note through the compact pencil control", async () => {
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
       [uiSceneStorageKeys.addFriendModalOpen]: true
@@ -1460,16 +1460,127 @@ describe("FriendsApp UI scene persistence", () => {
     expect(container.textContent).not.toContain("去设置管理");
     expect(container.querySelector(".scope-select-trigger")).toBeFalsy();
     expect(container.querySelector(".candidate-action-remove")).toBeTruthy();
-    expect(container.querySelector(".candidate-note-edit")).toBeFalsy();
+    const editButton = container.querySelector<HTMLButtonElement>(".candidate-note-edit");
+    expect(editButton?.classList.contains("has-note")).toBe(true);
     expect(container.querySelector(".modal-list .friend-note-preview")).toBeFalsy();
+
+    await act(async () => editButton?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    expect(document.body.querySelector("[role='tooltip']")?.textContent).toBe("NAS");
+
+    await act(async () => {
+      editButton?.click();
+    });
+    expect(document.body.querySelector("[role='tooltip']")).toBeNull();
+    const input = container.querySelector<HTMLInputElement>(".friend-note-field input");
+    expect(input?.value).toBe("NAS");
+
+    await act(async () => {
+      setInputValue(input!, "Homelab");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      getButton(container, "保存").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "updateFriend", username: "neo", patch: { note: "Homelab" } });
+    expect(container.querySelector(".friend-note-modal")).toBeNull();
+    expect(container.querySelector(".candidate-note-edit")?.classList.contains("has-note")).toBe(true);
 
     await act(async () => {
       getButton(container, "移除").click();
       await Promise.resolve();
     });
-
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "removeFriend", username: "neo" });
     expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "openOptionsPage", hash: "#scope" });
+  });
+
+  it("uses the page tooltip portal for the in-page quick-add pencil", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.addFriendModalOpen]: true
+    });
+    setupChrome({
+      session,
+      state: updateFriend(
+        addFriendFromProfile(defaultAppState, {
+          username: "Neo",
+          name: "Neo",
+          refreshedAt: "2026-06-28T00:00:00.000Z"
+        }),
+        "neo",
+        { activityKinds: ["reply"], note: "网页快速添加备注" }
+      )
+    });
+    const tooltipPortalTarget = document.createElement("div");
+    document.body.append(tooltipPortalTarget);
+    const { container } = await renderFriendsApp("in-page", tooltipPortalTarget);
+    const editButton = container.querySelector<HTMLButtonElement>(".candidate-note-edit");
+
+    expect(editButton).toBeTruthy();
+    await act(async () => editButton?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+
+    expect(tooltipPortalTarget.querySelector("[role='tooltip']")?.textContent).toBe("网页快速添加备注");
+    expect(container.querySelector("[role='tooltip']")).toBeNull();
+  });
+
+  it("uses a subdued pencil for an empty note without an empty tooltip", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.addFriendModalOpen]: true
+    });
+    setupChrome({
+      session,
+      state: addFriendFromProfile(defaultAppState, {
+        username: "Neo",
+        name: "Neo",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      })
+    });
+    const { container } = await renderFriendsApp("side-panel");
+    const editButton = container.querySelector<HTMLButtonElement>(".candidate-note-edit");
+
+    expect(editButton?.classList.contains("is-empty")).toBe(true);
+    expect(container.querySelector(".modal-list .friend-note-preview")).toBeFalsy();
+    await act(async () => editButton?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    await act(async () => editButton?.focus());
+    expect(document.body.querySelector("[role='tooltip']")).toBeNull();
+
+    await act(async () => editButton?.click());
+    expect(container.querySelector<HTMLInputElement>(".friend-note-field input")?.value).toBe("");
+  });
+
+  it("keeps the compact note draft open when saving fails", async () => {
+    const session = createMockStorage({
+      [uiSceneStorageKeys.version]: 1,
+      [uiSceneStorageKeys.addFriendModalOpen]: true
+    });
+    const chromeMock = setupChrome({
+      session,
+      state: addFriendFromProfile(defaultAppState, {
+        username: "Neo",
+        name: "Neo",
+        refreshedAt: "2026-06-28T00:00:00.000Z"
+      }),
+      updateFriendError: "保存失败"
+    });
+    const { container } = await renderFriendsApp("side-panel");
+
+    await act(async () => container.querySelector<HTMLButtonElement>(".candidate-note-edit")?.click());
+    const input = container.querySelector<HTMLInputElement>(".friend-note-field input");
+    await act(async () => {
+      setInputValue(input!, "失败草稿");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      getButton(container, "保存").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "updateFriend", username: "neo", patch: { note: "失败草稿" } });
+    expect(container.querySelector(".friend-note-modal")).toBeTruthy();
+    expect(container.querySelector<HTMLInputElement>(".friend-note-field input")?.value).toBe("失败草稿");
+    expect(container.querySelector(".friend-note-dialog-error")?.textContent).toBe("保存失败");
   });
 
   it("shows a constrained friend note preview in the side panel", async () => {
@@ -3219,7 +3330,10 @@ describe("FriendsApp UI scene persistence", () => {
   });
 });
 
-async function renderFriendsApp(surface?: React.ComponentProps<typeof FriendsApp>["surface"]) {
+async function renderFriendsApp(
+  surface?: React.ComponentProps<typeof FriendsApp>["surface"],
+  tooltipPortalTarget?: Element | DocumentFragment
+) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -3233,7 +3347,12 @@ async function renderFriendsApp(surface?: React.ComponentProps<typeof FriendsApp
   };
   mountedFriendsAppRoots.push(mounted);
   await act(async () => {
-    root.render(React.createElement(FriendsApp, surface ? { surface } : undefined));
+    root.render(
+      React.createElement(FriendsApp, {
+        ...(surface ? { surface } : {}),
+        ...(tooltipPortalTarget ? { friendNoteTooltipPortalTarget: tooltipPortalTarget } : {})
+      })
+    );
   });
   await act(async () => {
     await Promise.resolve();
@@ -3280,7 +3399,8 @@ function setupChrome({
     checkedAt: "2026-06-28T00:00:00.000Z",
     source: "github_release" as const
   },
-  beforeTimedControllerClaim
+  beforeTimedControllerClaim,
+  updateFriendError
 }: {
   pageStatus?: PageScriptStatusSnapshot;
   progress?: SiteDataTaskProgress | null;
@@ -3302,6 +3422,7 @@ function setupChrome({
     source?: "github_release";
   };
   beforeTimedControllerClaim?: () => Promise<void>;
+  updateFriendError?: string;
 }) {
   const storageListeners: Array<(changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void> = [];
   const activityResponseQueue = [...refreshActivityResponses];
@@ -3345,7 +3466,10 @@ function setupChrome({
       return { ok: true, data: { message: "已切换到 linux.do 页面。", tabId: message.tabId, openedNewTab: false } };
     }
     if (message.type === "removeFriend") return { ok: true, data: removeFriend(state, message.username) };
-    if (message.type === "updateFriend") return { ok: true, data: updateFriend(state, message.username, message.patch) };
+    if (message.type === "updateFriend") {
+      if (updateFriendError) return { ok: false, error: updateFriendError };
+      return { ok: true, data: updateFriend(state, message.username, message.patch) };
+    }
     if (message.type === "upsertDredgeRule") return { ok: true, data: state };
     if (message.type === "removeDredgeRule") return { ok: true, data: state };
     if (message.type === "markLaoFindsItemRead") return { ok: true, data: state };

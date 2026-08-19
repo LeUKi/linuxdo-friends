@@ -72,13 +72,14 @@ import {
   siteDataProgressAtom,
   statusMessageAtom,
   syncFollowsAtom,
+  updateFriendAtom,
   updateSettingsAtom,
   updateCheckAtom
 } from "../state/atoms";
 import { VersionBadge } from "./VersionStatus";
 import { AvatarImageContext } from "./AvatarContext";
 import { FriendCandidateList } from "./FriendManagement";
-import { FriendNotePreview } from "./FriendNoteEditor";
+import { FriendNotePreview, type FriendNoteSaveResult } from "./FriendNoteEditor";
 import { kindIcon } from "./activityKinds";
 import { UserIdentityRow } from "./UserIdentityRow";
 import { FilterPopover, type FilterOption } from "./FilterPopover";
@@ -121,6 +122,7 @@ import type {
   Username
 } from "../shared/types";
 import { DREDGE_REFRESH_UNAVAILABLE_MESSAGE, deriveDredgeRefreshAvailability, deriveTimedActivityRefreshScopes } from "../domain/activityRefresh";
+import { normalizeUsername } from "../domain/friends";
 import { deriveRequestStatsView } from "../domain/requestStats";
 import {
   type UserIdentityView,
@@ -252,6 +254,7 @@ export function FriendsApp({
   const registerTimedActivityRefreshSurface = useSetAtom(registerTimedActivityRefreshSurfaceAtom);
   const recordAutoRefreshFinished = useSetAtom(recordAutoRefreshFinishedAtom);
   const syncFollows = useSetAtom(syncFollowsAtom);
+  const updateFriend = useSetAtom(updateFriendAtom);
   const clearStatus = useSetAtom(clearStatusMessageAtom);
   const deleteLaoFindsItem = useSetAtom(deleteLaoFindsItemAtom);
   const clearLaoFindsItems = useSetAtom(clearLaoFindsItemsAtom);
@@ -698,8 +701,16 @@ export function FriendsApp({
           onOpenScopeSettings={openScopeSettings}
           onRepairPageScript={() => void repairLinuxDoPageScript()}
           onRemove={(target) => void removeFriend(target)}
+          onUpdateNote={async (target, note) => {
+            const response = await updateFriend(target, { note });
+            if (!response.ok) return { ok: false, error: response.error };
+            return response.data.friends[normalizeUsername(target)]
+              ? { ok: true }
+              : { ok: false, error: "该用户已不在佬朋友中。" };
+          }}
           onSync={() => void syncFollows()}
           status={status}
+          tooltipPortalTarget={friendNoteTooltipPortalTarget}
         />
       ) : null}
       </main>
@@ -1978,8 +1989,10 @@ function AddFriendModal({
   onOpenScopeSettings,
   onRepairPageScript,
   onRemove,
+  onUpdateNote,
   onSync,
-  status
+  status,
+  tooltipPortalTarget
 }: {
   candidates: ReturnType<typeof deriveFollowedCandidates>;
   currentAccount?: Username;
@@ -1994,8 +2007,10 @@ function AddFriendModal({
   onOpenScopeSettings: () => void;
   onRepairPageScript: () => void;
   onRemove: (username: Username) => void;
+  onUpdateNote: (username: Username, note: string) => Promise<FriendNoteSaveResult>;
   onSync: () => void;
   status: string | null;
+  tooltipPortalTarget?: Element | DocumentFragment;
 }) {
   const statusAction = status ? repairActionForStatus(status, onRepairPageScript, onOpenLinuxDoHome) : null;
 
@@ -2063,7 +2078,9 @@ function AddFriendModal({
             onAdd={onAdd}
             onLookup={onLookup}
             onRemove={onRemove}
+            onUpdateNote={onUpdateNote}
             query={query}
+            tooltipPortalTarget={tooltipPortalTarget}
           />
         </section>
       </section>

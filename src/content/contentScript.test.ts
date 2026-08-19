@@ -7,6 +7,43 @@ import { addFriendFromProfile, updateFriend } from "../domain/friends";
 vi.mock("../app/FriendNoteEditor", async () => {
   const React = await import("react");
   return {
+    FriendNoteEditButton({
+      ariaLabel,
+      className,
+      disabled,
+      note,
+      onClick,
+      showNoteTooltip,
+      title,
+      tooltipPortalTarget,
+      username
+    }: {
+      ariaLabel?: string;
+      className?: string;
+      disabled: boolean;
+      note: string;
+      onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+      showNoteTooltip?: boolean;
+      title?: string;
+      tooltipPortalTarget?: Element | DocumentFragment;
+      username: string;
+    }) {
+      const hasNote = Boolean(note.trim());
+      return React.createElement(
+        "button",
+        {
+          "aria-label": ariaLabel ?? `编辑 @${username} 的备注`,
+          className: `${className ?? "candidate-note-edit"} ${hasNote ? "has-note" : "is-empty"}`,
+          "data-note": note,
+          "data-show-note-tooltip": String(Boolean(showNoteTooltip)),
+          "data-tooltip-portal": tooltipPortalTarget ? "provided" : "default",
+          disabled,
+          onClick,
+          title: hasNote && showNoteTooltip ? undefined : title
+        },
+        React.createElement("svg", { "aria-hidden": true })
+      );
+    },
     FriendNotePreview({
       note,
       surface,
@@ -839,7 +876,12 @@ describe("content script friend markers", () => {
     expect(noteRow?.parentElement).toBe(document.querySelector(".user-main .names"));
     expect(noteRow?.previousElementSibling?.classList.contains("username")).toBe(true);
     expect(noteRow?.parentElement?.classList.contains("linuxdo-friends-note-container")).toBe(true);
-    expect(friendNoteEditButton()?.querySelector("svg")).not.toBeNull();
+    const profileEditButton = friendNoteEditButton();
+    expect(profileEditButton?.querySelector("svg")).not.toBeNull();
+    expect(profileEditButton?.classList.contains("has-note")).toBe(true);
+    expect(profileEditButton?.dataset.note).toBe("旧备注");
+    expect(profileEditButton?.dataset.showNoteTooltip).toBe("true");
+    expect(profileEditButton?.dataset.tooltipPortal).toBe("provided");
     const tooltipHost = document.getElementById("linuxdo-friends-note-tooltip-layer");
     const tooltipRoot = tooltipHost?.shadowRoot?.querySelector<HTMLElement>(".linuxdo-friends-note-tooltip-root");
     expect(tooltipHost?.parentElement).toBe(document.body);
@@ -916,7 +958,12 @@ describe("content script friend markers", () => {
     const cardNoteRow = friendNoteRowHost(".user-card .linuxdo-friends-note-row");
     expect(cardNoteRow?.parentElement).toBe(document.querySelector(".user-card .names"));
     expect(cardNoteRow?.previousElementSibling?.classList.contains("username")).toBe(true);
-    friendNoteEditButton(".user-card .linuxdo-friends-note-row")?.click();
+    const cardEditButton = friendNoteEditButton(".user-card .linuxdo-friends-note-row");
+    expect(cardEditButton?.classList.contains("has-note")).toBe(true);
+    expect(cardEditButton?.dataset.note).toBe("卡片备注");
+    expect(cardEditButton?.dataset.showNoteTooltip).toBe("true");
+    expect(cardEditButton?.dataset.tooltipPortal).toBe("provided");
+    cardEditButton?.click();
     const dialog = await waitForFriendNoteDialog();
     const detachedPreviewHost = friendNoteRowHost(".user-card .linuxdo-friends-note-row");
     document.querySelector(".user-card")?.remove();
@@ -989,6 +1036,12 @@ describe("content script friend markers", () => {
     expect(friendNotePlaceholder(cardSelector)?.textContent).toBe("视奸备注");
     expect(friendNotePreviewElement(profileSelector)).toBeNull();
     expect(friendNotePreviewElement(cardSelector)).toBeNull();
+    expect(friendNoteEditButton(profileSelector)?.classList.contains("is-empty")).toBe(true);
+    expect(friendNoteEditButton(cardSelector)?.classList.contains("is-empty")).toBe(true);
+    expect(friendNoteEditButton(profileSelector)?.dataset.showNoteTooltip).toBe("true");
+    expect(friendNoteEditButton(cardSelector)?.dataset.showNoteTooltip).toBe("true");
+    expect(friendNoteEditButton(profileSelector)?.dataset.tooltipPortal).toBe("default");
+    expect(friendNoteEditButton(cardSelector)?.dataset.tooltipPortal).toBe("default");
     expect(document.getElementById("linuxdo-friends-note-tooltip-layer")).toBeNull();
 
     friendNotePlaceholder(profileSelector)?.click();
