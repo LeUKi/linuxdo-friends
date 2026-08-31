@@ -74,9 +74,24 @@ AMO 审核通过后会生成签名后的正式 Firefox 安装包；GitHub Releas
 ```text
 This add-on targets Firefox Desktop 140 and later. It is not submitted for Firefox for Android.
 
-Reproducible build instructions are in AMO_BUILD.md. The reference toolchain is Node.js 22.20.0, npm 10.9.3, and the committed package-lock.json. Run npm ci, npm test, npm run typecheck, npm run build:firefox, npm run lint:firefox, and npm run package:firefox -- --name linuxdo-friends-v1.5.2-firefox.zip.
+A linux.do login is not required to open or use the add-on. The available public data depends on what linux.do exposes to the current browser session. The main interface can be opened with the toolbar button or from the Firefox Sidebar menu.
 
-The web-ext lint warnings about innerHTML come from React runtime output and three content-script assignments that insert repository-owned fixed SVG icon templates. No network response or user-provided HTML is assigned to innerHTML. Source maps are included for review.
+The submitted source archive is GitHub's automatic "Source code (zip)" from the exact v1.5.2 tag.
 
-The add-on does not download or execute remote code. Network access is limited to linux.do, Telegram API, GitHub release checks and the documented cloud-save service. Telegram, cloud-save and update-check transmissions require the declared optional Firefox data collection permissions. Revoking those permissions stops the related external requests.
+Reproducible build instructions are included in AMO_BUILD.md. The reference toolchain is Node.js 22.20.0, npm 10.9.3, and the committed package-lock.json. Run:
+
+npm ci
+npm test
+npm run typecheck
+npm run build:firefox
+npm run lint:firefox
+npm run package:firefox -- --name linuxdo-friends-v1.5.2-firefox.zip
+
+The generated package is packages/linuxdo-friends-v1.5.2-firefox.zip. Source maps are included for review.
+
+The web-ext lint warnings about innerHTML come from React runtime output and three content-script assignments that insert fixed SVG icon templates stored in this repository. No network response or user-provided HTML is assigned to innerHTML.
+
+The add-on does not download or execute remote code. Network access is limited to linux.do, the Telegram API, GitHub release checks, and the documented cloud-save service. Telegram, cloud-save, and update-check transmissions require the declared optional Firefox data collection permissions. Rejecting or revoking those permissions stops the corresponding external requests without disabling local friend management and other local features.
+
+No Telegram, cloud-save, or other third-party credentials are bundled with the add-on.
 ```

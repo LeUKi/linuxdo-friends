@@ -33,7 +33,7 @@
 
 ### `tabs`
 
-在用户触发的刷新、页面激活和 linux.do 页面协同场景中定位或打开浏览器标签页。用于用户已登录浏览器会话内的页面读取和跳转，不用于跨站追踪。
+在用户触发的刷新、页面激活和 linux.do 页面协同场景中定位或打开浏览器标签页。用于当前浏览器会话内的页面读取和跳转，不用于跨站追踪。
 
 ### `sidePanel`
 
@@ -51,7 +51,7 @@
 
 ### `https://linux.do/*`
 
-用于 content script 页面增强，以及在用户已登录 linux.do 的浏览器环境中读取用户可见的公开页面/API。扩展不绕过 Cloudflare，不读取或导出 Cookie，不使用远程服务器代请求 linux.do。
+用于 content script 页面增强，以及通过当前浏览器环境读取用户可见的 linux.do 公开页面/API。使用扩展不要求登录 linux.do，实际可获取的内容以 linux.do 对当前访问状态开放的数据为准。扩展不绕过 Cloudflare，不读取或导出 Cookie，不使用远程服务器代请求 linux.do。
 
 ### `https://api.telegram.org/*`
 
