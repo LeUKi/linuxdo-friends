@@ -12,6 +12,7 @@ import {
   type FriendStatusAutoRefreshSession,
   type FriendStatusAutoRefreshSurface
 } from "../storage/autoRefreshSessionStorage";
+import { addSessionStorageChangeListener } from "../storage/sessionStorageAdapter";
 
 export const autoRefreshSessionAtom = atom<FriendStatusAutoRefreshSession>(defaultAutoRefreshSession());
 
@@ -33,7 +34,7 @@ export const observeAutoRefreshSessionAtom = atom(null, (_get, set) => {
         autoRefreshSessionSubscribers.forEach((subscriber) => subscriber(autoRefreshSessionAtom, session));
       });
     };
-    chrome.storage.onChanged.addListener(storageListener);
+    addSessionStorageChangeListener(storageListener);
     autoRefreshSessionStorageListenerRegistered = true;
   }
   return () => {

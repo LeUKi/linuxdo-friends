@@ -1,13 +1,34 @@
-import { resolve } from "node:path";
+import { cpSync, mkdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { createManifest, getTargetBrowser, getTargetOutDir } from "./scripts/manifest.mjs";
 
 const isWatchMode = process.argv.includes("--watch") || process.argv.includes("-w");
+const targetBrowser = getTargetBrowser();
+const outDir = getTargetOutDir(targetBrowser);
 
 export default defineConfig({
-  plugins: [react()],
+  publicDir: false,
+  define: {
+    __TARGET_BROWSER__: JSON.stringify(targetBrowser)
+  },
+  plugins: [
+    react(),
+    {
+      name: "write-extension-manifest",
+      closeBundle() {
+        mkdirSync(resolve(__dirname, outDir), { recursive: true });
+        cpSync(resolve(__dirname, "public/icons"), resolve(__dirname, outDir, "icons"), { recursive: true });
+        writeFileSync(
+          join(resolve(__dirname, outDir), "manifest.json"),
+          `${JSON.stringify(createManifest(targetBrowser), null, 2)}\n`
+        );
+      }
+    }
+  ],
   build: {
-    outDir: "dist",
+    outDir,
     emptyOutDir: !isWatchMode,
     sourcemap: true,
     rollupOptions: {

@@ -1,4 +1,5 @@
 import type { RefreshFailureReason, TimedActivityRefreshScopeMode } from "../shared/types";
+import { getSessionStorageArea } from "./sessionStorageAdapter";
 
 export type TimedActivityRefreshSurface = "side-panel";
 
@@ -356,7 +357,7 @@ function isTimedActivityRefreshStorageKey(key: string) {
 
 function getChromeSessionStorage(): SessionStorageLike | null {
   if (typeof chrome === "undefined") return null;
-  return chrome.storage?.session ?? null;
+  return getSessionStorageArea();
 }
 
 function isPausedReason(value: unknown): value is TimedActivityRefreshSession["pausedReason"] {

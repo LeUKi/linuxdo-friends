@@ -8,6 +8,7 @@ import {
   uiSceneFromStorageChanges,
   type UiScenePatch
 } from "../storage/uiSceneStorage";
+import { addSessionStorageChangeListener } from "../storage/sessionStorageAdapter";
 
 export const uiSceneAtom = atom<UiSceneState>(defaultUiSceneState);
 
@@ -38,7 +39,7 @@ export const observeUiSceneAtom = atom(null, (_get, set) => {
       if (!patch) return;
       uiSceneSubscribers.forEach((subscriber) => subscriber(uiSceneAtom, (current) => mergeUiScenePatch(current, patch)));
     };
-    chrome.storage.onChanged.addListener(listener);
+    addSessionStorageChangeListener(listener);
     uiSceneStorageListenerRegistered = true;
   }
   return () => {

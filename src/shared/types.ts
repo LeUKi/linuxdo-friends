@@ -399,7 +399,7 @@ export interface PageRepairResult {
   openedNewTab?: boolean;
 }
 
-export type UpdateCheckStatus = "idle" | "checking" | "up-to-date" | "update-available" | "no-release" | "error";
+export type UpdateCheckStatus = "idle" | "checking" | "permission-required" | "up-to-date" | "update-available" | "no-release" | "error";
 
 export interface UpdateCheckState {
   installedVersion: string;
@@ -476,7 +476,15 @@ export type BackgroundCommand =
   | { type: "importConfig"; json: string }
   | { type: "clearCache" }
   | { type: "resetExtension" }
-  | { type: "testTelegramNotification"; credentials: { kind: "saved" } | { kind: "draft"; botToken: string; chatId: string } };
+  | { type: "testTelegramNotification"; credentials: { kind: "saved" } | { kind: "draft"; botToken: string; chatId: string } }
+  | { type: "sessionStorageGet"; keys: string | string[] | null }
+  | { type: "sessionStorageSet"; values: Record<string, unknown> }
+  | { type: "sessionStorageRemove"; keys: string | string[] };
+
+export interface SessionStorageChangeMessage {
+  type: "sessionStorageChanged";
+  changes: Record<string, chrome.storage.StorageChange>;
+}
 
 export type BackgroundResponse<T = unknown> =
   | { ok: true; data: T }

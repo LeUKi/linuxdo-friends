@@ -113,14 +113,14 @@
 
 ## Source map 和发布包
 
-当前 Vite 构建启用了 `sourcemap: true`，`scripts/package-extension.mjs` 会把 `dist/` 原样打包，因此 release zip 会包含 `.map` 文件。当前建议保留这一行为：项目开源，source map 有助于审核透明度和问题诊断；同时必须保证仓库源码和打包产物中没有硬编码个人密钥、Token 或 Cookie。
+当前 Vite 构建启用了 `sourcemap: true`，`scripts/package-extension.mjs` 会把 `dist-chrome/` 原样打包，因此 release zip 会包含 `.map` 文件。当前建议保留这一行为：项目开源，source map 有助于审核透明度和问题诊断；同时必须保证仓库源码和打包产物中没有硬编码个人密钥、Token 或 Cookie。
 
 发布前检查：
 
 ```bash
 npm run build
-npm run package-extension -- --name linuxdo-friends-v1.4.0.zip
-zipinfo packages/linuxdo-friends-v1.4.0.zip | sort
+npm run package:chrome -- --name linuxdo-friends-v1.4.0-chrome.zip
+zipinfo packages/linuxdo-friends-v1.4.0-chrome.zip | sort
 ```
 
 如果之后决定从商店包排除 source map，应作为单独的 package-only 变更实现并验证，不要顺手改运行时逻辑。
@@ -136,7 +136,7 @@ git diff --check
 
 额外人工检查：
 
-- `public/manifest.json` 未新增 `cookies`、`proxy`、`webRequest`、`declarativeNetRequest` 或远程代码能力。
+- `manifests/common.json` 和 `manifests/chrome.json` 未新增 `cookies`、`proxy`、`webRequest`、`declarativeNetRequest` 或远程代码能力。
 - 设置页披露 Telegram 凭据会随配置导出和云存档迁移。
 - 云存档文案明确 `linuxdo-cloud-save.lafish.workers.dev` 和上传的可迁移配置边界。
 - 隐私政策公开 URL 可访问，并与商店表单中的数据使用声明一致。

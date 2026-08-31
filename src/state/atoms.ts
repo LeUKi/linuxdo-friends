@@ -31,6 +31,8 @@ import {
 import { loadSiteDataProgressState, siteDataProgressFromStorageChanges } from "../storage/siteDataProgressStorage";
 import { APP_STATE_STORAGE_KEY } from "../storage/storage";
 import { updateCheckStateFromStorageChanges } from "../storage/updateCheckStorage";
+import { addSessionStorageChangeListener } from "../storage/sessionStorageAdapter";
+import { DATA_CONSENT_REQUIRED_MESSAGE, requestDataConsent } from "../shared/dataConsent";
 
 export const appStateAtom = atom<AppState>(defaultAppState);
 export const loadingAtom = atom(false);
@@ -135,6 +137,14 @@ export const loadUpdateCheckAtom = atom(null, async (_get, set) => {
 
 export const checkForUpdatesAtom = atom(null, async (get, set, force?: boolean) => {
   const current = get(updateCheckAtom);
+  if (force && !(await requestDataConsent("updateCheck"))) {
+    set(updateCheckAtom, {
+      ...current,
+      status: "permission-required",
+      error: DATA_CONSENT_REQUIRED_MESSAGE
+    });
+    return;
+  }
   set(updateCheckAtom, { ...current, status: "checking" });
   const response = await sendCommand<UpdateCheckState>({ type: "checkForUpdates", force });
   if (response.ok) {
@@ -172,7 +182,7 @@ export const observeSiteDataProgressAtom = atom(null, (_get, set) => {
       if (progress === undefined) return;
       siteDataProgressSubscribers.forEach((subscriber) => subscriber(siteDataProgressAtom, progress));
     };
-    chrome.storage.onChanged.addListener(storageListener);
+    addSessionStorageChangeListener(storageListener);
     siteDataProgressStorageListenerRegistered = true;
   }
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage && !siteDataProgressListenerRegistered) {
@@ -197,7 +207,7 @@ export const observePageScriptStatusAtom = atom(null, (_get, set) => {
       if (status === undefined) return;
       pageScriptStatusSubscribers.forEach((subscriber) => subscriber(pageScriptStatusAtom, status ?? defaultPageScriptStatus()));
     };
-    chrome.storage.onChanged.addListener(storageListener);
+    addSessionStorageChangeListener(storageListener);
     pageScriptStatusStorageListenerRegistered = true;
   }
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage && !pageScriptStatusListenerRegistered) {

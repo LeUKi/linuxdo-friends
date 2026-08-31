@@ -16,6 +16,12 @@ export function isBackgroundCommand(value: unknown): value is BackgroundCommand 
     case "getCloudConfigStatus":
     case "bindCloudSave":
       return true;
+    case "sessionStorageGet":
+      return command.keys === null || typeof command.keys === "string" || isStringList(command.keys);
+    case "sessionStorageSet":
+      return isRecord(command.values);
+    case "sessionStorageRemove":
+      return typeof command.keys === "string" || isStringList(command.keys);
     case "cloudSaveExchangeCode":
       return typeof command.code === "string" && command.code.trim().length > 0;
     case "backupCloudConfig":

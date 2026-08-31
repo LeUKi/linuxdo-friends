@@ -1,8 +1,8 @@
-# 佬朋友隐私政策草案
+# 佬朋友隐私政策
 
-更新日期：2026-07-04
+更新日期：2026-08-31
 
-本政策适用于 Chrome 扩展「佬朋友 - LinuxDo Friends」。佬朋友是 local-first 扩展：默认数据优先保存在浏览器扩展本地存储中，但用户可以启用云存档和 Telegram 通知等可选集成。扩展界面打开时会检查 GitHub Release 更新，并使用 12 小时缓存。
+本政策适用于浏览器扩展「佬朋友 - LinuxDo Friends」。佬朋友是 local-first 扩展：默认数据优先保存在浏览器扩展本地存储中，但用户可以启用云存档和 Telegram 通知等可选集成。扩展界面打开时会使用 12 小时缓存检查 GitHub Release 更新；Firefox 会先取得对应的可选数据授权。
 
 ## 数据类别
 
@@ -29,15 +29,21 @@
 
 已配置的 Telegram Bot Token / Chat ID 会随配置导出和云存档备份迁移。用户应把导出的 JSON 当作包含通知凭据的私密备份保存。
 
+在 Firefox 中，发送测试或保存并开启 Telegram 通知前会请求可选数据授权：`authenticationInfo`、`personallyIdentifyingInfo`、`personalCommunications`、`websiteContent`。如果用户拒绝、取消，或之后在 `about:addons` 中撤销这些授权，扩展不会执行 Telegram 外联，也不会启用后续自动发送；本地保存 Telegram 凭据不需要该授权。
+
 ### GitHub API 和镜像
 
-扩展界面打开时会请求 `https://api.github.com/*` 检查最新 GitHub Release，并使用 12 小时缓存；当 GitHub API 检查失败且符合回退条件时，会请求 `https://github-api.lafish.workers.dev/*`。这些请求用于版本更新提示，不会上传佬朋友列表、打捞规则、Telegram 凭据或 linux.do 活动数据。
+扩展界面打开时会使用 12 小时缓存，并在允许联网检查时请求 `https://api.github.com/*` 获取最新 GitHub Release；当 GitHub API 检查失败且符合回退条件时，会请求 `https://github-api.lafish.workers.dev/*`。这些请求用于版本更新提示，不会上传佬朋友列表、打捞规则、Telegram 凭据或 linux.do 活动数据。
+
+在 Firefox 中，用户首次点击“检查更新”前会请求可选数据授权：`technicalAndInteraction`。如果用户拒绝、取消，或之后撤销授权，扩展不会执行 GitHub 更新检查请求。
 
 ### linuxdo-cloud-save.lafish.workers.dev
 
 用户绑定云存档后，扩展会请求 `https://linuxdo-cloud-save.lafish.workers.dev/*` 完成绑定、检查状态、备份和恢复。备份会上传可迁移配置，包括佬朋友及其备注、打捞规则、请求统计、设置，以及已配置的 Telegram Bot Token / Chat ID。每日自动备份只有在用户绑定云存档并开启对应开关后才会运行。
 
 云存档绑定令牌保存在本地扩展存储中。断开绑定会清除本地云存档授权并停止后续自动备份；当前扩展前端不会把“断开绑定”解释为删除远端备份。
+
+在 Firefox 中，绑定、备份、恢复或开启自动备份前会请求可选数据授权：`authenticationInfo`、`personallyIdentifyingInfo`、`websiteContent`、`technicalAndInteraction`。如果用户拒绝、取消，或之后撤销授权，扩展不会执行云存档外联，自动云备份也会停止。
 
 ## 使用目的
 
@@ -68,6 +74,7 @@
 - 清空 Telegram Bot Token / Chat ID。
 - 断开云存档本地绑定。
 - 卸载扩展并通过浏览器清除扩展存储。
+- 在 Firefox 的 `about:addons` 中撤销 Telegram、云存档和更新检查所需的可选数据授权。撤销后，对应外联功能会停止；本地佬朋友管理、页面增强、手动刷新和浏览器本地通知不受影响。
 
 ## Chrome Web Store Limited Use
 

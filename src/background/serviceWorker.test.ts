@@ -1198,6 +1198,78 @@ describe("message contracts", () => {
     expect(sidePanel.open).toHaveBeenCalledWith({ tabId: 456 });
   });
 
+  it("opens the Firefox sidebar from the browser action and reports a rejected page launcher", async () => {
+    const { send, sidebarAction, triggerActionClick } = await setupWorker({
+      firefoxDataPermissions: [],
+      includeSidePanel: false
+    });
+
+    triggerActionClick();
+    await Promise.resolve();
+    sidebarAction.open.mockRejectedValueOnce(new Error("sidebarAction.open requires a user action"));
+    const response = await send({ type: "openSidePanel" }, { tab: { id: 123, url: "https://linux.do/" } as chrome.tabs.Tab });
+
+    expect(response).toEqual({
+      ok: false,
+      error: "当前 Firefox 无法从页面打开插件侧栏，请使用浏览器工具栏按钮或侧栏菜单打开佬朋友。"
+    });
+    expect(sidebarAction.open).toHaveBeenCalledTimes(2);
+  });
+
+  it("blocks Firefox update checks after data consent is revoked", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const { send } = await setupWorker({ firefoxDataPermissions: [] });
+
+    const response = await send({ type: "checkForUpdates", force: true });
+
+    expect(response).toMatchObject({ ok: true, data: { status: "permission-required" } });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("blocks Firefox Telegram and cloud requests after data consent is revoked", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const { send, windows } = await setupWorker({
+      firefoxDataPermissions: [],
+      initialState: {
+        ...defaultAppState,
+        settings: { ...defaultAppState.settings, telegramBotToken: "bot-token", telegramChatId: "chat-id" }
+      }
+    });
+
+    const telegram = await send({ type: "testTelegramNotification", credentials: { kind: "saved" } });
+    const cloud = await send({ type: "bindCloudSave" });
+
+    expect(telegram).toMatchObject({ ok: false, error: expect.stringContaining("Firefox 数据权限") });
+    expect(cloud).toMatchObject({ ok: false, error: expect.stringContaining("Firefox 数据权限") });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(windows.create).not.toHaveBeenCalled();
+  });
+
+  it("brokers session storage only for linux.do content scripts", async () => {
+    const { send, sessionStorage } = await setupWorker();
+
+    const sender = { tab: { id: 123, url: "https://linux.do/t/1" } as chrome.tabs.Tab };
+    expect(await send({ type: "sessionStorageSet", values: { shared: 1 } }, sender)).toMatchObject({ ok: true });
+    expect(await send({ type: "sessionStorageGet", keys: "shared" }, sender)).toEqual({ ok: true, data: { shared: 1 } });
+    expect(sessionStorage.dump()).toMatchObject({ shared: 1 });
+    expect(await send({ type: "sessionStorageGet", keys: "shared" }, {})).toMatchObject({ ok: false, error: expect.stringContaining("来源不正确") });
+  });
+
+  it("broadcasts session storage changes to linux.do content scripts", async () => {
+    const tabs = {
+      query: vi.fn(async () => [{ id: 123, url: "https://linux.do/" } as chrome.tabs.Tab]),
+      sendMessage: vi.fn(async () => undefined)
+    };
+    const worker = await setupWorker({ tabs });
+
+    await worker.triggerStorageChange({ shared: { oldValue: 1, newValue: 2 } }, "session");
+
+    expect(tabs.sendMessage).toHaveBeenCalledWith(123, {
+      type: "sessionStorageChanged",
+      changes: { shared: { oldValue: 1, newValue: 2 } }
+    });
+  });
+
   it("opens a new extension options page when no existing options tab is available", async () => {
     const { send, runtime, tabs } = await setupWorker();
 
@@ -1348,10 +1420,10 @@ describe("message contracts", () => {
     expect(tabs.create).toHaveBeenCalledWith({ url: "https://linux.do/t/topic/1/2", active: true });
   });
 
-  it("allows session storage access from content scripts when Chrome exposes the API", async () => {
+  it("keeps session storage restricted because content scripts use the background broker", async () => {
     const { sessionStorage } = await setupWorker();
 
-    expect(sessionStorage.setAccessLevel).toHaveBeenCalledWith({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" });
+    expect(sessionStorage.setAccessLevel).not.toHaveBeenCalled();
   });
 
   it("restricts local storage to trusted contexts when Chrome exposes the API", async () => {
@@ -2107,7 +2179,7 @@ describe("message contracts", () => {
   });
 
   it("falls back to an existing linux.do tab when direct profile add hits a challenge", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn(async () => challengeResponse()));
     const { send, tabs } = await setupWorker({
       tabs: {
         query: vi.fn(async () => [{ id: 321, url: "https://linux.do/latest" } as chrome.tabs.Tab]),
@@ -2136,7 +2208,7 @@ describe("message contracts", () => {
   });
 
   it("identifies the current account without syncing the following list", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn(async () => challengeResponse()));
     const { send, tabs } = await setupWorker({
       tabs: {
         query: vi.fn(async () => [{ id: 123, url: "https://linux.do/t/topic/1" } as chrome.tabs.Tab]),
@@ -2159,7 +2231,7 @@ describe("message contracts", () => {
   });
 
   it("falls back to an existing linux.do tab when direct follow sync hits a challenge", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn(async () => challengeResponse()));
     const { send, tabs } = await setupWorker({
       tabs: {
         query: vi.fn(async () => [{ id: 123, url: "https://linux.do/t/topic/1" } as chrome.tabs.Tab]),
@@ -2227,7 +2299,7 @@ describe("message contracts", () => {
   });
 
   it("records page script heartbeats and prefers the fresh ready tab for fallback requests", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn(async () => challengeResponse()));
     const { send, tabs } = await setupWorker({
       tabs: {
         query: vi.fn(async () => [{ id: 777, url: "https://linux.do/latest", active: true } as chrome.tabs.Tab]),
@@ -2252,6 +2324,30 @@ describe("message contracts", () => {
     expect(status).toMatchObject({ ok: true, data: { status: "connected", connectedCount: 1, selectedTabId: 777 } });
     expect(response).toMatchObject({ ok: true, data: { lastSync: { ok: true, source: "existing_tab" } } });
     expect(tabs.sendMessage).toHaveBeenCalledWith(777, { type: "linuxdoFriends.extractProfile", username: "Neil" });
+  });
+
+  it("replaces a challenge heartbeat with ready state for the same tab", async () => {
+    const { send } = await setupWorker();
+    const sender = { tab: { id: 777, windowId: 9, url: "https://linux.do/", active: true } as chrome.tabs.Tab };
+
+    await send(
+      { type: "linuxdoFriends.pageHeartbeat", url: "https://linux.do/", title: "Just a moment...", status: "challenge", hasLauncher: false },
+      sender
+    );
+    expect(await send({ type: "getPageScriptStatus" })).toMatchObject({
+      ok: true,
+      data: { status: "challenge", connectedCount: 0, heartbeats: [{ tabId: 777, status: "challenge" }] }
+    });
+
+    await send(
+      { type: "linuxdoFriends.pageHeartbeat", url: "https://linux.do/", title: "LINUX DO", status: "ready", hasLauncher: true },
+      sender
+    );
+
+    expect(await send({ type: "getPageScriptStatus" })).toMatchObject({
+      ok: true,
+      data: { status: "connected", connectedCount: 1, selectedTabId: 777, heartbeats: [{ tabId: 777, status: "ready" }] }
+    });
   });
 
   it("repairs an existing linux.do tab by activating and reloading it", async () => {
@@ -2360,7 +2456,7 @@ describe("message contracts", () => {
   });
 
   it("falls back to an existing linux.do tab when direct profile refresh hits a challenge", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn(async () => challengeResponse()));
     const state = addFriendFromProfile(defaultAppState, { username: "neil", refreshedAt: "2026-06-27T00:00:00.000Z" });
     const { send, tabs } = await setupWorker({
       initialState: state,
@@ -2419,7 +2515,7 @@ describe("message contracts", () => {
   });
 
   it("falls back to an existing linux.do tab when direct activity refresh hits a challenge", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn(async () => challengeResponse()));
     const state: AppState = {
       ...addFriendFromProfile(defaultAppState, { username: "misaka7369", refreshedAt: "2026-06-28T00:00:00.000Z" }),
       laoFindsStartedAt: "2026-06-26T00:00:00.000Z",
@@ -2537,7 +2633,7 @@ describe("message contracts", () => {
   });
 
   it("does not commit earlier friends when existing-tab activity refresh later fails", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn(async () => challengeResponse()));
     const withFirstFriend = addFriendFromProfile(defaultAppState, { username: "neil", refreshedAt: "2026-06-28T00:00:00.000Z" });
     const state = {
       ...addFriendFromProfile(withFirstFriend, { username: "ada", refreshedAt: "2026-06-28T00:00:00.000Z" }),
@@ -3032,7 +3128,7 @@ describe("message contracts", () => {
   });
 
   it("preserves already-refreshed profiles when existing-tab fallback later fails", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn(async () => challengeResponse()));
     const state = addFriendFromProfile(
       addFriendFromProfile(defaultAppState, { username: "neil", refreshedAt: "2026-06-27T00:00:00.000Z" }),
       { username: "ada", refreshedAt: "2026-06-27T00:00:00.000Z" }
@@ -3410,12 +3506,17 @@ async function setupWorker(
     initialCloudAuth?: Record<string, unknown>;
     initialCloudVerifier?: string;
     includeSessionAccessLevel?: boolean;
+    includeSidePanel?: boolean;
+    firefoxDataPermissions?: string[];
+    targetBrowser?: "chrome" | "firefox";
   } = {}
 ) {
   let listener: ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean) | null = null;
   const startupListeners: Array<() => void> = [];
   const alarmListeners: Array<(alarm: chrome.alarms.Alarm) => void> = [];
   const notificationClickListeners: Array<(notificationId: string) => void> = [];
+  const actionClickListeners: Array<() => void> = [];
+  const storageChangeListeners: Array<(changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void> = [];
   const runtime = {
     sendMessage: vi.fn(),
     openOptionsPage: vi.fn(),
@@ -3449,6 +3550,11 @@ async function setupWorker(
     open: vi.fn(),
     setPanelBehavior: vi.fn()
   };
+  const sidebarAction = { open: vi.fn(async () => undefined) };
+  const permissions = {
+    getAll: vi.fn(async () => ({ data_collection: overrides.firefoxDataPermissions ?? [] })),
+    request: vi.fn(async () => true)
+  };
   const alarms = {
     create: vi.fn(async () => undefined),
     clear: vi.fn(async () => true),
@@ -3479,21 +3585,36 @@ async function setupWorker(
     }),
     setAccessLevel: vi.fn()
   };
+  vi.stubGlobal("__TARGET_BROWSER__", overrides.targetBrowser ?? (overrides.firefoxDataPermissions ? "firefox" : "chrome"));
   vi.stubGlobal("chrome", {
     runtime: {
       ...runtime,
-      getManifest: vi.fn(() => ({ version: "1.0.0" }))
+      getManifest: vi.fn(() => ({
+        version: "1.0.0",
+        ...(overrides.firefoxDataPermissions ? { browser_specific_settings: { gecko: { id: "linuxdo-friends@lafish" } } } : {})
+      }))
     },
     storage: {
       local: localStorage,
-      session: sessionStorage
+      session: sessionStorage,
+      onChanged: {
+        addListener: vi.fn((callback) => storageChangeListeners.push(callback)),
+        removeListener: vi.fn()
+      }
     },
     tabs,
     windows,
-    sidePanel,
+    sidePanel: overrides.includeSidePanel === false ? undefined : sidePanel,
+    action: {
+      onClicked: { addListener: vi.fn((callback) => actionClickListeners.push(callback)) }
+    },
+    permissions,
     alarms,
     notifications
   });
+  if (overrides.firefoxDataPermissions) {
+    vi.stubGlobal("browser", { sidebarAction, permissions });
+  }
 
   await import("./serviceWorker");
   expect(listener).toBeTruthy();
@@ -3506,17 +3627,24 @@ async function setupWorker(
     windows,
     alarms,
     notifications,
+    sidebarAction,
+    triggerActionClick() {
+      for (const listener of actionClickListeners) listener();
+    },
+    async triggerStorageChange(changes: Record<string, chrome.storage.StorageChange>, areaName: string) {
+      for (const listener of storageChangeListeners) listener(changes, areaName);
+      await Promise.resolve();
+      await Promise.resolve();
+    },
     async triggerAlarm(name: string) {
       for (const alarmListener of alarmListeners) {
         alarmListener({ name, scheduledTime: Date.now() });
       }
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushAsync();
     },
     async triggerStartup() {
       for (const startupListener of startupListeners) startupListener();
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushAsync();
     },
     triggerNotificationClick(notificationId: string) {
       for (const listener of notificationClickListeners) listener(notificationId);
@@ -3537,7 +3665,7 @@ function createPendingChallengeFetch() {
   return {
     fetchImpl: vi.fn(() => pendingFetch),
     release() {
-      resolveFetch(new Response("Enable JavaScript and cookies to continue", { status: 429 }));
+      resolveFetch(challengeResponse());
     }
   };
 }
@@ -3599,6 +3727,13 @@ function profileResponse(username: string, name: string): Response {
       }
     }),
     { status: 200 }
+  );
+}
+
+function challengeResponse(status = 429): Response {
+  return new Response(
+    "<!doctype html><html><head><title>Just a moment...</title></head><body><span id='challenge-error-text'>Enable JavaScript and cookies to continue</span></body></html>",
+    { status, headers: { "content-type": "text/html; charset=UTF-8" } }
   );
 }
 

@@ -1,0 +1,16 @@
+{
+  "side_panel": {
+    "default_path": "src/side-panel/index.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "sidePanel",
+    "alarms",
+    "notifications"
+  ]
+}

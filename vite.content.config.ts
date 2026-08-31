@@ -2,8 +2,13 @@ import { readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { getTargetBrowser, getTargetOutDir } from "./scripts/manifest.mjs";
+
+const targetBrowser = getTargetBrowser();
+const outDir = getTargetOutDir(targetBrowser);
 
 export default defineConfig({
+  publicDir: false,
   plugins: [
     react(),
     {
@@ -22,6 +27,7 @@ export default defineConfig({
     }
   ],
   define: {
+    __TARGET_BROWSER__: JSON.stringify(targetBrowser),
     "process.env.NODE_ENV": JSON.stringify("production")
   },
   resolve: {
@@ -41,7 +47,7 @@ export default defineConfig({
     ]
   },
   build: {
-    outDir: "dist",
+    outDir,
     emptyOutDir: false,
     cssCodeSplit: false,
     sourcemap: true,
@@ -60,7 +66,7 @@ export default defineConfig({
 });
 
 async function removeEmittedContentCssAssets() {
-  const assetsDir = resolve(__dirname, "dist/assets");
+  const assetsDir = resolve(__dirname, outDir, "assets");
   let entries: string[];
   try {
     entries = await readdir(assetsDir);

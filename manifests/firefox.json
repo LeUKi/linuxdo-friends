@@ -1,0 +1,36 @@
+{
+  "sidebar_action": {
+    "default_panel": "src/side-panel/index.html",
+    "default_title": "佬朋友"
+  },
+  "background": {
+    "scripts": [
+      "service-worker.js"
+    ],
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms",
+    "notifications"
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "linuxdo-friends@lafish",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ],
+        "optional": [
+          "authenticationInfo",
+          "personallyIdentifyingInfo",
+          "personalCommunications",
+          "websiteContent",
+          "technicalAndInteraction"
+        ]
+      }
+    }
+  }
+}

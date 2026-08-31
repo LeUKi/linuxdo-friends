@@ -3,6 +3,8 @@ node_modules/
 
 # build artifacts
 dist/
+dist-chrome/
+dist-firefox/
 packages/
 
 # local env

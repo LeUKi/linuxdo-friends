@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { classifyFetchResponse } from "../api/responseClassifier";
 import { FriendsApp } from "../app/FriendsApp";
 import { FriendNoteDialog, FriendNoteEditButton, FriendNotePreview } from "../app/FriendNoteEditor";
 import type { AppState } from "../shared/types";
@@ -23,6 +24,7 @@ import type {
   Username
 } from "../shared/types";
 import appCss from "../styles/app.css?inline";
+import { markContentScriptContext } from "../storage/sessionStorageAdapter";
 
 const markerClass = "linuxdo-friends-marker";
 const friendAvatarClass = "linuxdo-friends-friend-avatar";
@@ -88,6 +90,7 @@ let friendNoteDialogRootElement: HTMLElement | null = null;
 let friendNoteDialogUsername: Username | null = null;
 let friendNoteTooltipRootElement: HTMLElement | null = null;
 
+markContentScriptContext();
 void init();
 subscribeToStorageChanges();
 subscribeToRuntimeMessages();
@@ -1763,8 +1766,13 @@ function sendHeartbeat() {
 }
 
 function pageHeartbeatStatus() {
-  const bodyText = document.body?.textContent?.slice(0, 4000) ?? "";
-  return looksLikeChallenge(bodyText) ? "challenge" : "ready";
+  const title = document.title.trim().toLowerCase();
+  const challengeTitle = title === "just a moment..." || title === "just a moment…";
+  // Normal Turnstile widgets leave hidden cf-chl-widget-* inputs on ready pages.
+  const challengeElement = document.querySelector(
+    "#challenge-error-text, #challenge-running, script[src*='/cdn-cgi/challenge-platform/'], form[action*='/cdn-cgi/challenge-platform/']"
+  );
+  return challengeTitle || challengeElement ? "challenge" : "ready";
 }
 
 function mutationsContainTitleChange(mutations: MutationRecord[]): boolean {
@@ -2081,27 +2089,28 @@ async function fetchJson(path: string): Promise<
       credentials: "same-origin",
       headers: { Accept: "application/json" }
     });
-    const text = await response.text();
-    if (looksLikeChallenge(text)) {
-      return { ok: false, reason: "challenge", error: "linux.do 要求浏览器验证，请在页面完成验证后再同步。", requestCount, requestAttemptedAts: [requestedAt] };
+    const classified = await classifyFetchResponse(response);
+    if (!classified.ok) {
+      return {
+        ok: false,
+        reason: classified.reason,
+        error: pageFetchError(classified.reason, response.status),
+        requestCount,
+        requestAttemptedAts: [requestedAt]
+      };
     }
-    if (response.status === 403) {
-      return { ok: false, reason: "blocked", error: "linux.do 拒绝了本次页面内同步。", requestCount, requestAttemptedAts: [requestedAt] };
-    }
-    if (response.status === 429) {
-      return { ok: false, reason: "rate_limited", error: "linux.do 返回限流，已停止同步。", requestCount, requestAttemptedAts: [requestedAt] };
-    }
-    if (!response.ok) {
-      return { ok: false, reason: "network_error", error: `页面内请求失败：${response.status}`, requestCount, requestAttemptedAts: [requestedAt] };
-    }
-    try {
-      return { ok: true, response, json: JSON.parse(text), requestCount, requestAttemptedAts: [requestedAt] };
-    } catch {
-      return { ok: false, reason: "invalid_response", error: "linux.do 返回的内容不是可解析 JSON。", requestCount, requestAttemptedAts: [requestedAt] };
-    }
+    return { ok: true, response, json: classified.json, requestCount, requestAttemptedAts: [requestedAt] };
   } catch {
     return { ok: false, reason: "network_error", error: "页面内请求失败，请确认 linux.do 标签页仍然可用。", requestCount: 1, requestAttemptedAts: [requestedAt] };
   }
+}
+
+function pageFetchError(reason: RefreshFailureReason, status: number): string {
+  if (reason === "challenge") return "linux.do 要求浏览器验证，请在页面完成验证后再同步。";
+  if (reason === "blocked") return "linux.do 拒绝了本次页面内同步。";
+  if (reason === "rate_limited") return "linux.do 返回限流，已停止同步。";
+  if (reason === "invalid_response") return "linux.do 返回的内容不是可解析 JSON。";
+  return `页面内请求失败：${status}`;
 }
 
 function isContentScriptCommand(value: unknown): value is ContentScriptCommand {
@@ -2170,16 +2179,6 @@ function isActivityKind(value: unknown): value is ActivityKindFilter | ActivityR
 function extractUsername(link: HTMLAnchorElement) {
   const match = link.href.match(/\/u\/([^/?#]+)/);
   return match?.[1]?.toLowerCase();
-}
-
-function looksLikeChallenge(text: string): boolean {
-  const lowered = text.slice(0, 4000).toLowerCase();
-  return (
-    lowered.includes("cf-mitigated") ||
-    lowered.includes("just a moment") ||
-    lowered.includes("challenge-error-text") ||
-    lowered.includes("enable javascript and cookies")
-  );
 }
 
 function extractFollowedUsers(json: unknown): FollowedUserInput[] {

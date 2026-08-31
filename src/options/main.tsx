@@ -43,6 +43,7 @@ import { deriveFollowedCandidates, deriveFriendList } from "../popup/selectors";
 import { normalizeUsername } from "../domain/friends";
 import { CLOUD_AUTH_STORAGE_KEY } from "../storage/cloudAuthStorage";
 import { deriveRequestStatsView } from "../domain/requestStats";
+import { DATA_CONSENT_REQUIRED_MESSAGE, requestDataConsent } from "../shared/dataConsent";
 import { classNames } from "./classNames";
 import { OPTIONS_SECTIONS, canonicalizeOptionsHash, sectionFromHash, type OptionsSectionId } from "./navigation";
 import { RequestStatsSettingsPanel } from "./RequestStatsSettingsPanel";
@@ -161,6 +162,10 @@ export function OptionsApp() {
   }, []);
 
   const refreshCloudStatus = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (!options.silent && !(await requestDataConsent("cloudSave"))) {
+      setCloudMessage(DATA_CONSENT_REQUIRED_MESSAGE);
+      return;
+    }
     if (!options.silent) setCloudBusy("status");
     const response = await sendCommand<CloudConfigStatusResult>({ type: "getCloudConfigStatus" });
     if (response.ok) {
@@ -212,6 +217,14 @@ export function OptionsApp() {
   useCloudAuthStorageRefresh(refreshCloudStatus, refreshCloudArchiveState);
 
   async function updateSettings(patch: Partial<typeof state.settings>) {
+    if (patch.laoFindsTelegramNotificationsEnabled === true && !(await requestDataConsent("telegram"))) {
+      setTelegramMessage(DATA_CONSENT_REQUIRED_MESSAGE);
+      return;
+    }
+    if (patch.requestStatsAutoSyncEnabled === true && !(await requestDataConsent("cloudSave"))) {
+      setCloudMessage(DATA_CONSENT_REQUIRED_MESSAGE);
+      return;
+    }
     const response = await sendCommand<typeof state>({ type: "updateSettings", settings: patch });
     if (response.ok) setState(response.data);
   }
@@ -243,6 +256,10 @@ export function OptionsApp() {
         setTelegramMessage("请先填写 Bot Token 和 Chat ID。");
         return false;
       }
+      if (enableTelegram && !(await requestDataConsent("telegram"))) {
+        setTelegramMessage(DATA_CONSENT_REQUIRED_MESSAGE);
+        return false;
+      }
       const response = await sendCommand<typeof state>({
         type: "updateSettings",
         settings: {
@@ -268,6 +285,10 @@ export function OptionsApp() {
     setTelegramBusy("test");
     setTelegramMessage(null);
     try {
+      if (!(await requestDataConsent("telegram"))) {
+        setTelegramMessage(DATA_CONSENT_REQUIRED_MESSAGE);
+        return false;
+      }
       const response = await sendCommand<unknown>(
         credentials
           ? { type: "testTelegramNotification", credentials: { kind: "draft", botToken: credentials.botToken, chatId: credentials.chatId } }
@@ -350,6 +371,10 @@ export function OptionsApp() {
   }
 
   async function handleBindCloudSave() {
+    if (!(await requestDataConsent("cloudSave"))) {
+      setCloudMessage(DATA_CONSENT_REQUIRED_MESSAGE);
+      return;
+    }
     setCloudBusy("bind");
     const response = await sendCommand<CloudConfigBindResult>({ type: "bindCloudSave" });
     if (response.ok) {
@@ -363,6 +388,10 @@ export function OptionsApp() {
   }
 
   async function handleBackupCloudConfig() {
+    if (!(await requestDataConsent("cloudSave"))) {
+      setCloudMessage(DATA_CONSENT_REQUIRED_MESSAGE);
+      return;
+    }
     setCloudBusy("backup");
     const response = await sendCommand<CloudConfigBackupResult>({ type: "backupCloudConfig" });
     if (response.ok) {
@@ -377,6 +406,10 @@ export function OptionsApp() {
 
   async function handleRestoreCloudConfig() {
     if (!window.confirm("确认从云端恢复配置？这会替换当前佬朋友和刷新设置，并清空本地缓存。")) return;
+    if (!(await requestDataConsent("cloudSave"))) {
+      setCloudMessage(DATA_CONSENT_REQUIRED_MESSAGE);
+      return;
+    }
     setCloudBusy("restore");
     const response = await sendCommand<CloudConfigRestoreResult>({ type: "restoreCloudConfig" });
     if (response.ok) {

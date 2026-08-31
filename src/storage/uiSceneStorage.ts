@@ -1,4 +1,5 @@
 import type { ActivityKindFilter, FilterPopoverScene, UiSceneState, UiSceneTab, Username } from "../shared/types";
+import { getSessionStorageArea } from "./sessionStorageAdapter";
 
 export const UI_SCENE_STORAGE_PREFIX = "linuxdoFriendsUiScene.";
 
@@ -117,7 +118,7 @@ export function resetUiSceneFallbackStorage() {
 
 function getChromeSessionStorage(): SessionStorageLike | null {
   if (typeof chrome === "undefined") return null;
-  return chrome.storage?.session ?? null;
+  return getSessionStorageArea();
 }
 
 async function readStorage(storage: SessionStorageLike | null): Promise<Record<string, unknown>> {

@@ -13,10 +13,6 @@ updateJson("package-lock.json", (json) => {
   }
 });
 
-updateJson("public/manifest.json", (json) => {
-  json.version = version;
-});
-
 console.log(`Version set to ${version}`);
 
 function normalizeVersion(input) {

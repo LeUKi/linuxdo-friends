@@ -6,6 +6,7 @@ import { addFriendFromKnownUser, addFriendFromProfile, removeFriend, updateFrien
 import { removeDredgeRule, upsertDredgeRule } from "../domain/laoFinds";
 import { defaultAppState } from "../domain/defaultState";
 import { recordRequestAttempts } from "../domain/requestStats";
+import { DATA_CONSENT_PERMISSIONS, DATA_CONSENT_REQUIRED_MESSAGE } from "../shared/dataConsent";
 import type { AppState, CloudArchiveLocalStateResult, DredgeRule } from "../shared/types";
 import { resetAppStateObserverForTest, resetRuntimeObserversForTest } from "../state/atoms";
 import { APP_STATE_STORAGE_KEY } from "../storage/storage";
@@ -68,6 +69,21 @@ describe("OptionsApp update diagnostics", () => {
     });
 
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "checkForUpdates", force: true });
+  });
+
+  it("does not check GitHub when Firefox update consent is denied", async () => {
+    const chromeMock = setupChrome({ firefoxDataPermissionRequest: false });
+    const { container } = await renderOptionsApp();
+    chromeMock.sendMessage.mockClear();
+
+    await act(async () => {
+      getButton(container, "检查更新").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.permissionsRequest).toHaveBeenCalledWith({ data_collection: DATA_CONSENT_PERMISSIONS.updateCheck });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "checkForUpdates", force: true });
+    expect(container.textContent).toContain(DATA_CONSENT_REQUIRED_MESSAGE);
   });
 
   it("identifies the current account from the options page", async () => {
@@ -374,6 +390,50 @@ describe("OptionsApp update diagnostics", () => {
     expect(container.textContent).not.toContain("secret-token");
   });
 
+  it("does not bind cloud save when Firefox cloud consent is denied", async () => {
+    const chromeMock = setupChrome({ firefoxDataPermissionRequest: false });
+    const { container } = await renderOptionsApp("#data");
+    chromeMock.sendMessage.mockClear();
+
+    await act(async () => {
+      getButton(container, "绑定").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.permissionsRequest).toHaveBeenCalledWith({ data_collection: DATA_CONSENT_PERMISSIONS.cloudSave });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "bindCloudSave" });
+    expect(container.textContent).toContain(DATA_CONSENT_REQUIRED_MESSAGE);
+  });
+
+  it("does not back up, restore, or enable automatic cloud backup when Firefox cloud consent is denied", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const chromeMock = setupChrome({
+      firefoxDataPermissionRequest: false,
+      cloudState: boundCloudState(),
+      cloudArchiveState: differentCloudArchiveState()
+    });
+    const { container } = await renderOptionsApp("#data");
+    chromeMock.sendMessage.mockClear();
+
+    await act(async () => {
+      getButton(container, "备份到云端").click();
+      await Promise.resolve();
+      getButton(container, "从云端恢复").click();
+      await Promise.resolve();
+      container.querySelector<HTMLButtonElement>(".cloud-stats-sync-row .switch-button")?.click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.permissionsRequest).toHaveBeenCalledTimes(3);
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "backupCloudConfig" });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "restoreCloudConfig" });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: { requestStatsAutoSyncEnabled: true }
+    });
+    expect(container.textContent).toContain(DATA_CONSENT_REQUIRED_MESSAGE);
+  });
+
   it("shows daily automatic backup inside the cloud archive card", async () => {
     const state = { ...defaultAppState, settings: { ...defaultAppState.settings, requestStatsAutoSyncEnabled: false } };
     const chromeMock = setupChrome({
@@ -658,6 +718,49 @@ describe("OptionsApp update diagnostics", () => {
 
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "testTelegramNotification", credentials: { kind: "saved" } });
     expect(telegramCard.textContent).toContain("测试消息已发送，请检查 Telegram。");
+  });
+
+  it("does not test or enable Telegram when Firefox Telegram consent is denied", async () => {
+    const chromeMock = setupChrome({
+      firefoxDataPermissionRequest: false,
+      state: {
+        ...defaultAppState,
+        settings: {
+          ...defaultAppState.settings,
+          telegramBotToken: "saved-token",
+          telegramChatId: "saved-chat"
+        }
+      }
+    });
+    const { container } = await renderOptionsApp("#notifications");
+    const telegramCard = getTelegramCard(container);
+    chromeMock.sendMessage.mockClear();
+
+    await act(async () => {
+      getButton(telegramCard, "发送测试").click();
+      await Promise.resolve();
+      getButton(telegramCard, "配置").click();
+      await Promise.resolve();
+    });
+    const { tokenInput, chatInput } = getTelegramInputs(container);
+    await act(async () => {
+      setInputValue(tokenInput, "draft-token");
+      tokenInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInputValue(chatInput, "draft-chat");
+      chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+      await Promise.resolve();
+      getButton(getTelegramDialog(container)!, "保存并开启").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.permissionsRequest).toHaveBeenCalledTimes(2);
+    expect(chromeMock.permissionsRequest).toHaveBeenCalledWith({ data_collection: DATA_CONSENT_PERMISSIONS.telegram });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({ type: "testTelegramNotification", credentials: { kind: "saved" } });
+    expect(chromeMock.sendMessage).not.toHaveBeenCalledWith({
+      type: "updateSettings",
+      settings: expect.objectContaining({ laoFindsTelegramNotificationsEnabled: true })
+    });
+    expect(container.textContent).toContain(DATA_CONSENT_REQUIRED_MESSAGE);
   });
 
   it("tests Telegram modal draft credentials without saving or enabling", async () => {
@@ -1866,6 +1969,7 @@ function setupChrome({
   cloudArchiveState = differentCloudArchiveState(),
   identifyResponse,
   telegramTestResponse = { ok: true, data: "已发送测试消息。" },
+  firefoxDataPermissionRequest,
   updateSettingsError = null,
   updateFriendError = null
 }: {
@@ -1883,12 +1987,15 @@ function setupChrome({
   cloudArchiveState?: CloudArchiveLocalStateResult;
   identifyResponse?: Promise<unknown>;
   telegramTestResponse?: { ok: true; data: unknown } | { ok: false; error: string };
+  firefoxDataPermissionRequest?: boolean;
   updateSettingsError?: string | null;
   updateFriendError?: string | null;
 } = {}) {
   let currentState = state;
   let currentCloudState = cloudState;
   let currentCloudArchiveState = cloudArchiveState;
+  const permissionsRequest = vi.fn(async () => firefoxDataPermissionRequest ?? true);
+  const permissionsGetAll = vi.fn(async () => ({ data_collection: [] as string[] }));
   const storageListeners: Array<(changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void> = [];
   const sendMessage = vi.fn(async (message) => {
     if (message.type === "getState") return { ok: true, data: currentState };
@@ -2073,11 +2180,19 @@ function setupChrome({
     },
     runtime: {
       sendMessage,
-      getManifest: vi.fn(() => ({ version: "1.0.0" }))
-    }
+      getManifest: vi.fn(() => ({
+        version: "1.0.0",
+        ...(firefoxDataPermissionRequest === undefined ? {} : { browser_specific_settings: { gecko: { id: "linuxdo-friends@lafish" } } })
+      }))
+    },
+    permissions: { request: permissionsRequest, getAll: permissionsGetAll }
   });
+  if (firefoxDataPermissionRequest !== undefined) {
+    vi.stubGlobal("browser", { permissions: { request: permissionsRequest, getAll: permissionsGetAll } });
+  }
   return {
     sendMessage,
+    permissionsRequest,
     setCloudState(nextCloudState: Record<string, unknown>) {
       currentCloudState = nextCloudState;
     },

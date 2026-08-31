@@ -47,6 +47,7 @@ import {
 } from "../domain/versionCheck";
 import { isBackgroundCommand } from "../messages/contracts";
 import { base64urlFromBytes, sha256Base64url } from "../shared/crypto";
+import { DATA_CONSENT_REQUIRED_MESSAGE, hasDataConsent, requireDataConsent } from "../shared/dataConsent";
 import { PAGE_SCRIPT_HEARTBEAT_FRESH_MS, PAGE_SCRIPT_HEARTBEAT_STALE_MS, isFreshReadyPageScriptHeartbeat } from "../shared/pageScriptStatus";
 import { nowIso } from "../shared/time";
 import type {
@@ -133,10 +134,11 @@ const CLOUD_AUTH_WINDOW_STORAGE_KEY = "linuxdoFriendsCloudAuthWindowId";
 const REQUEST_STATS_AUTO_SYNC_ALARM_NAME = "linuxdoFriends.requestStatsAutoSync";
 const REQUEST_STATS_AUTO_SYNC_PERIOD_MINUTES = 24 * 60;
 const LAO_FINDS_NOTIFICATION_ID_PREFIX = "linuxdoFriends.laoFinds.";
+const TARGET_BROWSER = __TARGET_BROWSER__;
 
-configureSessionStorageAccess();
 configureLocalStorageAccess();
 configureSidePanelAction();
+registerSessionStorageBroadcast();
 registerActiveTabListeners();
 registerRequestStatsAutoSyncAlarmListeners();
 registerLaoFindsNotificationClickListener();
@@ -191,17 +193,18 @@ async function sendLaoFindsBrowserNotification({
 
 function configureSidePanelAction() {
   try {
-    void chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true });
+    if (TARGET_BROWSER === "chrome" && chrome.sidePanel?.setPanelBehavior) {
+      void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+      return;
+    }
+    const sidebarAction = firefoxSidebarAction();
+    if (sidebarAction?.open) {
+      chrome.action?.onClicked?.addListener?.(() => {
+        void sidebarAction.open().catch(() => undefined);
+      });
+    }
   } catch {
     // Some test and non-Chrome environments expose only a subset of extension APIs.
-  }
-}
-
-function configureSessionStorageAccess() {
-  try {
-    void chrome.storage?.session?.setAccessLevel?.({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" });
-  } catch {
-    // Content-script access depends on Chrome support; tests and partial APIs may not expose it.
   }
 }
 
@@ -224,6 +227,17 @@ async function handleMessage(message: unknown, sender: chrome.runtime.MessageSen
 
 async function dispatch(command: BackgroundCommand, sender: chrome.runtime.MessageSender): Promise<BackgroundResponse> {
   switch (command.type) {
+    case "sessionStorageGet":
+      assertContentScriptSessionSender(sender);
+      return ok(await chrome.storage.session.get(command.keys));
+    case "sessionStorageSet":
+      assertContentScriptSessionSender(sender);
+      await chrome.storage.session.set(command.values);
+      return ok(null);
+    case "sessionStorageRemove":
+      assertContentScriptSessionSender(sender);
+      await chrome.storage.session.remove(command.keys);
+      return ok(null);
     case "getState":
       return ok(await loadState());
     case "identifyCurrentAccount":
@@ -350,6 +364,7 @@ async function dispatch(command: BackgroundCommand, sender: chrome.runtime.Messa
     case "resetExtension":
       return ok(await resetExtension());
     case "testTelegramNotification": {
+      await requireDataConsent("telegram");
       const telegramCredentials = command.credentials.kind === "draft"
         ? { botToken: command.credentials.botToken.trim(), chatId: command.credentials.chatId.trim() }
         : await loadSavedTelegramTestCredentials();
@@ -443,7 +458,7 @@ async function sendLaoFindsNotifications(state: AppState, items: LaoFindsItem[],
   if (state.settings.laoFindsBrowserNotificationsEnabled) {
     await sendLaoFindsBrowserNotification({ count: items.length, source });
   }
-  if (state.settings.laoFindsTelegramNotificationsEnabled) {
+  if (state.settings.laoFindsTelegramNotificationsEnabled && (await hasDataConsent("telegram"))) {
     await sendLaoFindsTelegramNotifications({
       botToken: state.settings.telegramBotToken,
       chatId: state.settings.telegramChatId,
@@ -556,6 +571,7 @@ async function resetExtension(): Promise<AppState> {
 }
 
 async function bindCloudSave(): Promise<CloudConfigBindResult> {
+  await requireDataConsent("cloudSave");
   const verifier = randomCloudVerifier();
   const challenge = await sha256Base64url(verifier);
   await saveCloudAuthVerifier(verifier);
@@ -583,6 +599,7 @@ async function runCloudCommand(command: () => Promise<CloudConfigOperationResult
 }
 
 async function exchangeCloudSaveCode(code: string): Promise<CloudConfigBindResult> {
+  await requireDataConsent("cloudSave");
   const verifier = await loadCloudAuthVerifier();
   if (!verifier) throw new Error("缺少 cloud-save verifier。");
   try {
@@ -651,6 +668,7 @@ async function getCloudConfigStatus(): Promise<CloudConfigStatusResult> {
       message: "尚未绑定 linuxdo-cloud-save。"
     };
   }
+  await requireDataConsent("cloudSave");
   const status = await fetchCloudConfigStatus(auth);
   return {
     binding: toPublicCloudBinding(auth),
@@ -677,6 +695,7 @@ async function getCloudArchiveLocalState(): Promise<CloudArchiveLocalStateResult
 }
 
 async function backupCloudConfig(): Promise<CloudConfigBackupResult> {
+  await requireDataConsent("cloudSave");
   const auth = await requireCloudAuth();
   const state = await loadState();
   const payload = createConfigExport(state);
@@ -708,6 +727,7 @@ async function backupCloudConfig(): Promise<CloudConfigBackupResult> {
 }
 
 async function restoreCloudConfig(): Promise<CloudConfigRestoreResult> {
+  await requireDataConsent("cloudSave");
   const auth = await requireCloudAuth();
   const response = await fetchCloudConfig("GET", auth);
   if (!response.ok) {
@@ -761,7 +781,7 @@ function registerRequestStatsAutoSyncAlarmListeners(): void {
 async function reconcileRequestStatsAutoSyncAlarm(): Promise<void> {
   if (!chrome.alarms) return;
   const [state, auth] = await Promise.all([loadState(), loadCloudAuth()]);
-  if (state.settings.requestStatsAutoSyncEnabled && auth) {
+  if (state.settings.requestStatsAutoSyncEnabled && auth && (await hasDataConsent("cloudSave"))) {
     await chrome.alarms.create(REQUEST_STATS_AUTO_SYNC_ALARM_NAME, {
       delayInMinutes: 1,
       periodInMinutes: REQUEST_STATS_AUTO_SYNC_PERIOD_MINUTES
@@ -775,6 +795,10 @@ async function handleRequestStatsAutoSyncAlarm(alarm: chrome.alarms.Alarm): Prom
   if (alarm.name !== REQUEST_STATS_AUTO_SYNC_ALARM_NAME) return;
   const state = await loadState();
   if (!state.settings.requestStatsAutoSyncEnabled) {
+    await reconcileRequestStatsAutoSyncAlarm();
+    return;
+  }
+  if (!(await hasDataConsent("cloudSave"))) {
     await reconcileRequestStatsAutoSyncAlarm();
     return;
   }
@@ -834,6 +858,7 @@ async function requireCloudAuth(): Promise<CloudAuthState> {
 }
 
 async function fetchCloudConfig(method: "GET" | "PUT", auth: CloudAuthState, body?: unknown): Promise<Response> {
+  await requireDataConsent("cloudSave");
   try {
     return await fetch(cloudConfigSlotUrl(), {
       method,
@@ -972,6 +997,13 @@ async function removeSessionStorageKeys(keys: string[]) {
 async function checkForUpdates(force: boolean): Promise<UpdateCheckState> {
   const installed = installedVersion();
   const cached = await loadUpdateCheckState(installed);
+  if (!(await hasDataConsent("updateCheck"))) {
+    return {
+      ...cached,
+      status: "permission-required",
+      error: DATA_CONSENT_REQUIRED_MESSAGE
+    };
+  }
   if (!force && cached.checkedAt && isUpdateCheckCacheFresh(cached)) return cached;
   if (activeUpdateCheck) return activeUpdateCheck;
 
@@ -1039,8 +1071,25 @@ function installedVersion(): string {
 }
 
 async function openSidePanel(sender: chrome.runtime.MessageSender): Promise<{ message: string }> {
+  return TARGET_BROWSER === "firefox" ? openFirefoxSidebar() : openChromeSidePanel(sender);
+}
+
+async function openFirefoxSidebar(): Promise<{ message: string }> {
+  const sidebarAction = firefoxSidebarAction();
+  if (!sidebarAction?.open) {
+    throw new Error("当前 Firefox 无法打开插件侧栏，请从浏览器侧栏菜单打开佬朋友。");
+  }
+  try {
+    await sidebarAction.open();
+  } catch {
+    throw new Error("当前 Firefox 无法从页面打开插件侧栏，请使用浏览器工具栏按钮或侧栏菜单打开佬朋友。");
+  }
+  return { message: "已打开插件侧栏。" };
+}
+
+async function openChromeSidePanel(sender: chrome.runtime.MessageSender): Promise<{ message: string }> {
   if (!chrome.sidePanel?.open) {
-    throw new Error("当前浏览器不支持插件侧栏。");
+    throw new Error("当前浏览器无法打开插件侧栏，请从浏览器侧栏菜单打开佬朋友。");
   }
   const senderTabId = sender.tab?.id;
   const senderWindowId = sender.tab?.windowId;
@@ -2068,6 +2117,12 @@ function applyMvpSettingsGuard(settings: Partial<AppState["settings"]>): Partial
 }
 
 async function updateSettings(settings: Partial<AppState["settings"]>) {
+  if (settings.laoFindsTelegramNotificationsEnabled === true) {
+    await requireDataConsent("telegram");
+  }
+  if (settings.requestStatsAutoSyncEnabled === true) {
+    await requireDataConsent("cloudSave");
+  }
   let timedActivityRefreshToggle: boolean | undefined;
   let timedRunIdToRetire: string | undefined;
   let beforeTimedTargetSignature = "";
@@ -2124,6 +2179,54 @@ async function updateSettings(settings: Partial<AppState["settings"]>) {
   }
   await reconcileRequestStatsAutoSyncAlarm();
   return nextState;
+}
+
+interface FirefoxSidebarAction {
+  open(): Promise<void>;
+}
+
+function firefoxSidebarAction(): FirefoxSidebarAction | null {
+  const browserApi = (globalThis as typeof globalThis & { browser?: { sidebarAction?: FirefoxSidebarAction } }).browser;
+  return browserApi?.sidebarAction ?? null;
+}
+
+function assertContentScriptSessionSender(sender: chrome.runtime.MessageSender): void {
+  const senderUrl = sender.url ?? sender.tab?.url ?? "";
+  try {
+    if (new URL(senderUrl).origin === "https://linux.do") return;
+  } catch {
+    // Fall through to the trusted-sender error.
+  }
+  throw new Error("Session 状态请求来源不正确。");
+}
+
+function registerSessionStorageBroadcast(): void {
+  try {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "session") return;
+      void broadcastSessionStorageChanges(changes);
+    });
+  } catch {
+    // Tests and older browser surfaces may not expose storage change events.
+  }
+}
+
+async function broadcastSessionStorageChanges(changes: Record<string, chrome.storage.StorageChange>): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({ url: "https://linux.do/*" });
+    await Promise.all(
+      tabs.map(async (tab) => {
+        if (tab.id == null) return;
+        try {
+          await chrome.tabs.sendMessage(tab.id, { type: "sessionStorageChanged", changes });
+        } catch {
+          // A matching tab may not have the content script loaded yet.
+        }
+      })
+    );
+  } catch {
+    // Session broadcasts are best effort; readers can reload the current state.
+  }
 }
 
 function createRequestStatsCounter() {

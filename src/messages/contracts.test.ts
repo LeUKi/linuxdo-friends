@@ -75,4 +75,16 @@ describe("message contracts", () => {
     ).toBe(false);
   });
 
+  it("accepts valid content-script session storage commands", () => {
+    expect(isBackgroundCommand({ type: "sessionStorageGet", keys: ["one", "two"] })).toBe(true);
+    expect(isBackgroundCommand({ type: "sessionStorageSet", values: { one: 1 } })).toBe(true);
+    expect(isBackgroundCommand({ type: "sessionStorageRemove", keys: "one" })).toBe(true);
+  });
+
+  it("rejects malformed content-script session storage commands", () => {
+    expect(isBackgroundCommand({ type: "sessionStorageGet", keys: 1 })).toBe(false);
+    expect(isBackgroundCommand({ type: "sessionStorageSet", values: null })).toBe(false);
+    expect(isBackgroundCommand({ type: "sessionStorageRemove", keys: ["one", 2] })).toBe(false);
+  });
+
 });

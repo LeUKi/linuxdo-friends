@@ -1517,6 +1517,111 @@ describe("content script friend markers", () => {
     expect(dot?.style.display).toBe("none");
   });
 
+  it("keeps the page heartbeat ready when ordinary page content mentions challenge text", async () => {
+    document.title = "后端服务人机验证讨论 - Linux.do";
+    document.body.innerHTML = "<article>Just a moment... Enable JavaScript and cookies to continue</article>";
+    const sendMessage = vi.fn(async (message: unknown) =>
+      isHeartbeatMessage(message)
+        ? { status: "connected", connectedCount: 1, staleCount: 0, heartbeats: [], updatedAt: new Date().toISOString() }
+        : { ok: true, data: defaultAppState }
+    );
+    vi.stubGlobal("chrome", {
+      runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+      storage: { local: createMockLocalStorage(), onChanged: { addListener: vi.fn() } }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+
+    expect(heartbeatMessages(sendMessage)).toContainEqual(expect.objectContaining({ status: "ready" }));
+  });
+
+  it("keeps the page heartbeat ready for an embedded Turnstile response field", async () => {
+    document.title = "LINUX DO - 新的理想型社区";
+    document.body.innerHTML = `
+      <div class="cf-turnstile">
+        <div>
+          <input id="cf-chl-widget-5dysa_response" name="cf-turnstile-response" type="hidden">
+        </div>
+      </div>
+    `;
+    const sendMessage = vi.fn(async (message: unknown) =>
+      isHeartbeatMessage(message)
+        ? { status: "connected", connectedCount: 1, staleCount: 0, heartbeats: [], updatedAt: new Date().toISOString() }
+        : { ok: true, data: defaultAppState }
+    );
+    vi.stubGlobal("chrome", {
+      runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+      storage: { local: createMockLocalStorage(), onChanged: { addListener: vi.fn() } }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+
+    expect(heartbeatMessages(sendMessage)).toContainEqual(expect.objectContaining({ status: "ready" }));
+    expect(heartbeatMessages(sendMessage)).not.toContainEqual(expect.objectContaining({ status: "challenge" }));
+  });
+
+  it.each([
+    ["exact challenge title", "Just a moment...", "", ""],
+    ["challenge running container", "LINUX DO", "", '<main id="challenge-running"></main>'],
+    ["challenge error element", "LINUX DO", "", '<span id="challenge-error-text"></span>'],
+    ["challenge platform script", "LINUX DO", '<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>', ""],
+    ["challenge platform form", "LINUX DO", "", '<form action="/cdn-cgi/challenge-platform/h/g/flow/ov1"></form>']
+  ])("marks the page heartbeat as challenged for %s", async (_case, title, headMarkup, bodyMarkup) => {
+    document.head.innerHTML = headMarkup;
+    document.title = title;
+    document.body.innerHTML = bodyMarkup;
+    const sendMessage = vi.fn(async (message: unknown) =>
+      isHeartbeatMessage(message)
+        ? { status: "challenge", connectedCount: 0, staleCount: 0, heartbeats: [], updatedAt: new Date().toISOString() }
+        : { ok: true, data: defaultAppState }
+    );
+    vi.stubGlobal("chrome", {
+      runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+      storage: { local: createMockLocalStorage(), onChanged: { addListener: vi.fn() } }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+
+    expect(heartbeatMessages(sendMessage)).toContainEqual(expect.objectContaining({ status: "challenge" }));
+  });
+
+  it("reports ready after a challenge page becomes a normal page with an embedded Turnstile widget", async () => {
+    vi.useFakeTimers();
+    document.title = "Just a moment...";
+    document.body.innerHTML = '<main id="challenge-running"></main>';
+    const sendMessage = vi.fn(async (message: unknown) =>
+      isHeartbeatMessage(message)
+        ? { status: "connected", connectedCount: 1, staleCount: 0, heartbeats: [], updatedAt: new Date().toISOString() }
+        : { ok: true, data: defaultAppState }
+    );
+    vi.stubGlobal("chrome", {
+      runtime: { sendMessage, onMessage: { addListener: vi.fn() } },
+      storage: { local: createMockLocalStorage(), onChanged: { addListener: vi.fn() } }
+    });
+
+    await import("./contentScript");
+    await flushContentScriptAsyncWork();
+    expect(heartbeatMessages(sendMessage)).toContainEqual(expect.objectContaining({ status: "challenge" }));
+    sendMessage.mockClear();
+
+    document.body.innerHTML = `
+      <div class="cf-turnstile">
+        <input id="cf-chl-widget-ready_response" name="cf-turnstile-response" type="hidden">
+      </div>
+    `;
+    document.title = "LINUX DO - 新的理想型社区";
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(350);
+
+    const recoveredHeartbeats = heartbeatMessages(sendMessage);
+    expect(recoveredHeartbeats).toContainEqual(expect.objectContaining({ status: "ready", title: "LINUX DO - 新的理想型社区" }));
+    expect(recoveredHeartbeats).not.toContainEqual(expect.objectContaining({ status: "challenge" }));
+    vi.useRealTimers();
+  });
+
   it("refreshes the page heartbeat promptly when the page title changes", async () => {
     vi.useFakeTimers();
     document.title = "旧主题 - Linux.do";
@@ -2396,6 +2501,41 @@ describe("content script friend markers", () => {
     expect(response.activity.coarseStatus).toEqual(direct.coarseStatus);
   });
 
+  it("accepts user activity JSON whose excerpt quotes a Cloudflare challenge page", async () => {
+    let listener: ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean) | null = null;
+    const payload = {
+      user_actions: [
+        {
+          action_type: 4,
+          topic_id: 2761192,
+          acting_username: "lafish",
+          title: "LDC 的分发接口似乎套了人机验证，可用性降级",
+          excerpt:
+            "我的后端服务调用分发接口，会触发人机验证，可能是近期出现的。 \n接入的是 “易支付兼容接口”，响应结果： \n{\n  &quot;httpStatus&quot;: 403,\n  &quot;body&quot;: &quot;&lt;html dir=\\&quot;ltr\\&quot;&gt;\\n&lt;head&gt;\\n    &lt;title&gt;Just a moment...&lt;/title&gt;\\n    &lt;meta http-equiv=\\&quot;Content-Type\\&quot; content=\\&quot;text/html; charset=utf-8\\&quot;&gt;\\n    &lt;meta name=\\&quot;viewport\\&quot; content=\\&quot;width=device-width, initial-scal&hellip;"
+        }
+      ]
+    };
+    vi.stubGlobal("chrome", {
+      runtime: {
+        sendMessage: vi.fn(async () => ({ ok: true, data: defaultAppState })),
+        onMessage: { addListener: vi.fn((callback) => { listener = callback; }) }
+      },
+      storage: { onChanged: { addListener: vi.fn() } }
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await import("./contentScript");
+    const response = await new Promise<{ ok: true; activity: ReturnType<typeof normalizeFriendActivity> }>((resolve) => {
+      listener?.({ type: "linuxdoFriends.extractActivity", username: "lafish", kind: "topic" }, {}, (value: unknown) => {
+        resolve(value as { ok: true; activity: ReturnType<typeof normalizeFriendActivity> });
+      });
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.activity.items).toHaveLength(1);
+    expect(response.activity.items[0]).toMatchObject({ kind: "topic", title: "LDC 的分发接口似乎套了人机验证，可用性降级" });
+  });
+
   it("stops activity extraction when any endpoint returns a challenge", async () => {
     let listener: ((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void) => boolean) | null = null;
     vi.stubGlobal("chrome", {
@@ -2418,7 +2558,7 @@ describe("content script friend markers", () => {
       vi
         .fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({ user_actions: [] }), { status: 200 }))
-        .mockResolvedValueOnce(new Response("Enable JavaScript and cookies to continue", { status: 429 }))
+        .mockResolvedValueOnce(challengeResponse())
     );
 
     await import("./contentScript");
@@ -2447,7 +2587,7 @@ describe("content script friend markers", () => {
         }
       }
     });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("Enable JavaScript and cookies to continue", { status: 429 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(challengeResponse()));
 
     await import("./contentScript");
     const response = await new Promise((resolve) => {
@@ -2511,6 +2651,13 @@ function createMockLocalStorage() {
       }
     }
   };
+}
+
+function challengeResponse(status = 429): Response {
+  return new Response("<!doctype html><html><head><title>Just a moment...</title></head><body><span id='challenge-error-text'>Enable JavaScript and cookies to continue</span></body></html>", {
+    status,
+    headers: { "content-type": "text/html; charset=UTF-8" }
+  });
 }
 
 async function waitForFriendMark(selector: string) {

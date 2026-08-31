@@ -152,7 +152,7 @@ describe("refresh adapter", () => {
   });
 
   it("does not create a friend when profile validation fails", async () => {
-    const fetchImpl = vi.fn(async () => new Response("Enable JavaScript and cookies to continue", { status: 429 })) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => challengeResponse()) as unknown as typeof fetch;
     const adapter = createRefreshAdapter(fetchImpl);
 
     const result = await adapter.addFriendByProfile(defaultAppState, "neil");
@@ -203,7 +203,7 @@ describe("refresh adapter", () => {
 
   it("normalizes direct fetch and challenge failures into one result shape", async () => {
     const state = addFriendFromProfile(defaultAppState, { username: "neil", refreshedAt: "2026-06-28T00:00:00.000Z" });
-    const fetchImpl = vi.fn(async () => new Response("<title>Just a moment...</title>", { status: 200 })) as unknown as typeof fetch;
+    const fetchImpl = vi.fn(async () => challengeResponse(200)) as unknown as typeof fetch;
     const adapter = createRefreshAdapter(fetchImpl);
     const result = await adapter.refreshFriendActivity(state);
     expect(result.result).toMatchObject({ ok: false, source: "direct_fetch", reason: "challenge" });
@@ -499,7 +499,7 @@ describe("refresh adapter", () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ user_actions: [{ action_type: 4, topic_id: 1, title: "new" }] }))
-      .mockResolvedValueOnce(new Response("Enable JavaScript and cookies to continue", { status: 429 })) as unknown as typeof fetch;
+      .mockResolvedValueOnce(challengeResponse()) as unknown as typeof fetch;
     const adapter = createRefreshAdapter(fetchImpl);
 
     const result = await adapter.refreshFriendActivity(state);
@@ -548,7 +548,7 @@ describe("refresh adapter", () => {
       .mockResolvedValueOnce(jsonResponse({ user_actions: [] }))
       .mockResolvedValueOnce(jsonResponse({ boosts: [] }))
       .mockResolvedValueOnce(jsonResponse([]))
-      .mockResolvedValueOnce(new Response("Enable JavaScript and cookies to continue", { status: 429 })) as unknown as typeof fetch;
+      .mockResolvedValueOnce(challengeResponse()) as unknown as typeof fetch;
     const adapter = createRefreshAdapter(fetchImpl);
 
     const result = await adapter.refreshFriendActivity(state, { kind: "all" });
@@ -580,4 +580,11 @@ function currentRule(patch: Partial<DredgeRule> = {}): DredgeRule {
 
 function jsonResponse(value: unknown): Response {
   return new Response(JSON.stringify(value), { status: 200 });
+}
+
+function challengeResponse(status = 429): Response {
+  return new Response(
+    "<!doctype html><html><head><title>Just a moment...</title></head><body><span id='challenge-error-text'>Enable JavaScript and cookies to continue</span></body></html>",
+    { status, headers: { "content-type": "text/html; charset=UTF-8" } }
+  );
 }

@@ -534,7 +534,9 @@ export function FriendsApp({
     void openActivityLink(href);
   }
 
-  const statusAction = status ? repairActionForStatus(status, repairLinuxDoPageScript, openLinuxDoHome) : null;
+  const statusAction = status
+    ? repairActionForStatus(status, repairLinuxDoPageScript, openLinuxDoHome, () => void openOptionsPage())
+    : null;
 
   return (
     <AvatarImageContext.Provider value={surface === "in-page"}>

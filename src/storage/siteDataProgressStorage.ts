@@ -1,4 +1,5 @@
 import type { ActivityKindFilter, SiteDataTaskProgress } from "../shared/types";
+import { getSessionStorageArea } from "./sessionStorageAdapter";
 
 export const SITE_DATA_PROGRESS_STORAGE_KEY = "linuxdoFriendsSiteDataProgress";
 export const SITE_DATA_PROGRESS_RUNNING_TTL_MS = 10 * 60_000;
@@ -115,7 +116,7 @@ export function isStaleRunningSiteDataProgress(progress: SiteDataTaskProgress | 
 
 function getChromeSessionStorage(): SessionStorageLike | null {
   if (typeof chrome === "undefined") return null;
-  return chrome.storage?.session ?? null;
+  return getSessionStorageArea();
 }
 
 function normalizeRefreshSource(value: unknown) {

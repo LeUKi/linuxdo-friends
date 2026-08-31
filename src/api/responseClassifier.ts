@@ -6,7 +6,17 @@ export type ClassifiedResponse =
 
 export async function classifyFetchResponse(response: Response): Promise<ClassifiedResponse> {
   const text = await response.text();
-  if (looksLikeChallenge(text)) {
+  if (hasCloudflareChallengeHeader(response)) {
+    return { ok: false, reason: "challenge", message: "遇到浏览器验证页面，已停止请求。" };
+  }
+  if (response.ok) {
+    try {
+      return { ok: true, json: JSON.parse(text) };
+    } catch {
+      // Non-JSON success responses are classified below.
+    }
+  }
+  if (looksLikeChallengeHtml(text, response.headers.get("content-type"))) {
     return { ok: false, reason: "challenge", message: "遇到浏览器验证页面，已停止请求。" };
   }
   if (response.status === 403) {
@@ -18,19 +28,26 @@ export async function classifyFetchResponse(response: Response): Promise<Classif
   if (!response.ok) {
     return { ok: false, reason: "network_error", message: `请求失败：${response.status}` };
   }
-  try {
-    return { ok: true, json: JSON.parse(text) };
-  } catch {
-    return { ok: false, reason: "invalid_response", message: "响应不是可解析的 JSON。" };
-  }
+  return { ok: false, reason: "invalid_response", message: "响应不是可解析的 JSON。" };
 }
 
-export function looksLikeChallenge(text: string): boolean {
-  const lowered = text.slice(0, 4000).toLowerCase();
+export function looksLikeChallengeHtml(text: string, contentType: string | null = null): boolean {
+  const lowered = text.trimStart().slice(0, 4000).toLowerCase();
+  if (!looksLikeHtml(lowered, contentType)) return false;
   return (
     lowered.includes("cf-mitigated") ||
-    lowered.includes("just a moment") ||
+    /<title[^>]*>\s*just a moment(?:\.{3}|…)?\s*<\/title>/.test(lowered) ||
     lowered.includes("challenge-error-text") ||
+    lowered.includes("/cdn-cgi/challenge-platform/") ||
     lowered.includes("enable javascript and cookies")
   );
+}
+
+function hasCloudflareChallengeHeader(response: Response): boolean {
+  return response.headers.get("cf-mitigated")?.trim().toLowerCase() === "challenge";
+}
+
+function looksLikeHtml(lowered: string, contentType: string | null): boolean {
+  const normalizedContentType = contentType?.toLowerCase() ?? "";
+  return normalizedContentType.includes("text/html") || normalizedContentType.includes("application/xhtml+xml") || /^<!doctype\s+html\b/.test(lowered) || /^<html\b/.test(lowered);
 }

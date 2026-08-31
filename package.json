@@ -1,16 +1,21 @@
 {
   "name": "linuxdo-friends",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "private": true,
   "type": "module",
   "description": "佬朋友 - LinuxDo Friends browser extension",
   "license": "MIT",
   "scripts": {
-    "build": "tsc --noEmit && vite build && vite build --config vite.content.config.ts && vite build --config vite.cloud-save.config.ts",
-    "dev": "vite build && vite build --config vite.content.config.ts && vite build --config vite.cloud-save.config.ts && vite build --watch",
-    "package-extension": "node scripts/package-extension.mjs",
+    "build": "npm run typecheck && npm run build:chrome && npm run build:firefox",
+    "build:chrome": "TARGET_BROWSER=chrome vite build && TARGET_BROWSER=chrome vite build --config vite.content.config.ts && TARGET_BROWSER=chrome vite build --config vite.cloud-save.config.ts",
+    "build:firefox": "TARGET_BROWSER=firefox vite build && TARGET_BROWSER=firefox vite build --config vite.content.config.ts && TARGET_BROWSER=firefox vite build --config vite.cloud-save.config.ts",
+    "dev": "npm run build:chrome && TARGET_BROWSER=chrome vite build --watch",
+    "lint:firefox": "web-ext lint --source-dir dist-firefox",
+    "package:chrome": "node scripts/package-extension.mjs --source-dir dist-chrome",
+    "package:firefox": "node scripts/package-firefox.mjs",
+    "package-extension": "node scripts/package-extension.mjs --source-dir dist-chrome",
     "set-version": "node scripts/set-version.mjs",
-    "test": "vitest run",
+    "test": "vitest run && node --test scripts/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -29,6 +34,7 @@
     "jsdom": "^29.1.1",
     "typescript": "^6.0.3",
     "vite": "^8.1.0",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "web-ext": "10.6.0"
   }
 }

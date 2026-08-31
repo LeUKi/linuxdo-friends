@@ -1,4 +1,4 @@
-name: Build extension package
+name: Build extension packages
 
 on:
   push:
@@ -10,18 +10,11 @@ permissions:
 
 jobs:
   package:
-    name: Package Chrome extension
+    name: Package Chrome and Firefox extensions
     runs-on: ubuntu-latest
     if: ${{ github.ref_type == 'tag' }}
 
     steps:
-      - name: Validate semver tag
-        run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag must match v1.0.0 style: ${GITHUB_REF_NAME}" >&2
-            exit 1
-          fi
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -31,29 +24,44 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Validate semver tag and versions
+        run: node scripts/verify-version.mjs --tag="${GITHUB_REF_NAME}"
+
       - name: Install dependencies
         run: npm ci
 
       - name: Test
         run: npm test
 
+      - name: Check whitespace errors
+        run: git diff --check
+
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Build
         run: npm run build
 
-      - name: Package zip
-        run: npm run package-extension -- --name "linuxdo-friends-${GITHUB_REF_NAME}.zip"
+      - name: Lint Firefox package
+        run: npm run lint:firefox
 
-      - name: Upload extension zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: linuxdo-friends-${{ github.ref_name }}
-          path: packages/linuxdo-friends-${{ github.ref_name }}.zip
-          if-no-files-found: error
+      - name: Package Chrome zip
+        run: npm run package:chrome -- --name "linuxdo-friends-${GITHUB_REF_NAME}-chrome.zip"
+
+      - name: Package Firefox zip
+        run: npm run package:firefox -- --name "linuxdo-friends-${GITHUB_REF_NAME}-firefox.zip"
+
+      - name: Verify release packages
+        run: |
+          node scripts/verify-release-package.mjs --browser chrome --zip "packages/linuxdo-friends-${GITHUB_REF_NAME}-chrome.zip" --tag "${GITHUB_REF_NAME}"
+          node scripts/verify-release-package.mjs --browser firefox --zip "packages/linuxdo-friends-${GITHUB_REF_NAME}-firefox.zip" --tag "${GITHUB_REF_NAME}"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          files: packages/linuxdo-friends-${{ github.ref_name }}.zip
+          files: |
+            packages/linuxdo-friends-${{ github.ref_name }}-chrome.zip
+            packages/linuxdo-friends-${{ github.ref_name }}-firefox.zip
           fail_on_unmatched_files: true

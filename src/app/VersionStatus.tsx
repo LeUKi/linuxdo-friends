@@ -66,7 +66,9 @@ export function VersionDiagnostics({
         <span>检查时间</span>
         <strong>{checkedAt}</strong>
       </div>
-      {state.status === "error" || state.status === "no-release" ? <p className="version-diagnostic-error">{state.error}</p> : null}
+      {state.status === "error" || state.status === "no-release" || state.status === "permission-required" ? (
+        <p className="version-diagnostic-error">{state.error}</p>
+      ) : null}
     </section>
   );
 }
@@ -92,6 +94,8 @@ function diagnosticMessage(state: UpdateCheckState): string {
       return "已是最新";
     case "no-release":
       return "暂无 Release";
+    case "permission-required":
+      return "需要数据权限";
     case "error":
       return "检查失败";
     case "idle":

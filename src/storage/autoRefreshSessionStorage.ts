@@ -1,3 +1,5 @@
+import { getSessionStorageArea } from "./sessionStorageAdapter";
+
 export type FriendStatusAutoRefreshIntervalMinutes = 1 | 10 | 30;
 export type FriendStatusAutoRefreshSurface = "side-panel" | "in-page";
 
@@ -391,7 +393,7 @@ function isAutoRefreshStorageKey(key: string) {
 
 function getChromeSessionStorage(): SessionStorageLike | null {
   if (typeof chrome === "undefined") return null;
-  return chrome.storage?.session ?? null;
+  return getSessionStorageArea();
 }
 
 function nowIso() {

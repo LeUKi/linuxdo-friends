@@ -11,6 +11,7 @@ import {
   type TimedActivityRefreshSession,
   type TimedActivityRefreshSessionPatch
 } from "../storage/timedActivityRefreshSessionStorage";
+import { addSessionStorageChangeListener } from "../storage/sessionStorageAdapter";
 
 export const timedActivityRefreshSessionAtom = atom<TimedActivityRefreshSession>(defaultTimedActivityRefreshSession());
 
@@ -32,7 +33,7 @@ export const observeTimedActivityRefreshSessionAtom = atom(null, (_get, set) => 
         timedActivityRefreshSessionSubscribers.forEach((subscriber) => subscriber(timedActivityRefreshSessionAtom, session));
       });
     };
-    chrome.storage.onChanged.addListener(storageListener);
+    addSessionStorageChangeListener(storageListener);
     timedActivityRefreshSessionStorageListenerRegistered = true;
   }
   return () => {

@@ -1268,6 +1268,30 @@ describe("FriendsApp UI scene persistence", () => {
     expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage" });
   });
 
+  it("offers the settings recovery action when Firefox rejects the in-page sidebar launcher", async () => {
+    const session = createMockStorage({ [uiSceneStorageKeys.version]: 1 });
+    const chromeMock = setupChrome({
+      session,
+      openSidePanelError: "当前 Firefox 无法从页面打开插件侧栏，请使用浏览器工具栏按钮或侧栏菜单打开佬朋友。"
+    });
+    const { container } = await renderFriendsApp("in-page");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".side-panel-chip")?.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector(".status")?.textContent).toContain("无法从页面打开插件侧栏");
+    expect(getButton(container, "打开设置")).toBeTruthy();
+
+    await act(async () => {
+      getButton(container, "打开设置").click();
+      await Promise.resolve();
+    });
+
+    expect(chromeMock.sendMessage).toHaveBeenCalledWith({ type: "openOptionsPage" });
+  });
+
   it("opens the side panel instead of starting dredging from the in-page Lao Finds button", async () => {
     const session = createMockStorage({
       [uiSceneStorageKeys.version]: 1,
@@ -3400,6 +3424,7 @@ function setupChrome({
     source: "github_release" as const
   },
   beforeTimedControllerClaim,
+  openSidePanelError,
   updateFriendError
 }: {
   pageStatus?: PageScriptStatusSnapshot;
@@ -3422,6 +3447,7 @@ function setupChrome({
     source?: "github_release";
   };
   beforeTimedControllerClaim?: () => Promise<void>;
+  openSidePanelError?: string;
   updateFriendError?: string;
 }) {
   const storageListeners: Array<(changes: Record<string, chrome.storage.StorageChange>, areaName: string) => void> = [];
@@ -3457,7 +3483,9 @@ function setupChrome({
         }
       };
     }
-    if (message.type === "openSidePanel") return { ok: true, data: { message: "已打开插件侧栏。" } };
+    if (message.type === "openSidePanel") {
+      return openSidePanelError ? { ok: false, error: openSidePanelError } : { ok: true, data: { message: "已打开插件侧栏。" } };
+    }
     if (message.type === "openOptionsPage") return { ok: true, data: { message: "已打开配置页。" } };
     if (message.type === "openLinuxDoHome") return { ok: true, data: { message: "已打开 linux.do 首页。", tabId: 901, openedNewTab: false } };
     if (message.type === "repairLinuxDoPageScript") return { ok: true, data: { message: "已切换并刷新 linux.do 页面。", tabId: message.tabId, openedNewTab: false } };

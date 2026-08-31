@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createManifest } from "../scripts/manifest.mjs";
 
-const manifest = JSON.parse(readFileSync(resolve(__dirname, "../public/manifest.json"), "utf8"));
+const manifest = createManifest("chrome") as Record<string, any>;
 const appCss = readCssWithLocalImports(resolve(__dirname, "styles/app.css"));
 
 function readCssWithLocalImports(path: string, seen = new Set<string>()): string {

@@ -2,22 +2,20 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
+const sourceDir = resolve("dist-firefox");
 const packagesDir = resolve("packages");
-const parsedArgs = parseArgs(process.argv.slice(2));
-const distDir = resolve(parsedArgs.sourceDir);
-const zipName = parsedArgs.name;
+const zipName = parseZipName(process.argv.slice(2), "linuxdo-friends-firefox.zip");
 const outputPath = join(packagesDir, zipName);
 
-if (!existsSync(join(distDir, "manifest.json"))) {
-  console.error(`${parsedArgs.sourceDir}/manifest.json was not found. Run npm run build before packaging.`);
+if (!existsSync(join(sourceDir, "manifest.json"))) {
+  console.error("dist-firefox/manifest.json was not found. Run npm run build:firefox before packaging.");
   process.exit(1);
 }
 
 mkdirSync(packagesDir, { recursive: true });
 rmSync(outputPath, { force: true });
 
-const result = spawnSync("zip", ["-r", "-q", outputPath, "."], {
-  cwd: distDir,
+const result = spawnSync("npx", ["web-ext", "build", "--source-dir", sourceDir, "--artifacts-dir", packagesDir, "--filename", zipName, "--overwrite-dest"], {
   stdio: "inherit"
 });
 
@@ -26,19 +24,6 @@ if (result.status !== 0) {
 }
 
 console.log(`Created ${outputPath}`);
-
-function parseArgs(args) {
-  const sourceFlagIndex = args.indexOf("--source-dir");
-  const sourceDir = sourceFlagIndex >= 0 ? args[sourceFlagIndex + 1] : "dist-chrome";
-  if (!sourceDir) {
-    console.error("Missing value for --source-dir.");
-    process.exit(1);
-  }
-  return {
-    sourceDir,
-    name: parseZipName(args, "linuxdo-friends-chrome.zip")
-  };
-}
 
 function parseZipName(args, fallback) {
   const nameFlagIndex = args.indexOf("--name");

@@ -1,4 +1,5 @@
 import type { PageScriptHeartbeatStatus, PageScriptStatusSnapshot } from "../shared/types";
+import { getSessionStorageArea } from "./sessionStorageAdapter";
 
 export const PAGE_SCRIPT_STATUS_STORAGE_KEY = "linuxdoFriendsPageScriptStatus";
 
@@ -88,7 +89,7 @@ export function normalizePageScriptStatus(value: unknown): PageScriptStatusSnaps
 
 function getChromeSessionStorage(): SessionStorageLike | null {
   if (typeof chrome === "undefined") return null;
-  return chrome.storage?.session ?? null;
+  return getSessionStorageArea();
 }
 
 function isStatus(value: unknown): value is PageScriptStatusSnapshot["status"] {

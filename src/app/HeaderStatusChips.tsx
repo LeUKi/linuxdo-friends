@@ -228,12 +228,20 @@ function compactLinuxDoUrl(value: string) {
   }
 }
 
-export function repairActionForStatus(status: string, onRepairPageScript: () => void, onOpenLinuxDoHome: () => void) {
+export function repairActionForStatus(
+  status: string,
+  onRepairPageScript: () => void,
+  onOpenLinuxDoHome: () => void,
+  onOpenOptions?: () => void
+) {
   if (status.includes("未加载佬朋友脚本") || status.includes("没有响应")) {
     return { label: "一键刷新页面", onClick: onRepairPageScript };
   }
   if (status.includes("浏览器验证") || status.includes("请打开一个 linux.do 页面")) {
     return { label: "打开 linux.do", onClick: onOpenLinuxDoHome };
+  }
+  if (status.includes("无法") && status.includes("插件侧栏") && onOpenOptions) {
+    return { label: "打开设置", onClick: onOpenOptions };
   }
   return null;
 }
